@@ -21,6 +21,9 @@
         <button type="button" id="btnToggleAlertSound" class="btn btn-outline btn-sm" style="display:none;" title="Activar o probar alarma sonora de pedidos nuevos">
           🔔 <span class="hide-mobile" id="soundBtnLabel">Sonido</span>
         </button>
+        <button type="button" id="btnTopManual" class="btn btn-outline btn-sm" style="display:none;" title="Manuales por área para compartir">
+          📖 <span class="hide-mobile">Manual</span>
+        </button>
         <button type="button" id="btnDownloadBackup" class="btn btn-outline btn-sm" style="display:none;" title="Descargar respaldo completo">
           💾 <span class="hide-mobile">Respaldar</span>
         </button>
@@ -109,6 +112,7 @@
       <button type="button" class="tab-btn" data-tab="tabOrders">📦 Pedidos en Línea</button>
       <button type="button" class="tab-btn" data-tab="tabCatalog">🏷️ Precios y Difusión</button>
       <button type="button" class="tab-btn" data-tab="tabDrivers">🚗 Choferes y PIN</button>
+      <button type="button" class="tab-btn" data-tab="tabManual">📖 Manual del Equipo</button>
     </div>
 
     <!-- ================= TAB 1: CONTROL DE ALMACÉN ================= -->
@@ -460,6 +464,22 @@
           </form>
         </div>
       </div>
+    </section>
+
+    <!-- ================= TAB 5: MANUAL OPERATIVO POR ÁREA (SOLO INTERNO) ================= -->
+    <section id="tabManual" class="admin-tab-pane" style="display:none;">
+      <div class="order-admin-card" style="background:linear-gradient(135deg,#132615 0%,#264428 100%);color:#fff;border:none;">
+        <span style="display:inline-block;background:rgba(255,255,255,0.16);padding:4px 10px;border-radius:999px;font-size:0.74rem;font-weight:800;margin-bottom:8px;">
+          🔒 USO INTERNO EN CASA • GUÍAS EXPLICADAS CON PERAS Y MANZANAS
+        </span>
+        <h3 class="serif-title" style="font-size:1.35rem;color:#fff;margin-bottom:6px;">📖 Manual Operativo por Nivel de Personal</h3>
+        <p style="font-size:0.86rem;color:#d6ebd4;max-width:740px;">
+          Selecciona a quién le quieres compartir o imprimir su guía. Cada manual explica únicamente lo que usa esa persona y tiene botón directo para <strong>mandárselo por WhatsApp en 1 toque</strong> o <strong>imprimirlo</strong>.
+        </p>
+      </div>
+
+      <div id="manualRoleTabsBar" class="manual-role-pills"></div>
+      <div id="adminManualContainer"></div>
     </section>
 
   </main>

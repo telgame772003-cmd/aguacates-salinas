@@ -23,7 +23,10 @@
       <button type="button" id="btnToggleGps" class="gps-toggle-btn">
         <span id="gpsDot">⚪</span> <span id="gpsLabel">Activar GPS</span>
       </button>
-      <button type="button" id="btnDriverLogout" class="btn btn-outline btn-sm" style="padding:5px 10px;font-size:0.74rem;background:transparent;color:#fff;border-color:rgba(255,255,255,0.3);">
+      <button type="button" id="btnOpenDriverHelp" class="btn btn-outline btn-sm" style="padding:5px 9px;font-size:0.74rem;background:transparent;color:#fff;border-color:rgba(255,255,255,0.3);" title="Ver Guía Rápida">
+        ❓ Guía
+      </button>
+      <button type="button" id="btnDriverLogout" class="btn btn-outline btn-sm" style="padding:5px 9px;font-size:0.74rem;background:transparent;color:#fff;border-color:rgba(255,255,255,0.3);">
         Salir
       </button>
     </div>
@@ -345,6 +348,18 @@
           ✅ Confirmar que pasé aquí (GPS)
         </button>
       </form>
+    </div>
+  </div>
+
+  <!-- Modal: Guía Rápida de Ventas en Ruta (Solo visible tras iniciar sesión con PIN) -->
+  <div id="driverHelpModal" class="modal-backdrop" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <button type="button" id="btnCloseDriverHelp" class="modal-close">✕</button>
+      <h3 class="serif-title" style="font-size:1.22rem;color:var(--green-950);margin-bottom:4px;padding-right:32px;">📖 Guía Rápida de Ruta</h3>
+      <p style="font-size:0.82rem;color:var(--slate-500);margin-bottom:12px;">
+        Cómo usar tus 4 botones de abajo paso a paso (con peras y manzanas).
+      </p>
+      <div id="driverHelpStepsContainer"></div>
     </div>
   </div>
 

@@ -19,6 +19,7 @@ import {
   formatCurrency,
   cleanPhoneForWhatsApp
 } from "./firebase-config.js";
+import { STAFF_MANUALS } from "./manuals-data.js";
 
 const SESSION_HASH_KEY = "salinas_admin_hash_v1";
 
@@ -340,6 +341,10 @@ btnLogout.addEventListener("click", () => {
   btnLogout.style.display = "none";
   btnDownloadBackup.style.display = "none";
   if (btnToggleAlertSound) btnToggleAlertSound.style.display = "none";
+  const btnTopManual = document.getElementById("btnTopManual");
+  if (btnTopManual) btnTopManual.style.display = "none";
+  const manualContainer = document.getElementById("adminManualContainer");
+  if (manualContainer) manualContainer.innerHTML = "";
   if (liveNewOrdersAlertBar) liveNewOrdersAlertBar.classList.remove("active");
   loginView.style.display = "flex";
 });
@@ -350,12 +355,19 @@ function enterDashboard() {
   btnLogout.style.display = "inline-flex";
   btnDownloadBackup.style.display = "inline-flex";
   if (btnToggleAlertSound) btnToggleAlertSound.style.display = "inline-flex";
+  const btnTopManual = document.getElementById("btnTopManual");
+  if (btnTopManual) btnTopManual.style.display = "inline-flex";
   document.getElementById("whDatePicker").value = selectedWhDate;
   document.getElementById("routeDatePicker").value = selectedRouteDate;
+  renderAdminManualTab();
   startRealtimeListeners();
   subscribeWarehouseDay(selectedWhDate);
   subscribeRouteCorteDay(selectedRouteDate);
 }
+
+document.getElementById("btnTopManual")?.addEventListener("click", () => {
+  switchAdminTab("tabManual");
+});
 
 // Tabs switching
 document.querySelectorAll(".tab-btn").forEach((btn) => {
@@ -2818,5 +2830,145 @@ document.getElementById("changePassForm").addEventListener("submit", async (e) =
     showToast("Error al actualizar la clave.");
   }
 });
+
+// ================= TAB 5: MANUAL OPERATIVO POR PERSONAL (SOLO AUTENTICADO) =================
+let selectedManualRole = "duenos";
+
+function renderAdminManualTab() {
+  if (!currentKeyHash) return;
+  const pillsBar = document.getElementById("manualRoleTabsBar");
+  const container = document.getElementById("adminManualContainer");
+  if (!pillsBar || !container) return;
+
+  const keys = ["duenos", "oficina", "almacen", "ventas", "clientes"];
+  pillsBar.innerHTML = keys
+    .map((k) => {
+      const m = STAFF_MANUALS[k];
+      const isAct = k === selectedManualRole;
+      return `<button type="button" class="btn btn-sm ${isAct ? "btn-primary" : "btn-outline"}" data-manual-role="${k}">${escapeHtml(m.shortTab)}</button>`;
+    })
+    .join("");
+
+  const activeManual = STAFF_MANUALS[selectedManualRole] || STAFF_MANUALS.duenos;
+  const waShareUrl = `https://wa.me/?text=${encodeURIComponent(activeManual.whatsappText)}`;
+
+  const stepsHtml = activeManual.steps
+    .map(
+      (st) => `
+      <article class="manual-step-card">
+        <div class="manual-step-head">
+          <span class="manual-step-badge">Paso ${escapeHtml(st.num)}</span>
+          <span style="font-size:1.25rem;">${st.icon}</span>
+          <h4 style="font-size:1.02rem;color:var(--green-950);margin:0;">${escapeHtml(st.heading)}</h4>
+        </div>
+        <div class="manual-step-body">${st.bodyHtml}</div>
+        ${
+          st.example
+            ? `<div class="manual-example-box">💡 <strong>Con peras y manzanas:</strong> ${escapeHtml(st.example)}</div>`
+            : ""
+        }
+      </article>
+    `
+    )
+    .join("");
+
+  container.innerHTML = `
+    <div class="order-admin-card" style="border-left:5px solid var(--green-800);">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+        <div>
+          <span class="ripeness-badge" style="margin-bottom:6px;display:inline-block;">${escapeHtml(activeManual.badge)}</span>
+          <h3 class="serif-title" style="font-size:1.3rem;color:var(--green-950);margin-bottom:2px;">${escapeHtml(activeManual.title)}</h3>
+          <div style="font-size:0.9rem;font-weight:800;color:var(--green-800);">👥 Dirigido a: ${escapeHtml(activeManual.people)}</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" id="btnCopyManualWa" class="btn btn-outline btn-sm">📋 Copiar para WhatsApp</button>
+          <a href="${waShareUrl}" target="_blank" rel="noopener" class="btn btn-whatsapp btn-sm">📲 Compartir por WhatsApp</a>
+          <button type="button" id="btnPrintManual" class="btn btn-primary btn-sm">🖨️ Imprimir Manual</button>
+        </div>
+      </div>
+
+      <p style="font-size:0.9rem;color:var(--slate-700);line-height:1.55;margin-bottom:10px;">
+        ${escapeHtml(activeManual.summary)}
+      </p>
+      <div style="background:var(--green-50);border:1px solid var(--green-200);padding:9px 12px;border-radius:10px;font-size:0.82rem;color:var(--green-950);">
+        🔑 <strong>Dónde entra:</strong> ${escapeHtml(activeManual.accessNote)}
+      </div>
+    </div>
+
+    <div class="manual-steps-list">
+      ${stepsHtml}
+    </div>
+  `;
+
+  document.getElementById("btnCopyManualWa")?.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(activeManual.whatsappText);
+      showToast(`📋 Manual de "${activeManual.people}" copiado para pegar en WhatsApp.`);
+    } catch (_) {
+      showToast("No se pudo copiar automáticamente.");
+    }
+  });
+
+  document.getElementById("btnPrintManual")?.addEventListener("click", () => {
+    printStaffManual(activeManual);
+  });
+}
+
+document.getElementById("manualRoleTabsBar")?.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-manual-role]");
+  if (!btn) return;
+  selectedManualRole = btn.dataset.manualRole;
+  renderAdminManualTab();
+});
+
+function printStaffManual(m) {
+  const area = document.getElementById("printReceiptArea");
+  if (!area) return;
+
+  const stepsPrint = m.steps
+    .map(
+      (st) => `
+      <div style="border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;margin-bottom:9px;page-break-inside:avoid;">
+        <div style="font-weight:900;font-size:10.5pt;color:#132615;margin-bottom:4px;">
+          Paso ${escapeHtml(st.num)} — ${st.icon} ${escapeHtml(st.heading)}
+        </div>
+        <div style="font-size:9.5pt;line-height:1.5;color:#1e293b;">${st.bodyHtml}</div>
+        ${
+          st.example
+            ? `<div style="margin-top:6px;background:#f4f8f3;padding:6px 8px;border-radius:6px;font-size:8.8pt;color:#264428;"><strong>Ejemplo práctico:</strong> ${escapeHtml(st.example)}</div>`
+            : ""
+        }
+      </div>
+    `
+    )
+    .join("");
+
+  area.innerHTML = `
+    <div style="max-width:190mm;margin:0 auto;font-family:Arial,sans-serif;color:#111;">
+      <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #264428;padding-bottom:8px;margin-bottom:12px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <img src="assets/logo-salinas.png" style="height:15mm;object-fit:contain;" alt="Salinas">
+          <div>
+            <div style="font-size:13pt;font-weight:900;color:#132615;">${escapeHtml(m.title)}</div>
+            <div style="font-size:9.5pt;font-weight:700;color:#2e5a31;">Personal: ${escapeHtml(m.people)}</div>
+          </div>
+        </div>
+        <div style="text-align:right;font-size:8pt;color:#475569;">
+          <div>${escapeHtml(m.badge)}</div>
+          <div>Comercializadora Salinas</div>
+        </div>
+      </div>
+      <p style="font-size:9.5pt;margin-bottom:8px;">${escapeHtml(m.summary)}</p>
+      <div style="background:#eff6ed;border:1px solid #bcd8b9;padding:7px 10px;border-radius:6px;font-size:9pt;margin-bottom:12px;">
+        <strong>Acceso:</strong> ${escapeHtml(m.accessNote)}
+      </div>
+      ${stepsPrint}
+    </div>
+  `;
+
+  document.body.classList.add("printing-receipt");
+  window.print();
+  setTimeout(() => document.body.classList.remove("printing-receipt"), 500);
+}
 
 checkInitialAuth();

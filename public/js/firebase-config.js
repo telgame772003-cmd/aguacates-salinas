@@ -56,7 +56,9 @@ export const DEFAULT_STORE_SETTINGS = {
   scheduleText: "Lunes a Sábado • 7:00 AM a 5:00 PM",
   drivers: [
     { id: "carlos", name: "Carlos", phone: "", hasPin: true },
-    { id: "tello", name: "Tello", phone: "", hasPin: true }
+    { id: "tello", name: "Tello", phone: "", hasPin: true },
+    { id: "alejandro", name: "Alejandro", phone: "", hasPin: true },
+    { id: "liz", name: "Liz", phone: "", hasPin: true }
   ],
   calibers: {
     S: {

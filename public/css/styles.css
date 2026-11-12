@@ -1828,10 +1828,154 @@ textarea.form-control {
   }
 }
 
+/* ================= PUBLIC CLIENT GUIDE & INTERNAL MANUALS ================= */
+.how-to-order-section {
+  background: linear-gradient(180deg, #eff6ed 0%, #f7f9f5 100%);
+  border-bottom: 1px solid var(--slate-200);
+  padding: 28px 0 24px;
+}
+
+.how-to-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.how-to-eyebrow {
+  display: inline-block;
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--green-800);
+  background: var(--green-100);
+  padding: 4px 10px;
+  border-radius: 999px;
+  margin-bottom: 6px;
+}
+
+.how-to-header h2 {
+  font-size: 1.48rem;
+  color: var(--green-950);
+  margin-bottom: 4px;
+}
+
+.how-to-header p {
+  font-size: 0.9rem;
+  color: var(--slate-700);
+}
+
+.how-to-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.how-step-card {
+  background: var(--white);
+  border: 1.5px solid var(--slate-200);
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+  box-shadow: var(--shadow-sm);
+}
+
+.how-step-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.how-step-num {
+  background: var(--green-950);
+  color: var(--white);
+  font-size: 0.74rem;
+  font-weight: 800;
+  padding: 3px 10px;
+  border-radius: 999px;
+  text-transform: uppercase;
+}
+
+.how-step-icon {
+  font-size: 1.45rem;
+}
+
+.how-step-card h3 {
+  font-size: 1.04rem;
+  color: var(--green-950);
+  margin-bottom: 6px;
+}
+
+.how-step-card p {
+  font-size: 0.85rem;
+  color: var(--slate-700);
+  line-height: 1.55;
+}
+
+.manual-role-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.manual-steps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.manual-step-card {
+  background: var(--white);
+  border: 1.5px solid var(--slate-200);
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+  box-shadow: var(--shadow-sm);
+}
+
+.manual-step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.manual-step-badge {
+  background: var(--green-950);
+  color: var(--white);
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 3px 9px;
+  border-radius: 999px;
+  text-transform: uppercase;
+}
+
+.manual-step-body {
+  font-size: 0.88rem;
+  color: var(--slate-700);
+  line-height: 1.62;
+}
+
+.manual-example-box {
+  margin-top: 10px;
+  background: var(--green-50);
+  border-left: 3px solid var(--green-700);
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 0.81rem;
+  color: var(--green-950);
+  line-height: 1.45;
+}
+
 /* ================= TABLET & MOBILE BREAKPOINTS ================= */
 @media (max-width: 960px) {
   .hero-grid,
   .store-grid,
+  .how-to-grid,
   .order-admin-grid,
   .two-col-panel {
     grid-template-columns: 1fr;

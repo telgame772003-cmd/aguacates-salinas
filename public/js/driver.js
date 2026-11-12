@@ -18,6 +18,7 @@ import {
   formatCurrency,
   cleanPhoneForWhatsApp
 } from "./firebase-config.js";
+import { STAFF_MANUALS } from "./manuals-data.js";
 
 const DRIVER_SESSION_KEY = "salinas_driver_session_v1";
 const RECENT_CLIENTS_KEY = "salinas_driver_clients_v1";
@@ -1540,5 +1541,34 @@ function renderTodaySalesList() {
     })
     .join("");
 }
+
+const driverHelpModal = document.getElementById("driverHelpModal");
+document.getElementById("btnOpenDriverHelp")?.addEventListener("click", () => {
+  if (!currentDriverKeyHash) return;
+  const container = document.getElementById("driverHelpStepsContainer");
+  const m = STAFF_MANUALS.ventas;
+  if (container && m) {
+    container.innerHTML = m.steps
+      .map(
+        (st) => `
+        <div class="manual-step-card" style="padding:12px;margin-bottom:10px;">
+          <div style="font-weight:800;color:var(--green-950);font-size:0.94rem;margin-bottom:4px;">
+            ${st.icon} ${escapeHtml(st.heading)}
+          </div>
+          <div style="font-size:0.82rem;color:var(--slate-700);line-height:1.55;">
+            ${st.bodyHtml}
+          </div>
+          ${st.example ? `<div class="manual-example-box" style="margin-top:8px;">💡 ${escapeHtml(st.example)}</div>` : ""}
+        </div>
+      `
+      )
+      .join("");
+  }
+  if (driverHelpModal) driverHelpModal.classList.add("open");
+});
+
+document.getElementById("btnCloseDriverHelp")?.addEventListener("click", () => {
+  if (driverHelpModal) driverHelpModal.classList.remove("open");
+});
 
 restoreDriverSession();
