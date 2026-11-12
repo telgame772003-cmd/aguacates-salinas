@@ -1,387 +1,382 @@
-// Manuales Operativos "Con Peras y Manzanas" por Nivel de Personal
-// Se muestran ÚNICAMENTE dentro de las vistas autenticadas (Admin / Ruta)
+// Documentación Interna: Manuales Operativos por Puesto y Área
+// Se renderizan únicamente dentro de las vistas autenticadas (Administración / Ruta)
 
 export const STAFF_MANUALS = {
   duenos: {
     id: "duenos",
-    shortTab: "👑 Dueños (Alejandro y Tello)",
-    badge: "NIVEL 1 • ACCESO TOTAL Y SUPERVISIÓN",
-    title: "Manual para Dueños y Dirección",
-    people: "Alejandro y Tello",
+    shortTab: "👑 Dirección General",
+    badge: "NIVEL 1 • DIRECCIÓN Y SUPERVISIÓN GENERAL",
+    title: "Manual Operativo — Dirección General",
+    people: "Dirección General y Socios",
     summary:
-      "Ustedes tienen la llave maestra de todo el negocio: ven los carros moviéndose en vivo en el mapa, comprueban qué tiendas visitó cada vendedor, fijan el precio mínimo permitido en calle, auditan cortes de dinero/cajas y descargan respaldos.",
+      "Acceso integral a la operación comercial: supervisión en tiempo real de unidades en ruta, auditoría de visitas a clientes, control de políticas de precios y mínimos autorizados, conciliación de cortes y generación de respaldos.",
     accessNote:
-      "Entras al Panel Central (/admin.html) con la Clave Maestra, y cuando sales a vender en carro entras a Modo Chofer (/chofer.html) con tu nombre y tu PIN de 4 dígitos.",
+      "Ingreso al Panel Central (/admin.html) mediante Clave Administrativa, y acceso a Modo Chofer (/chofer.html) mediante usuario y PIN de 4 dígitos al realizar labores de ruta.",
     steps: [
       {
         num: "1",
         icon: "🗺️",
-        heading: "Ver a los vendedores en tiempo real y revisar sus visitas",
+        heading: "Supervisión de unidades en tiempo real y auditoría de visitas",
         bodyHtml:
-          "Entra a la pestaña <strong>🗺️ Ruta, GPS y Cortes</strong>. Ahí tienes el mapa de toda la ciudad (puedes tocar <strong>⛶ Pantalla Completa</strong> para dejarlo abierto en monitor o celular):<br>" +
-          "• <strong>🚗 Carros y recorrido:</strong> Ves dónde anda cada vendedor ahorita, cuántas cajas trae en la cajuela y la <strong>línea de color</strong> con todas las calles por donde ya pasó hoy.<br>" +
-          "• <strong>Semáforo de negocios en el mapa:</strong><br>" +
-          "&nbsp;&nbsp;🟢 <strong>Verde:</strong> Ya compró hoy (te dice cuántas cajas y cuánto pagó).<br>" +
-          "&nbsp;&nbsp;🟡 <strong>Amarillo:</strong> El vendedor pasó pero no le compraron (el sistema mide con GPS a cuántos metros reales estaba del local para comprobar que sí fue físicamente).<br>" +
-          "&nbsp;&nbsp;⚪ <strong>Gris:</strong> Negocios que todavía nadie visita hoy.",
+          "Ingrese a la pestaña <strong>🗺️ Ruta, GPS y Cortes</strong> para visualizar el mapa operativo de la ciudad (dispone del botón <strong>⛶ Pantalla Completa</strong> para monitoreo continuo):<br>" +
+          "• <strong>🚗 Unidades y trayectoria:</strong> Muestra la ubicación actual de cada unidad, las cajas disponibles a bordo y el <strong>trazo en mapa</strong> del recorrido realizado durante la jornada.<br>" +
+          "• <strong>Indicadores de estatus por punto de venta:</strong><br>" +
+          "&nbsp;&nbsp;🟢 <strong>Verde:</strong> Cliente con compra registrada hoy (indica cajas e importe).<br>" +
+          "&nbsp;&nbsp;🟡 <strong>Amarillo:</strong> Punto visitado sin venta (registra mediante GPS la distancia en metros desde el establecimiento para validar presencialmente la visita).<br>" +
+          "&nbsp;&nbsp;⚪ <strong>Gris:</strong> Establecimientos pendientes de visita en la fecha actual.",
         example:
-          "Ejemplo: Si un vendedor dice 'ya pasé a Carnicería San Juan pero tenía fruta', en el mapa verás el punto en 🟡 Amarillo diciendo: 'Visitado por Carlos (GPS a 14 metros)'."
+          "Si un ejecutivo de ventas reporta que el cliente aún contaba con inventario, el indicador aparecerá en color amarillo detallando la hora y la distancia GPS exacta al momento del registro."
       },
       {
         num: "2",
         icon: "🚨",
-        heading: "Foquitos de pedidos nuevos y alarma sonora",
+        heading: "Alertas de pedidos en línea y asignación inmediata",
         bodyHtml:
-          "Arriba a la derecha toca una vez el botón <strong>🔔 Sonido</strong> para dejar activada la campana.<br>" +
-          "• Cada vez que un cliente pide aguacate en línea, suena una campana doble, aparece una <strong>barra roja parpadeante</strong> arriba y se prende un <strong>🔴 Foquito Rojo</strong> en el mapa.<br>" +
-          "• Toca ese foquito rojo directamente en el mapa: ahí mismo ves qué pidió y eliges a qué carro cercano asignárselo sin cambiar de pantalla.",
+          "En la barra superior derecha, pulse el botón <strong>🔔 Sonido</strong> para habilitar las notificaciones auditivas en el equipo.<br>" +
+          "• Al recibirse un pedido nuevo en línea, el sistema emite una alerta sonora, despliega una <strong>barra superior de aviso</strong> y activa un <strong>🔴 Indicador Rojo de Pedido Nuevo</strong> en el mapa.<br>" +
+          "• Al seleccionar dicho indicador directamente sobre el mapa, se muestra el detalle del pedido y permite asignarlo de inmediato a la unidad más cercana.",
         example:
-          "Ejemplo: Prende un 🔴 Foquito Rojo en el centro y ves en el mapa que el carro de Carlos va a 4 cuadras con aguacate Maduro; tocas el foquito, eliges 'Carlos' y cambia a 🔵 Azul (En Ruta)."
+          "Al activarse una alerta en cierta zona, puede identificar visualmente qué unidad cercana cuenta con la maduración solicitada y asignarle la entrega desde el mismo mapa."
       },
       {
         num: "3",
         icon: "🏷️",
-        heading: "Fijar Precios del Día y Candado de Precio Mínimo",
+        heading: "Política de precios de lista y precio mínimo en ruta",
         bodyHtml:
-          "En la pestaña <strong>🏷️ Precios y Difusión</strong> controlas cada calibre (<strong>Super, Extra, Primera y Media</strong>):<br>" +
-          "• <strong>Precio por Caja ($):</strong> El precio público que ven los clientes en la página web y el que sale por defecto.<br>" +
-          "• <strong>Mínimo Ruta ($):</strong> Es el piso autorizado. Si en la calle un vendedor intenta cobrar una caja más barata que ese mínimo, su celular no lo deja guardar la venta.",
+          "En la pestaña <strong>🏷️ Precios y Difusión</strong> se configuran dos valores para cada calibre (<strong>Super, Extra, Primera y Media</strong>):<br>" +
+          "• <strong>Precio por Caja ($):</strong> Tarifa pública vigente en la tienda en línea y precio sugerido de venta.<br>" +
+          "• <strong>Mínimo Ruta ($):</strong> Límite inferior autorizado. La aplicación móvil impide registrar ventas por debajo de este importe.",
         example:
-          "Ejemplo: Si pones Primera en $320 y Mínimo Ruta en $280, el vendedor puede negociar en $300 o $290, pero jamás malbaratarla en $250."
+          "Si el calibre Primera tiene un precio de lista de $320 y un mínimo autorizado de $280, el vendedor podrá otorgar precio preferencial dentro de ese rango sin exceder el límite establecido."
       },
       {
         num: "4",
         icon: "💰",
-        heading: "Revisar el Corte de Cajas y Dinero sin hacer cuentas a mano",
+        heading: "Auditoría automática de cortes de inventario y efectivo",
         bodyHtml:
-          "En <strong>🗺️ Ruta, GPS y Cortes</strong> (abajo del mapa) están las tarjetas de <strong>Pre-Corte Automático por Chofer</strong>:<br>" +
-          "• El sistema cruza solito lo que <strong>Güerita</strong> despachó en almacén contra las notas que el vendedor registró en su celular.<br>" +
-          "• Te dice con letras claras: cuántas cajas físicas debe devolver a bodega y exactamente cuánto <strong>Efectivo en billetes</strong> debe entregar en oficina (separando Transferencias y Créditos).",
+          "En la sección inferior de <strong>🗺️ Ruta, GPS y Cortes</strong> se presenta el <strong>Pre-Corte Automático por Chofer</strong>:<br>" +
+          "• El sistema concilia automáticamente las salidas y devoluciones registradas en el <strong>Área de Almacén</strong> frente a las ventas capturadas en ruta.<br>" +
+          "• Indica con exactitud las cajas físicas que deben reingresar a bodega y el monto exacto de <strong>Efectivo por entregar</strong>, separando pagos por Transferencia y operaciones a Crédito.",
         example:
-          "Ejemplo: Si sacó 30 cajas y vendió 22 en ruta, el sistema marca automático: 'Por devolver a bodega: 8 cajas' y te desglosa cuánto efectivo exacto debes recibir."
+          "Si una unidad registró salida de 30 cajas y documentó la venta de 22 cajas en ruta, el corte exigirá automáticamente la devolución física de 8 cajas en almacén."
       },
       {
         num: "5",
         icon: "🔐",
-        heading: "Dar de alta más vendedores, PINs y Respaldos",
+        heading: "Gestión de personal de ventas, accesos y respaldos",
         bodyHtml:
-          "• En <strong>🚗 Choferes y PIN</strong> puedes cambiar celulares, asignar o cambiar el PIN de 4 dígitos de cualquier vendedor, agregar choferes nuevos cuando crezca la flotilla y mandarles su acceso con <strong>📲 Mandar App</strong>.<br>" +
-          "• Con el botón <strong>💾 Respaldar</strong> arriba a la derecha descargas en 1 clic toda la base de datos del negocio a tu computadora o teléfono.",
+          "• En <strong>🚗 Choferes y PIN</strong> es posible dar de alta nuevos ejecutivos de ventas, actualizar números telefónicos, renovar códigos PIN de 4 dígitos y compartir el enlace de acceso mediante <strong>📲 Mandar App</strong>.<br>" +
+          "• El botón superior <strong>💾 Respaldar</strong> permite descargar en cualquier momento una copia íntegra de la base de datos operativa.",
         example:
-          "Recomendación: Descarga un respaldo los sábados al cerrar la semana para tener doble tranquilidad."
+          "Se recomienda generar y almacenar un respaldo semanal al cierre del día sábado como medida de control institucional."
       }
     ],
     whatsappText:
-      `👑 *MANUAL RÁPIDO DUEÑOS — AGUACATES SALINAS*\n` +
-      `*(Para Alejandro y Tello)*\n\n` +
-      `1️⃣ *Ver carros y tiendas en vivo:* Entra al Panel Admin -> pestaña *🗺️ Ruta, GPS y Cortes* (puedes tocar *⛶ Pantalla Completa*).\n` +
-      `   • Ves cada carro 🚗 moviéndose y la línea de las calles que recorrió hoy.\n` +
-      `   • Tiendas en mapa: 🟢 Compró hoy | 🟡 Visitado sin venta (con distancia GPS real) | ⚪ Pendiente.\n\n` +
-      `2️⃣ *Foquitos de pedidos nuevos:* Activa *🔔 Sonido* arriba a la derecha. Cuando caiga un pedido sonará campana y prenderá un *🔴 Foquito Rojo* en el mapa; tócalo ahí mismo para asignarlo al carro más cercano.\n\n` +
-      `3️⃣ *Precios y Candado Mínimo:* En *🏷️ Precios y Difusión* defines el Precio Web y el *Mínimo Ruta ($)* para que nadie venda abajo del mínimo autorizado.\n\n` +
-      `4️⃣ *Cortes sin calculadora:* Abajo del mapa ves el *Pre-Corte Automático* que cruza Almacén vs Ventas en Ruta (cajas exactas a devolver y efectivo exacto a entregar).\n\n` +
-      `5️⃣ *Choferes y Respaldo:* En *🚗 Choferes y PIN* administras vendedores/PINs y arriba en *💾 Respaldar* guardas copia de todo el sistema.`
+      `👑 *MANUAL OPERATIVO: DIRECCIÓN GENERAL — COMERCIALIZADORA SALINAS*\n\n` +
+      `1️⃣ *Supervisión en tiempo real:* En el Panel Administrativo -> pestaña *🗺️ Ruta, GPS y Cortes* (*⛶ Pantalla Completa*):\n` +
+      `   • Visualización de unidades en movimiento, inventario a bordo y recorrido diario.\n` +
+      `   • Estatus de puntos de venta: 🟢 Con compra hoy | 🟡 Visitado sin venta (validado con distancia GPS) | ⚪ Pendiente.\n\n` +
+      `2️⃣ *Alertas de pedidos nuevos:* Active *🔔 Sonido* en la barra superior. Cada pedido entrante emite alerta sonora y muestra un *🔴 Indicador Rojo* en el mapa para asignación directa a la unidad más cercana.\n\n` +
+      `3️⃣ *Control de precios:* En *🏷️ Precios y Difusión* se establece el Precio Público y el *Mínimo Ruta ($)* autorizado para proteger el margen comercial.\n\n` +
+      `4️⃣ *Conciliación de cortes:* En *Pre-Corte Automático* se cruzan automáticamente los registros de Almacén contra las Ventas en Ruta (inventario a devolver y efectivo exacto a liquidar).\n\n` +
+      `5️⃣ *Seguridad y respaldos:* Gestión de personal y PINs en *🚗 Choferes y PIN*, y descarga de base de datos en *💾 Respaldar*.`
   },
 
   oficina: {
     id: "oficina",
-    shortTab: "💼 Oficina (Liz y Alejandra)",
-    badge: "NIVEL 2 • ADMINISTRACIÓN, PEDIDOS Y CORTES",
-    title: "Manual de Administración y Oficina",
-    people: "Liz y Alejandra",
+    shortTab: "💼 Administración y Oficina",
+    badge: "NIVEL 2 • COORDINACIÓN ADMINISTRATIVA Y DESPACHO",
+    title: "Manual Operativo — Administración y Oficina",
+    people: "Coordinación Administrativa y Personal de Oficina",
     summary:
-      "Esta guía resume el día a día en Oficina explicado paso a paso: mandar la lista de precios de la mañana sin escribirle uno por uno a 450 clientes, atender los pedidos que caen con alarma, asignarlos al carro correcto y recibir el corte de la tarde en 1 minuto.",
+      "Procedimiento diario para la difusión matutina de precios, recepción y asignación de pedidos en línea, registro de puntos de venta en el mapa y liquidación ágil de cortes vespertinos.",
     accessNote:
-      "En oficina entran al Panel de Administración (/admin.html). Además, cuando Liz salga a ruta/ventas, también tiene su usuario listo en Modo Chofer (/chofer.html).",
+      "Ingreso al Panel de Administración (/admin.html) con Clave Administrativa. En caso de realizar actividades comerciales en campo, se ingresa adicionalmente a Modo Chofer (/chofer.html) con su PIN asignado.",
     steps: [
       {
         num: "1",
         icon: "📣",
-        heading: "En la mañana: Mandar precios del día a los 450 contactos en 15 segundos",
+        heading: "Apertura del día: Actualización y difusión masiva de precios",
         bodyHtml:
-          "Ya no hay que mandar 450 mensajes uno por uno:<br>" +
-          "1. Entra a la pestaña <strong>🏷️ Precios y Difusión</strong>.<br>" +
-          "2. Si hoy cambió algún precio o disponibilidad, ajústalo y toca <strong>Guardar y Actualizar Precios en Vivo</strong>.<br>" +
-          "3. Toca el botón verde <strong>📋 Copiar Mensaje de Hoy</strong>.<br>" +
-          "4. Abre el WhatsApp de la empresa y pégalo en tus <strong>2 Listas de Difusión</strong> (Lista 1 y Lista 2). ¡Se les envía a todos en segundos y con el link para que pidan solos!",
+          "Para enviar la lista de precios diaria a toda la cartera de clientes de forma ágil:<br>" +
+          "1. Ingrese a la pestaña <strong>🏷️ Precios y Difusión</strong>.<br>" +
+          "2. Verifique o actualice los precios y disponibilidad por calibre y pulse <strong>Guardar y Actualizar Precios en Vivo</strong>.<br>" +
+          "3. Presione el botón <strong>📋 Copiar Mensaje de Hoy</strong>.<br>" +
+          "4. Pegue y envíe el mensaje en las <strong>Listas de Difusión de WhatsApp Business</strong> para notificar simultáneamente a los clientes junto con el enlace de pedidos en línea.",
         example:
-          "Tip: Los clientes que no quieran hoy no estorban, y los que sí quieran meterán su pedido directo y te prenderá foquito en el mapa."
+          "Los clientes interesados ingresarán su pedido directamente en el portal, registrándose de forma ordenada en el panel administrativo."
       },
       {
         num: "2",
         icon: "🔔",
-        heading: "Activar la Campana y recibir Pedidos Nuevos",
+        heading: "Monitoreo de alertas y recepción de pedidos nuevos",
         bodyHtml:
-          "Al abrir el sistema en la computadora o celular de oficina, toca el botón <strong>🔔 Sonido</strong> arriba a la derecha.<br>" +
-          "• En cuanto un cliente haga pedido en línea: sonará una campanita, verás arriba una <strong>barra roja parpadeante</strong> y se encenderá un <strong>🔴 Foquito Rojo</strong> en el mapa.<br>" +
-          "• Si es un cliente nuevo que escribió su calle pero no adjuntó GPS, en su pedido toca <strong>📍 Ubicar en Mapa</strong> y haz un clic donde queda su negocio: ¡así ya tendrá foquito automático siempre!",
+          "Al iniciar labores en el equipo de oficina, active el botón <strong>🔔 Sonido</strong> ubicado en la parte superior derecha.<br>" +
+          "• Cada nuevo pedido generará una alerta auditiva, mostrará la <strong>barra superior de notificación</strong> y colocará un <strong>🔴 Indicador Rojo de Pedido Nuevo</strong> en el mapa.<br>" +
+          "• Cuando un cliente nuevo capture únicamente su domicilio escrito sin coordenadas GPS, pulse <strong>📍 Ubicar en Mapa</strong> dentro de su pedido y seleccione el punto en el mapa para dejar registrada su ubicación permanentemente.",
         example:
-          "Ejemplo: Pide 'Taquería El Primo' 3 cajas de Media maduras. Suena la alarma y arriba te avisa: '¡1 pedido nuevo sin asignar!'."
+          "Una vez ubicado el establecimiento por primera vez, todos sus pedidos posteriores aparecerán automáticamente geolocalizados en el mapa."
       },
       {
         num: "3",
         icon: "🚗",
-        heading: "Asignar el pedido al vendedor ideal (evitando vueltas en balde)",
+        heading: "Asignación eficiente de pedidos a unidades en ruta",
         bodyHtml:
-          "Antes de asignar un pedido, revisa dos cosas rapidísimo:<br>" +
-          "1. En el <strong>Mapa (🗺️ Ruta, GPS y Cortes)</strong> mira quién anda más cerca del foquito rojo y cuántas cajas / qué madurez lleva en su carro.<br>" +
-          "2. Selecciona el nombre del chofer ahí mismo dentro del foquito del mapa (o en <strong>📦 Pedidos en Línea</strong>).<br>" +
-          "3. Al asignarlo, el pedido aparece <strong>instantáneamente en el celular del chofer</strong> (y si gustas también puedes tocar <strong>Enviar a Chofer</strong> para mandarle copia a su WhatsApp con link de Google Maps).",
+          "Para despachar cada pedido evitando traslados innecesarios:<br>" +
+          "1. En <strong>🗺️ Ruta, GPS y Cortes</strong> identifique qué unidad se encuentra próxima al punto de entrega y verifique que cuente con el calibre y maduración requeridos.<br>" +
+          "2. Seleccione al ejecutivo de ventas directamente en la ventana emergente del mapa (o desde la pestaña <strong>📦 Pedidos en Línea</strong>).<br>" +
+          "3. El pedido se sincroniza de inmediato en la aplicación móvil del vendedor; opcionalmente puede pulsar <strong>Enviar a Chofer</strong> para remitir los detalles por WhatsApp.",
         example:
-          "Ventaja: Así nunca le asignas un pedido de aguacate Maduro a un chofer que hoy solo salió con Verde o que ya se quedó sin calibre Extra."
+          "Esto permite asignar cada entrega a la unidad que realmente dispone del producto solicitado en su inventario a bordo."
       },
       {
         num: "4",
         icon: "🏪",
-        heading: "Guardar tiendas nuevas que manden por WhatsApp",
+        heading: "Alta de establecimientos en el directorio del mapa",
         bodyHtml:
-          "Los choferes ya pueden guardar tiendas nuevas solos desde su celular, pero si tienes ubicaciones guardadas en WhatsApp:<br>" +
-          "1. Ve a <strong>🗺️ Ruta, GPS y Cortes</strong> y toca <strong>➕ Punto / Tienda</strong>.<br>" +
-          "2. Elige si es Tienda, Carnicería, Restaurante o Frutería, pon su nombre y pega el enlace de Google Maps (o toca <strong>👆 Elegir en Mapa</strong>).<br>" +
-          "3. Toca <strong>💾 Guardar Negocio en el Mapa</strong>.",
+          "Además de los registros realizados por los vendedores en campo, Administración puede dar de alta clientes en el mapa:<br>" +
+          "1. En <strong>🗺️ Ruta, GPS y Cortes</strong> presione <strong>➕ Punto / Tienda</strong>.<br>" +
+          "2. Seleccione el giro comercial (Tienda, Carnicería, Restaurante o Frutería), indique el nombre del negocio y pegue el enlace de Google Maps o pulse <strong>👆 Elegir en Mapa</strong>.<br>" +
+          "3. Presione <strong>💾 Guardar Negocio en el Mapa</strong>.",
         example:
-          "Cada negocio guardado aparecerá en el mapa para supervisar que los vendedores pasen a visitarlo."
+          "Todos los establecimientos dados de alta quedan integrados en el monitoreo diario de cobertura comercial."
       },
       {
         num: "5",
         icon: "🧾",
-        heading: "En la tarde: Recibir el Corte del Chofer sin enredos de papelitos",
+        heading: "Cierre del día: Liquidación y recepción de corte por unidad",
         bodyHtml:
-          "Cuando un vendedor regresa a cerrar el día:<br>" +
-          "1. Primero <strong>Güerita</strong> cuenta cuántas cajas físicas sobrantes bajó del carro y las anota en Devolución.<br>" +
-          "2. Tú abres <strong>🗺️ Ruta, GPS y Cortes</strong> y miras la tarjeta del chofer en <strong>Pre-Corte Automático</strong>:<br>" +
-          "&nbsp;&nbsp;• Si dice <strong>✓ ¡Cajas cuadran al 100%!</strong>, no falta ni una sola caja.<br>" +
-          "&nbsp;&nbsp;• Si dice <strong>⚠️ Faltan X cajas por comprobar</strong>, es que olvidó anotar una venta o devolver cajas.<br>" +
-          "&nbsp;&nbsp;• El recuadro verde oscuro te dice al centavo cuánto <strong>💵 Efectivo a Entregar</strong> debe darte en la mano, cuánto entró por <strong>🏦 Transferencia</strong> y quién quedó con <strong>📝 Crédito / Resta</strong>.",
+          "Al regreso de cada unidad al término de su ruta:<br>" +
+          "1. El <strong>Área de Almacén</strong> verifica físicamente y registra las cajas devueltas a bodega.<br>" +
+          "2. Administración consulta en <strong>🗺️ Ruta, GPS y Cortes</strong> la tarjeta de <strong>Pre-Corte Automático</strong> correspondiente:<br>" +
+          "&nbsp;&nbsp;• El indicador <strong>✓ ¡Cajas cuadran al 100%!</strong> confirma que no existen diferencias de inventario.<br>" +
+          "&nbsp;&nbsp;• Si muestra <strong>⚠️ Faltan X cajas por comprobar</strong>, existe una venta pendiente de captura o producto pendiente de devolución.<br>" +
+          "&nbsp;&nbsp;• El recuadro inferior indica el importe exacto de <strong>💵 Efectivo a Entregar</strong>, desglosando por separado cobros en <strong>🏦 Transferencia</strong> y saldos en <strong>📝 Crédito</strong>.",
         example:
-          "Ejemplo: 'Efectivo a Entregar: $4,850' -> Cuentas los billetes, revisas en el banco las transferencias anotadas y ¡corte terminado en 1 minuto!"
+          "Con este procedimiento se eliminan errores aritméticos y extravío de notas durante la liquidación diaria."
       }
     ],
     whatsappText:
-      `💼 *MANUAL DE OFICINA Y ADMINISTRACIÓN — SALINAS*\n` +
-      `*(Para Liz y Alejandra)*\n\n` +
-      `1️⃣ *Precios de la mañana (en 15 seg):* Pestaña *🏷️ Precios y Difusión* -> actualiza precios -> toca *📋 Copiar Mensaje de Hoy* y pégalo en las 2 Listas de Difusión de WhatsApp.\n\n` +
-      `2️⃣ *Alarma de pedidos nuevos:* Al entrar toca *🔔 Sonido* arriba a la derecha. Cada pedido nuevo suena, prende barra roja arriba y enciende un *🔴 Foquito Rojo* en el mapa.\n\n` +
-      `3️⃣ *Asignar chofer:* Toca el Foquito Rojo en el mapa, revisa qué carro anda cerca y trae esa madurez/calibre, y asígnaselo ahí mismo (le llega directo a su celular).\n\n` +
-      `4️⃣ *Agregar tiendas al mapa:* En *🗺️ Ruta, GPS y Cortes* toca *➕ Punto / Tienda* para pegar links de ubicaciones o elegirlas en el mapa.\n\n` +
-      `5️⃣ *Corte de la tarde en 1 minuto:* Primero Güerita anota las cajas devueltas en Almacén; luego tú ves en *Pre-Corte Automático* si las cajas cuadran al 100% y el monto exacto de *💵 Efectivo a Entregar* que debes recibir.`
+      `💼 *MANUAL OPERATIVO: ADMINISTRACIÓN Y OFICINA — COMERCIALIZADORA SALINAS*\n\n` +
+      `1️⃣ *Difusión matutina de precios:* En *🏷️ Precios y Difusión*, actualice tarifas, pulse *📋 Copiar Mensaje de Hoy* y envíelo mediante las Listas de Difusión de WhatsApp Business.\n\n` +
+      `2️⃣ *Recepción de pedidos:* Active *🔔 Sonido* al abrir el panel. Cada pedido nuevo emite alerta sonora, muestra aviso superior y coloca un *🔴 Indicador de Pedido Nuevo* en el mapa.\n\n` +
+      `3️⃣ *Asignación de entregas:* Seleccione el pedido en el mapa, verifique qué unidad cercana cuenta con el calibre y maduración requeridos, y asígnelo para sincronizarlo en el teléfono del vendedor.\n\n` +
+      `4️⃣ *Registro de puntos de venta:* En *🗺️ Ruta, GPS y Cortes* utilice *➕ Punto / Tienda* para incorporar ubicaciones mediante enlace de Google Maps o selección directa en mapa.\n\n` +
+      `5️⃣ *Liquidación vespertina:* Una vez capturada la devolución física por el Área de Almacén, verifique en *Pre-Corte Automático* el cuadre al 100% de cajas y reciba el monto exacto indicado en *💵 Efectivo a Entregar*.`
   },
 
   almacen: {
     id: "almacen",
-    shortTab: "📦 Almacén ('Güerita')",
-    badge: "NIVEL 3 • BODEGA, SALIDAS Y DEVOLUCIONES",
-    title: "Manual Súper Sencillo de Almacén",
-    people: "Para 'Güerita' (Encargada de Almacén)",
+    shortTab: "📦 Área de Almacén",
+    badge: "NIVEL 3 • CONTROL DE INVENTARIO, SALIDAS Y DEVOLUCIONES",
+    title: "Manual Operativo — Área de Almacén",
+    people: "Encargado(a) de Almacén y Control de Piso",
     summary:
-      "¡Hola Güerita! Con este sistema ya no tienes que batallar haciendo sumas y restas a mano ni llenando copias de tarjetas. Tú solo usas la primera pantalla (📋 Control de Almacén) y únicamente haces 3 pasos muy fáciles durante el día.",
+      "Procedimiento estandarizado para el control diario de existencias en piso, salidas de cámara fría, despacho de unidades por vuelta y recepción de devoluciones sin cálculos manuales.",
     accessNote:
-      "Entras al Panel (/admin.html) y ya aparece abierta tu pestaña: 📋 Control de Almacén. No necesitas moverle a ninguna otra pestaña.",
+      "Al ingresar al Panel (/admin.html) se muestra directamente la pestaña de trabajo correspondiente: 📋 Control de Almacén.",
     steps: [
       {
         num: "1",
         icon: "🌅",
-        heading: "Paso 1 (Al abrir en la mañana): Anotar con cuántas cajas empezamos",
+        heading: "Paso 1 (Apertura de bodega): Registro de inventario inicial y cámara fría",
         bodyHtml:
-          "1. Revisa que arriba diga la <strong>Fecha de hoy</strong>.<br>" +
-          "2. Toca el botón <strong>↺ Jalar Cierre Ayer</strong>: eso copia solito las cajas que sobraron ayer en el piso para que no las escribas otra vez (o si prefieres, escríbelas tú en <strong>M, P, E y S</strong>).<br>" +
-          "3. <strong>¿Sacaron cajas nuevas del cuarto frío / refrigerador al piso?</strong> Escribe cuántas sacaron en los cuadritos azules que dicen <strong>+ M, + P, + E, + S</strong>.<br>" +
-          "4. Toca el botón verde <strong>Guardar Inventario Base</strong>.<br>" +
-          "<em>(Nota: Si más tarde a mediodía sacan otras cajas del refrigerador, nada más súmalas ahí mismo en los cuadritos +M, +P, +E, +S y vuelve a tocar Guardar).</em>",
+          "1. Verifique en la parte superior que esté seleccionada la <strong>Fecha actual</strong>.<br>" +
+          "2. Presione el botón <strong>↺ Cargar Cierre Anterior</strong> para importar automáticamente las existencias finales del día previo en piso (o capture manualmente las cantidades en <strong>M, P, E y S</strong>).<br>" +
+          "3. <strong>Salidas de cámara fría / entradas del día:</strong> Cuando se retire mercancía del refrigerador hacia el piso de venta, capture las cajas correspondientes en los campos <strong>+ M, + P, + E, + S</strong>.<br>" +
+          "4. Presione el botón <strong>Guardar Inventario Base</strong>.<br>" +
+          "<em>(Nota: Si en el transcurso del día se retiran cajas adicionales de cámara fría, incremente la cantidad en dichos campos y pulse nuevamente Guardar).</em>",
         example:
-          "Ejemplo: Amanecieron 10 cajas de Primera en piso y sacaron 20 más del refrigerador -> En 'P' hay 10 y en '+ P' pones 20. El sistema suma solito 30 en piso."
+          "Si iniciaron con 10 cajas de Primera en piso y se retiraron 20 cajas adicionales de cámara fría, el sistema calculará automáticamente una disponibilidad total de 30 cajas en piso."
       },
       {
         num: "2",
         icon: "🚚",
-        heading: "Paso 2 (Cada vez que sale un carro): Registrar qué se lleva el chofer",
+        heading: "Paso 2 (Despacho de unidades): Registro de cada salida a ruta",
         bodyHtml:
-          "Cada vez que <strong>Carlos, Tello, Alejandro o Liz</strong> suban cajas a su carro para salir a vender:<br>" +
-          "1. Ve al recuadro que dice <strong>2. Registrar Salida de Carro (Nueva Vuelta)</strong>.<br>" +
-          "2. En <strong>Chofer / Vendedor</strong> elige el nombre de quién se lleva el carro.<br>" +
-          "3. En <strong>Maduración que lleva</strong> elige cómo va la fruta (<em>Maduro, Sazón, Quebrado, Verde, Maduro y Sazón, etc.</em>).<br>" +
-          "4. Escribe cuántas cajas subió de cada tamaño: <strong>M (Media), P (Primera), E (Extra) y S (Super)</strong>.<br>" +
-          "5. Toca el botón verde <strong>+ Dar Salida de Carro</strong>.<br>" +
-          "<em>¡Y listo! Si ese mismo vendedor regresa más tarde por una segunda o tercera vuelta, vuelves a llenar este mismo cuadrito igualito.</em>",
+          "Cada vez que una unidad cargue mercancía para salir a ruta:<br>" +
+          "1. Ubique la sección <strong>2. Registrar Salida de Carro (Nueva Vuelta)</strong>.<br>" +
+          "2. En <strong>Chofer / Vendedor</strong> seleccione al operador correspondiente.<br>" +
+          "3. En <strong>Maduración que lleva</strong> seleccione el estado de la fruta despachada (<em>Maduro, Sazón, Quebrado, Verde, Maduro y Sazón, etc.</em>).<br>" +
+          "4. Capture el número de cajas cargadas por calibre: <strong>M (Media), P (Primera), E (Extra) y S (Super)</strong>.<br>" +
+          "5. Presione <strong>+ Dar Salida de Carro</strong>.<br>" +
+          "<em>Si el mismo operador realiza una segunda o tercera vuelta durante la jornada, registre una nueva salida siguiendo exactamente los mismos pasos.</em>",
         example:
-          "Ejemplo: Sale Carlos a las 8:30 AM con aguacate Maduro: 5 de Media, 10 de Primera, 5 de Extra y 0 de Super -> Tocas '+ Dar Salida de Carro' y ya quedó guardado con la hora exacta."
+          "Al confirmar la salida, queda registrada automáticamente la hora exacta del despacho y se actualiza tanto la existencia en piso como el inventario disponible en el teléfono del vendedor."
       },
       {
         num: "3",
         icon: "↩️",
-        heading: "Paso 3 (Cuando regresa un carro): Anotar cuántas cajas devolvió",
+        heading: "Paso 3 (Regreso de ruta): Recepción y captura de devoluciones",
         bodyHtml:
-          "Cuando el vendedor termina su vuelta y baja cajas que no vendió:<br>" +
-          "1. Baja hasta la lista <strong>3. Bitácora de Vueltas y Devoluciones</strong>.<br>" +
-          "2. Busca el renglón o tarjeta de ese chofer y toca el botón <strong>Editar / Devolución</strong>.<br>" +
-          "3. Se abre una ventanita: en la parte de abajo que dice <strong>DEVOLUCIÓN A BODEGA</strong> escribe cuántas cajas regresó de <strong>M, P, E y S</strong>.<br>" +
-          "4. Toca <strong>Guardar Cambios</strong>.<br>" +
-          "¡El sistema resta solito lo que vendió y vuelve a sumar las cajas devueltas a tu existencia en piso!",
+          "Cuando el operador regrese a bodega con mercancía no vendida:<br>" +
+          "1. Diríjase a la sección <strong>3. Bitácora de Vueltas y Devoluciones</strong>.<br>" +
+          "2. Localice el registro de la vuelta correspondiente y presione el botón <strong>Editar / Devolución</strong>.<br>" +
+          "3. En el apartado <strong>DEVOLUCIÓN QUE REGRESA SIN VENDER</strong> capture las cajas recibidas físicamente en buen estado para cada calibre (<strong>M, P, E y S</strong>).<br>" +
+          "4. Presione <strong>Guardar Cambios</strong>.",
         example:
-          "Ejemplo: Carlos se había llevado 10 cajas de Primera y regresó 2 cajas buenas -> Pones '2' en Devolución P, guardas, y el sistema calcula solito que vendió 8 y regresa esas 2 al piso."
+          "El sistema calcula de manera automática el neto vendido de esa vuelta y reincorpora las cajas devueltas a la existencia actual en piso."
       },
       {
         num: "4",
         icon: "✅",
-        heading: "¿Cómo sé si mi almacén está cuadrado al cerrar el día?",
+        heading: "Verificación de cierre físico de almacén",
         bodyHtml:
-          "Mira los cuadros de hasta arriba (el primer cuadro verde oscuro dice <strong>TOTAL EN PISO</strong>):<br>" +
-          "• Ese número te dice cuántas cajas físicas deben estar paradas ahorita mismo en el piso de la bodega (separadas por M, P, E y S).<br>" +
-          "• Si cuentas las cajas del piso al final de la tarde y coinciden con esos números, <strong>¡tu almacén cerró perfecto!</strong> Si necesitan hoja en papel, toca <strong>🖨️ Imprimir Corte</strong>.",
+          "En la parte superior de la pantalla se muestra permanentemente el indicador principal <strong>TOTAL EN PISO</strong> junto con el desglose por calibre:<br>" +
+          "• Dichas cifras representan las cajas físicas que deben encontrarse en el área de piso en todo momento.<br>" +
+          "• Al concluir la jornada, verifique que el conteo físico coincida con los indicadores del sistema. En caso de requerir respaldo impreso, presione <strong>🖨️ Imprimir Corte</strong>.",
         example:
-          "Recuerda los 4 códigos de siempre: M = Media | P = Primera | E = Extra | S = Super."
+          "Nomenclatura oficial de calibres: M = Media | P = Primera | E = Extra | S = Super."
       }
     ],
     whatsappText:
-      `📦 *GUÍA FÁCIL DE ALMACÉN — PARA GÜERITA* 🥑\n\n` +
-      `¡Hola Güerita! Solo ocupas usar la primera pantalla (*📋 Control de Almacén*) con estos *3 pasos sencillos*:\n\n` +
-      `1️⃣ *EN LA MAÑANA (Al abrir):*\n` +
-      `• Toca *↺ Jalar Cierre Ayer* para poner las cajas con las que amanecimos.\n` +
-      `• Si sacan cajas del refrigerador/cámara fría, anótalas en los cuadritos *+M, +P, +E, +S*.\n` +
-      `• Toca *Guardar Inventario Base*.\n\n` +
-      `2️⃣ *CADA VEZ QUE SALE UN CARRO:*\n` +
-      `• Ve a *2. Registrar Salida de Carro*.\n` +
-      `• Elige el *Chofer* (Carlos, Tello, Alejandro o Liz) y qué *Maduración* lleva (Maduro, Sazón, Quebrado, Verde).\n` +
-      `• Pon cuántas cajas sube de *M, P, E y S* y toca *+ Dar Salida de Carro*.\n` +
-      `*(Si da otra vuelta más tarde, haces lo mismo otra vez).* \n\n` +
-      `3️⃣ *CUANDO REGRESA CON CAJAS SOBRANTES:*\n` +
-      `• Abajo en la lista busca su vuelta y toca *Editar / Devolución*.\n` +
-      `• Escribe cuántas cajas regresó en *Devolución (M, P, E, S)* y toca *Guardar Cambios*.\n\n` +
-      `✨ *¡El sistema suma y resta todo solito!* Arriba en el cuadro verde oscuro siempre verás cuántas cajas exactas deben haber en piso.`
+      `📦 *MANUAL OPERATIVO: ÁREA DE ALMACÉN — COMERCIALIZADORA SALINAS*\n\n` +
+      `Operación diaria en el módulo *📋 Control de Almacén* en 3 pasos:\n\n` +
+      `1️⃣ *APERTURA DE BODEGA (Inventario Inicial):*\n` +
+      `• Presione *↺ Cargar Cierre Anterior* para importar la existencia final del día previo.\n` +
+      `• Capture en los campos *+M, +P, +E, +S* las cajas retiradas de cámara fría hacia el piso.\n` +
+      `• Pulse *Guardar Inventario Base*.\n\n` +
+      `2️⃣ *DESPACHO DE UNIDADES (Salida a Ruta):*\n` +
+      `• En *2. Registrar Salida de Carro*, seleccione *Chofer / Vendedor* y la *Maduración* despachada.\n` +
+      `• Indique las cajas cargadas por calibre (*M, P, E y S*) y presione *+ Dar Salida de Carro*.\n` +
+      `*(Repita este registro por cada vuelta adicional durante el día).* \n\n` +
+      `3️⃣ *RECEPCIÓN DE DEVOLUCIONES (Regreso de Ruta):*\n` +
+      `• En la bitácora inferior localice la vuelta correspondiente y pulse *Editar / Devolución*.\n` +
+      `• Capture las cajas recibidas físicamente en *Devolución (M, P, E, S)* y presione *Guardar Cambios*.\n\n` +
+      `✅ El recuadro superior *TOTAL EN PISO* calcula automáticamente la existencia exacta que debe permanecer físicamente en bodega.`
   },
 
   ventas: {
     id: "ventas",
-    shortTab: "🚗 Ventas (Carlos, Tello, Alejandro, Liz)",
-    badge: "NIVEL 4 • RUTA, CLIENTES, VENTAS Y CORTE",
-    title: "Manual de Ventas en Ruta (App Celular)",
-    people: "Carlos, Tello, Alejandro y Liz",
+    shortTab: "🚗 Ventas y Reparto",
+    badge: "NIVEL 4 • OPERACIÓN EN RUTA, PROSPECCIÓN Y COBRANZA",
+    title: "Manual Operativo — Ventas y Reparto en Ruta",
+    people: "Ejecutivos de Ventas y Operadores de Reparto",
     summary:
-      "Esta es tu herramienta de bolsillo en la calle (/chofer.html). Te dice cuántas cajas traes en el carro, te avisa de pedidos nuevos, guarda tiendas con GPS sin mandar WhatsApps sueltos, manda notas digitales a los clientes y te arma tu corte solito.",
+      "Guía de uso de la aplicación móvil de ruta (/chofer.html) para consulta de carga a bordo, atención de pedidos asignados, geolocalización de clientes, registro de ventas y pre-corte diario.",
     accessNote:
-      "Abre en tu celular aguacates-salinas.web.app/chofer.html, elige tu nombre (Carlos, Tello, Alejandro o Liz), pon tu PIN de 4 números y deja marcada la casilla 'Mantener sesión iniciada'.",
+      "Ingrese desde su teléfono móvil a aguacates-salinas.web.app/chofer.html, seleccione su usuario, capture su PIN personal de 4 dígitos y mantenga activa la opción 'Mantener sesión iniciada'.",
     steps: [
       {
         num: "1",
         icon: "🛰️",
-        heading: "Al subirte al carro: Prende tu GPS con 1 toque",
+        heading: "Inicio de recorrido: Activación de ubicación GPS",
         bodyHtml:
-          "En cuanto entres a la app, mira arriba a la derecha y toca el botón <strong>⚪ Activar GPS</strong> para que se ponga en verde: <strong>🟢 GPS Activo</strong>.<br>" +
-          "• Déjala abierta mientras manejas (el sistema evita que tu pantalla se duerma).<br>" +
-          "• Así Oficina ve en qué colonia andas para mandarte los pedidos que queden cerquita de ti y no hacerte dar vueltas de embalde.",
+          "Al iniciar su ruta, presione en la barra superior el botón <strong>⚪ Activar GPS</strong> hasta visualizar el estado <strong>🟢 GPS Activo</strong>.<br>" +
+          "• Mantenga la aplicación abierta durante sus traslados (el sistema conserva activa la pantalla automáticamente).<br>" +
+          "• Esto permite a Administración visualizar su ubicación en tiempo real y asignarle los pedidos más cercanos a su zona para evitar traslados innecesarios.",
         example:
-          "Cuando ya termines tu día y apagues el carro en la bodega, vuelves a tocar el botón para apagar el GPS."
+          "Al concluir la jornada laboral en bodega, presione nuevamente el botón para finalizar la transmisión de ubicación."
       },
       {
         num: "2",
         icon: "🚗",
-        heading: "Botón 1 abajo — 'Mi Ruta': Tus cajas disponibles y Pedidos de Oficina",
+        heading: "Sección 1 — 'Mi Ruta': Inventario a bordo y entregas asignadas",
         bodyHtml:
-          "• <strong>Cuadro verde de arriba:</strong> Te muestra cuántas cajas te cargó Güerita hoy y cuántas te quedan libres en el carro de <strong>M, P, E y S</strong>.<br>" +
-          "• <strong>Pedidos Asignados por Oficina:</strong> Cuando caiga un pedido para ti, aparece aquí mismo con la dirección y qué madurez pidió:<br>" +
-          "&nbsp;&nbsp;1. Toca <strong>📍 Abrir Mapa</strong> para que Google Maps te lleve directo o <strong>📞 Llamar</strong> si necesitas hablarle.<br>" +
-          "&nbsp;&nbsp;2. Toca <strong>🚗 Voy en Camino</strong> cuando vayas para allá.<br>" +
-          "&nbsp;&nbsp;3. Al bajar las cajas y cobrarle, toca <strong>✅ Entregar y Cobrar</strong> para confirmar cómo te pagó.",
+          "• <strong>Indicador superior de carga:</strong> Muestra el total de cajas despachadas por Almacén y la disponibilidad actual en su unidad por calibre (<strong>M, P, E y S</strong>).<br>" +
+          "• <strong>Pedidos Asignados por Oficina:</strong> Cada orden asignada muestra domicilio, detalle de cajas y maduración solicitada:<br>" +
+          "&nbsp;&nbsp;1. Pulse <strong>📍 Abrir Mapa</strong> para iniciar la navegación o <strong>📞 Llamar</strong> para contactar al cliente.<br>" +
+          "&nbsp;&nbsp;2. Presione <strong>🚗 Voy en Camino</strong> al dirigirse al establecimiento.<br>" +
+          "&nbsp;&nbsp;3. Al efectuar la entrega, pulse <strong>✅ Entregar y Cobrar</strong> para registrar la forma de pago recibida.",
         example:
-          "En cuanto confirmas la entrega, esas cajas se descuentan solitas de tu carro y se suman a tu corte del día."
+          "Al confirmar la entrega, el sistema descuenta automáticamente las cajas del inventario de su unidad y las integra a su corte diario."
       },
       {
         num: "3",
         icon: "🏪",
-        heading: "Botón 2 abajo — 'Clientes': Guardar tiendas nuevas y marcar visitas",
+        heading: "Sección 2 — 'Clientes': Registro de nuevos negocios y constancia de visita",
         bodyHtml:
-          "<strong>¡Ya no mandes ubicaciones sueltas por WhatsApp!</strong> Toca el botón <strong>🏪 Clientes</strong> abajo:<br>" +
-          "• <strong>¿Llegaste a un negocio nuevo?</strong> Párate afuera del local, toca el botón verde <strong>📍 Guardar Nuevo Negocio Aquí (GPS)</strong>, elige si es Tienda, Carnicería, Restaurante o Frutería, escribe su nombre y guárdalo. ¡Queda en el mapa para siempre!<br>" +
-          "• <strong>¿Fuiste a ver a un cliente guardado y SÍ te compró?</strong> Búscalo en la lista y toca <strong>➕ Venderle</strong> (ya llena su nombre y celular por ti).<br>" +
-          "• <strong>¿Pasaste a verlo pero HOY NO compró (tenía aguacate o estaba cerrado)?</strong> Toca <strong>📍 Pasé (Sin venta)</strong> y elige el motivo. Eso registra tu ubicación GPS y pinta la tienda en amarillo en el mapa para comprobar que sí cumpliste con visitarla.",
+          "Utilice la pestaña <strong>🏪 Clientes</strong> para gestionar los puntos de compra directamente en el sistema (sin enviar ubicaciones sueltas por mensajería):<br>" +
+          "• <strong>Alta de establecimiento nuevo:</strong> Ubicado frente al negocio, presione <strong>📍 Guardar Nuevo Negocio Aquí (GPS)</strong>, seleccione el giro comercial, indique el nombre del establecimiento y guarde el registro.<br>" +
+          "• <strong>Cliente existente con compra:</strong> Localícelo en el listado y pulse <strong>➕ Venderle</strong> para autocompletar sus datos en el formulario de venta.<br>" +
+          "• <strong>Visita realizada sin venta:</strong> Si acudió al establecimiento pero no requirió producto o se encontraba cerrado, presione <strong>📍 Pasé (Sin venta)</strong> y seleccione el motivo para dejar constancia geolocalizada de su visita.",
         example:
-          "Ejemplo: Pasas a 'Abarrotes Don Pepe' y todavía tiene media caja. Tocas '📍 Pasé (Sin venta)' -> 'Aún tiene aguacate' y en oficina ven que ya cumpliste con pasar."
+          "El registro de visita sin venta actualiza de inmediato el indicador del cliente en el mapa de supervisión administrativa."
       },
       {
         num: "4",
         icon: "➕",
-        heading: "Botón 3 abajo — 'Vender': Ventas rápidas en calle y Nota Digital",
+        heading: "Sección 3 — 'Vender': Captura de ventas en ruta y comprobante digital",
         bodyHtml:
-          "Para cualquier venta directa en tu recorrido, toca <strong>➕ Vender</strong>:<br>" +
-          "1. Escribe el nombre del cliente o negocio.<br>" +
-          "2. Toca <strong>+</strong> en las cajas que le entregas (<strong>S, E, P o M</strong>). Si le mejoras el precio, cámbialo en el cuadrito de <em>$ Precio</em> (el sistema te cuida avisándote cuál es el precio mínimo autorizado).<br>" +
-          "3. Elige cómo te pagó:<br>" +
+          "Para documentar toda venta directa en ruta, ingrese a <strong>➕ Vender</strong>:<br>" +
+          "1. Capture el nombre del cliente o establecimiento.<br>" +
+          "2. Indique la cantidad de cajas entregadas por calibre (<strong>S, E, P o M</strong>). En caso de otorgar precio especial, ajústelo respetando el límite mínimo autorizado por el sistema.<br>" +
+          "3. Seleccione el método de cobro:<br>" +
           "&nbsp;&nbsp;• <strong>💵 Efectivo</strong> o <strong>🏦 Transferencia</strong>.<br>" +
-          "&nbsp;&nbsp;• <strong>📝 Crédito / Deja Anticipo:</strong> Pide siempre su celular de 10 dígitos; si te dio una parte en efectivo ponla en <em>Anticipo</em> y el sistema calcula solito cuánto resta deber.<br>" +
-          "4. Toca <strong>✅ Registrar Venta</strong>. Enseguida te saldrá la pantalla para tocar <strong>📲 Mandar Nota por WhatsApp al Cliente</strong> con su folio oficial.",
+          "&nbsp;&nbsp;• <strong>📝 Crédito / Deja Anticipo:</strong> Es obligatorio capturar el teléfono de 10 dígitos del cliente; si entrega un pago parcial en efectivo, regístrelo en el campo <em>Anticipo</em> para calcular automáticamente el saldo pendiente.<br>" +
+          "4. Presione <strong>✅ Registrar Venta</strong> y utilice el botón <strong>📲 Mandar Nota por WhatsApp al Cliente</strong> para enviar el comprobante foliado.",
         example:
-          "Si el cliente además te pide papelito físico, se lo das, pero igual regístrala siempre aquí para que tus cajas y tu dinero cuadren al regresar."
+          "Aun cuando el cliente solicite adicionalmente una nota física impresa, toda operación debe registrarse en la aplicación para mantener cuadrado su inventario y efectivo."
       },
       {
         num: "5",
         icon: "💰",
-        heading: "Botón 4 abajo — 'Mi Corte': Cerrar tu día sin cuentas ni discusiones",
+        heading: "Sección 4 — 'Mi Corte': Conciliación previa al regreso a bodega",
         bodyHtml:
-          "Toca <strong>💰 Mi Corte</strong> en cualquier momento del día o antes de llegar a la bodega:<br>" +
-          "• Te dice exactamente <strong>cuántas cajas físicas debes devolverle a Güerita</strong>.<br>" +
-          "• Te dice al peso exacto <strong>cuánto Efectivo en billetes debes entregar en Oficina</strong> (ya descontando lo que fue por transferencia o crédito).<br>" +
-          "• Abajo ves la lista de todas tus notas del día por si quieres revisar alguna o reenviarla por WhatsApp.",
+          "Consulte la pestaña <strong>💰 Mi Corte</strong> antes de concluir su ruta:<br>" +
+          "• Muestra con exactitud <strong>las cajas físicas que debe reingresar al Área de Almacén</strong>.<br>" +
+          "• Calcula el importe exacto de <strong>Efectivo que debe liquidar en Administración</strong>, separando los cobros recibidos por transferencia y los saldos otorgados a crédito.<br>" +
+          "• Incluye la relación completa de notas emitidas en el día para consulta o reenvío de comprobantes.",
         example:
-          "Si el número de cajas en tu cajuela y tus billetes coinciden con lo que dice 'Mi Corte', entregas en 1 minuto y te vas tranquilo a casa."
+          "Verificar que su existencia física en la unidad y su efectivo coincidan con 'Mi Corte' agiliza su cierre diario en menos de un minuto."
       }
     ],
     whatsappText:
-      `🚗 *MANUAL DE RUTA EN CELULAR — AGUACATES SALINAS*\n` +
-      `*(Para Carlos, Tello, Alejandro y Liz)*\n\n` +
-      `👉 *Tu link de trabajo:* https://aguacates-salinas.web.app/chofer.html\n` +
-      `*(Elige tu nombre e ingresa tu PIN personal de 4 dígitos)*\n\n` +
-      `1️⃣ *Al salir:* Toca arriba *⚪ Activar GPS* para que pase a *🟢 GPS Activo* y oficina sepa qué pedidos cercanos mandarte.\n\n` +
-      `2️⃣ *🚗 Mi Ruta:* Ahí ves cuántas cajas traes libres en el carro y los pedidos que te asigna Oficina (*📍 Abrir Mapa* -> *🚗 Voy en Camino* -> *✅ Entregar y Cobrar*).\n\n` +
-      `3️⃣ *🏪 Clientes (Tiendas, Carnicerías, Restaurantes):*\n` +
-      `• *Negocio nuevo:* Ya NO mandes ubicación suelta por WhatsApp; toca *📍 Guardar Nuevo Negocio Aquí (GPS)*.\n` +
-      `• *Si pasaste pero hoy no compró:* Búscalo y toca *📍 Pasé (Sin venta)* para que quede registrada tu visita en el mapa.\n\n` +
-      `4️⃣ *➕ Vender:* Anota cajas entregadas y cómo pagó (*Efectivo, Transferencia o Crédito con Anticipo*). Al guardar puedes mandarle su *📲 Nota Digital por WhatsApp* en 1 toque.\n\n` +
-      `5️⃣ *💰 Mi Corte:* Te dice sin calculadora cuántas cajas exactas devuelves a Güerita en almacén y cuánto efectivo exacto entregas en oficina.`
+      `🚗 *MANUAL OPERATIVO: VENTAS Y REPARTO EN RUTA — COMERCIALIZADORA SALINAS*\n\n` +
+      `👉 *Acceso móvil:* https://aguacates-salinas.web.app/chofer.html\n` +
+      `*(Seleccione su usuario e ingrese su PIN personal de 4 dígitos)*\n\n` +
+      `1️⃣ *Inicio de ruta:* Presione en la parte superior *⚪ Activar GPS* (*🟢 GPS Activo*) para habilitar el monitoreo y la asignación de entregas cercanas.\n\n` +
+      `2️⃣ *🚗 Mi Ruta:* Consulte su inventario disponible a bordo y gestione los pedidos asignados por Administración (*📍 Abrir Mapa* -> *🚗 Voy en Camino* -> *✅ Entregar y Cobrar*).\n\n` +
+      `3️⃣ *🏪 Clientes:*\n` +
+      `• *Establecimiento nuevo:* Regístrelo frente al local pulsando *📍 Guardar Nuevo Negocio Aquí (GPS)*.\n` +
+      `• *Visita sin venta:* Seleccione *📍 Pasé (Sin venta)* para dejar constancia GPS de su visita.\n\n` +
+      `4️⃣ *➕ Vender:* Capture toda venta realizada en ruta (*Efectivo, Transferencia o Crédito con Anticipo*) y envíe el comprobante foliado con *📲 Mandar Nota por WhatsApp*.\n\n` +
+      `5️⃣ *💰 Mi Corte:* Verifique automáticamente las cajas exactas a devolver en Almacén y el efectivo exacto a liquidar en Administración.`
   },
 
   clientes: {
     id: "clientes",
-    shortTab: "🛒 Guía Pública Clientes",
-    badge: "PÚBLICO • VISIBLE EN LA TIENDA EN LÍNEA",
-    title: "Explicación Pública para Clientes (Tienda Web)",
-    people: "Clientes de Tiendas, Carnicerías, Restaurantes y Fruterías",
+    shortTab: "🛒 Guía para Clientes",
+    badge: "PÚBLICO • INFORMACIÓN VISIBLE EN TIENDA EN LÍNEA",
+    title: "Guía Pública de Pedidos para Clientes",
+    people: "Clientes Comerciales (Tiendas, Carnicerías, Restaurantes y Fruterías)",
     summary:
-      "Esta es la explicación amigable y 100% pública que ya ven los clientes directamente al entrar a aguacates-salinas.web.app (no muestra absolutamente nada interno de almacén, choferes ni administración).",
+      "Texto informativo 100% público visible en aguacates-salinas.web.app para orientar a los compradores sobre cómo realizar sus pedidos en línea (sin incluir información operativa interna).",
     accessNote:
-      "Pública en https://aguacates-salinas.web.app — También puedes copiar este texto si un cliente te pregunta por WhatsApp cómo pedir en la página.",
+      "Visible públicamente en https://aguacates-salinas.web.app — Disponible para compartir por WhatsApp con clientes que soliciten orientación.",
     steps: [
       {
         num: "1",
         icon: "🥑",
-        heading: "Paso 1: Elige tus Cajas y Tamaño",
+        heading: "Paso 1: Selección de cajas por calibre",
         bodyHtml:
-          "Entra al enlace de la tienda y toca el botón <strong>+</strong> en los tamaños que ocupes hoy (<strong>Super, Extra, Primera o Media</strong>). Puedes combinar varios calibres y ver tu total al momento con los precios actualizados del día.",
+          "Ingrese al portal de pedidos y presione el botón <strong>(+)</strong> en los calibres requeridos (<strong>Super, Extra, Primera o Media</strong>), visualizando al instante los precios vigentes del día.",
         example: ""
       },
       {
         num: "2",
         icon: "📍",
-        heading: "Paso 2: Tus Datos, Punto de Madurez y Ubicación",
+        heading: "Paso 2: Datos de entrega, madurez y ubicación GPS",
         bodyHtml:
-          "Escribe el nombre de tu negocio, tu celular, cómo prefieres tu aguacate (<strong>Maduro listo para hoy, Sazón, Quebrado o Verde</strong>) y toca <strong>📍 Adjuntar mi ubicación GPS</strong> si estás en tu local para llegar directo. Tu teléfono guardará tus datos para tus próximos pedidos.",
+          "Indique el nombre de su establecimiento, teléfono de contacto, punto de madurez requerido (<strong>Maduro listo para hoy, Sazón, Quebrado o Verde</strong>) y opcionalmente pulse <strong>📍 Adjuntar mi ubicación GPS</strong> para agilizar la entrega.",
         example: ""
       },
       {
         num: "3",
         icon: "🚚",
-        heading: "Paso 3: Confirma en 1 Toque y Paga al Recibir",
+        heading: "Paso 3: Confirmación y pago contra entrega",
         bodyHtml:
-          "Presiona <strong>Confirmar Pedido en Línea</strong>. Tu orden entra directo con folio a nuestro reparto, puedes ver en vivo cuando va en camino desde el botón <strong>Mis Pedidos</strong> y pagas al recibir tu mercancía (<strong>Efectivo o Transferencia</strong>).",
+          "Presione <strong>Confirmar Pedido en Línea</strong> para generar su folio de atención. Podrá consultar el estatus de despacho en tiempo real desde <strong>Mis Pedidos</strong> y realizar su pago al recibir la mercancía (<strong>Efectivo o Transferencia</strong>).",
         example: ""
       }
     ],
     whatsappText:
-      `🥑 *¿CÓMO HACER TU PEDIDO EN LÍNEA? — COMERCIALIZADORA SALINAS*\n\n` +
-      `Levanta tu pedido en menos de 30 segundos aquí:\n` +
+      `🥑 *GUÍA PARA REALIZAR SU PEDIDO EN LÍNEA — COMERCIALIZADORA SALINAS*\n\n` +
+      `Solicite su pedido en menos de un minuto desde nuestro portal oficial:\n` +
       `👉 https://aguacates-salinas.web.app\n\n` +
-      `1️⃣ *Elige tus cajas:* Toca *(+)* en los tamaños que necesites (*Super, Extra, Primera o Media*). Ahí mismo ves el precio del día.\n` +
-      `2️⃣ *Indica tu madurez y datos:* Elige si lo quieres *Maduro para hoy, Sazón, Quebrado o Verde*. Si estás en tu negocio, toca *📍 Adjuntar mi ubicación GPS* una sola vez (tu celular recordará tus datos para la próxima).\n` +
-      `3️⃣ *Confirma y recibe:* Toca *Confirmar Pedido en Línea* y paga al recibir tu mercancía en *Efectivo o Transferencia*.\n\n` +
+      `1️⃣ *Seleccione sus cajas:* Pulse *(+)* en los calibres que requiera (*Super, Extra, Primera o Media*) con precios actualizados al día.\n` +
+      `2️⃣ *Indique madurez y domicilio:* Elija el punto de madurez (*Maduro para hoy, Sazón, Quebrado o Verde*) y, si se encuentra en su negocio, pulse *📍 Adjuntar mi ubicación GPS* (sus datos quedarán guardados para futuras compras).\n` +
+      `3️⃣ *Confirme y pague al recibir:* Presione *Confirmar Pedido en Línea* y liquide al recibir su mercancía mediante *Efectivo o Transferencia*.\n\n` +
       `_“La lealtad es escasa en estos tiempos y nosotros la valoramos. Gracias por tu lealtad.”_`
   }
 };

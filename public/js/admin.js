@@ -1320,7 +1320,7 @@ function renderGpsMapAndChips() {
     return { place: p, status: st };
   });
 
-  // Active orders with coordinates ("Foquitos")
+  // Active orders with coordinates
   const activeOrders = allOrders.filter(
     (o) => o.status === "nuevo" || o.status === "confirmado" || o.status === "en_ruta"
   );
@@ -1335,7 +1335,7 @@ function renderGpsMapAndChips() {
   if (summaryEl) {
     summaryEl.innerHTML = `
       <span><strong>🏪 Negocios (${validPlaces.length}):</strong> 🟢 Compraron: <strong>${soldCount}</strong> • 🟡 Visitados s/venta: <strong>${visitedCount}</strong> • ⚪ Sin visita: <strong>${pendingCount}</strong></span>
-      <span><strong>💡 Foquitos Pedidos:</strong> <strong>${pinnedOrders.length}</strong> en mapa${unpinnedActiveCount > 0 ? ` (${unpinnedActiveCount} sin GPS aún)` : ""}</span>
+      <span><strong>📍 Pedidos Activos en Mapa:</strong> <strong>${pinnedOrders.length}</strong>${unpinnedActiveCount > 0 ? ` (${unpinnedActiveCount} pendientes de ubicar)` : ""}</span>
     `;
   }
 
@@ -1441,17 +1441,17 @@ function renderGpsMapAndChips() {
     mapFocusMarkers.set(`driver:${loc.id}`, m);
   });
 
-  // 3. Blinking Order "Foquitos" (New & En-Ruta Online Orders)
+  // 3. Active Order Alert Indicators (New & En-Ruta Online Orders)
   const drivers = storeSettings.drivers || [];
   for (const { ord, coords } of pinnedOrders) {
     boundsPoints.push([coords.lat, coords.lng]);
     const isNew = ord.status === "nuevo";
-    const wrapClass = isNew ? "pin-foquito-wrap" : "pin-foquito-wrap is-route";
+    const wrapClass = isNew ? "pin-order-alert-wrap" : "pin-order-alert-wrap is-route";
     const coreEmoji = isNew ? "🚨" : "📦";
 
-    const foquitoIcon = window.L.divIcon({
+    const orderAlertIcon = window.L.divIcon({
       className: "salinas-div-icon",
-      html: `<div class="${wrapClass}"><span class="pulse-ring"></span><div class="pin-foquito-core">${coreEmoji}</div></div>`,
+      html: `<div class="${wrapClass}"><span class="pulse-ring"></span><div class="pin-order-alert-core">${coreEmoji}</div></div>`,
       iconSize: [34, 34],
       iconAnchor: [17, 17],
       popupAnchor: [0, -16]
@@ -1488,7 +1488,7 @@ function renderGpsMapAndChips() {
       </div>
     `;
 
-    const m = window.L.marker([coords.lat, coords.lng], { icon: foquitoIcon, zIndexOffset: 1000 })
+    const m = window.L.marker([coords.lat, coords.lng], { icon: orderAlertIcon, zIndexOffset: 1000 })
       .addTo(mapLayerGroup)
       .bindPopup(popupHtml);
     mapFocusMarkers.set(`order:${ord.id}`, m);
@@ -1518,7 +1518,7 @@ document.getElementById("gpsDriverChips").addEventListener("click", (e) => {
   }
 });
 
-// Delegated listener for assigning driver right inside a Map Foquito Popup
+// Delegated listener for assigning driver right inside a Map Order Popup
 document.getElementById("adminLiveMap")?.addEventListener("click", async (e) => {
   const assignBtn = e.target.closest("button[data-map-assign-btn]");
   if (!assignBtn) return;
@@ -2135,7 +2135,7 @@ function renderOrdersList() {
       const stLabel = STATUS_LABELS[ord.status] || "Nuevo";
       const coords = resolveOrderCoords(ord);
       const mapBtnHtml = coords
-        ? `<button type="button" class="btn btn-outline btn-sm" data-action="focus-order-map" data-id="${ord.id}" style="border-color:#dc2626;color:#991b1b;">🔴 Ver Foquito Mapa</button>`
+        ? `<button type="button" class="btn btn-outline btn-sm" data-action="focus-order-map" data-id="${ord.id}" style="border-color:#dc2626;color:#991b1b;">📍 Ver en Mapa</button>`
         : `<button type="button" class="btn btn-outline btn-sm" data-action="pin-order" data-id="${ord.id}">📍 Ubicar en Mapa</button>`;
 
       const chipsHtml = (ord.items || [])
@@ -2354,7 +2354,7 @@ document.getElementById("ordersAdminContainer").addEventListener("click", async 
             { merge: true }
           );
         });
-        showToast(`🔴 ¡Foquito encendido en el mapa para ${ord.customerName}!`);
+        showToast(`📍 Ubicación del pedido registrada en el mapa para ${ord.customerName}.`);
       } catch (err) {
         console.error(err);
         showToast("No se pudo guardar la ubicación del pedido.");
@@ -2864,7 +2864,7 @@ function renderAdminManualTab() {
         <div class="manual-step-body">${st.bodyHtml}</div>
         ${
           st.example
-            ? `<div class="manual-example-box">💡 <strong>Con peras y manzanas:</strong> ${escapeHtml(st.example)}</div>`
+            ? `<div class="manual-example-box">💡 <strong>Ejemplo práctico:</strong> ${escapeHtml(st.example)}</div>`
             : ""
         }
       </article>
@@ -2878,7 +2878,7 @@ function renderAdminManualTab() {
         <div>
           <span class="ripeness-badge" style="margin-bottom:6px;display:inline-block;">${escapeHtml(activeManual.badge)}</span>
           <h3 class="serif-title" style="font-size:1.3rem;color:var(--green-950);margin-bottom:2px;">${escapeHtml(activeManual.title)}</h3>
-          <div style="font-size:0.9rem;font-weight:800;color:var(--green-800);">👥 Dirigido a: ${escapeHtml(activeManual.people)}</div>
+          <div style="font-size:0.9rem;font-weight:800;color:var(--green-800);">👥 Puesto / Área: ${escapeHtml(activeManual.people)}</div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button type="button" id="btnCopyManualWa" class="btn btn-outline btn-sm">📋 Copiar para WhatsApp</button>
@@ -2950,7 +2950,7 @@ function printStaffManual(m) {
           <img src="assets/logo-salinas.png" style="height:15mm;object-fit:contain;" alt="Salinas">
           <div>
             <div style="font-size:13pt;font-weight:900;color:#132615;">${escapeHtml(m.title)}</div>
-            <div style="font-size:9.5pt;font-weight:700;color:#2e5a31;">Personal: ${escapeHtml(m.people)}</div>
+            <div style="font-size:9.5pt;font-weight:700;color:#2e5a31;">Puesto / Área: ${escapeHtml(m.people)}</div>
           </div>
         </div>
         <div style="text-align:right;font-size:8pt;color:#475569;">

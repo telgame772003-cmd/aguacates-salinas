@@ -344,7 +344,7 @@ function startGpsSharing() {
   gpsDot.textContent = "🟢";
   gpsLabel.textContent = "GPS En Vivo";
   requestRouteWakeLock();
-  showToast("GPS activo: Oficina y Alejandro ven tu ruta en tiempo real.");
+  showToast("GPS activo: Administración supervisa tu recorrido en tiempo real.");
 
   gpsWatchId = navigator.geolocation.watchPosition(
     async (pos) => {
