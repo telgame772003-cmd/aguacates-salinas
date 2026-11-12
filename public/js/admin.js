@@ -228,7 +228,7 @@ btnDownloadBackup.addEventListener("click", async () => {
     showToast("Error al generar el respaldo.");
   } finally {
     btnDownloadBackup.disabled = false;
-    btnDownloadBackup.textContent = "💾 Respaldar Datos";
+    btnDownloadBackup.innerHTML = '💾 <span class="hide-mobile">Respaldar</span>';
   }
 });
 
@@ -464,13 +464,19 @@ function renderWarehouseModule() {
       .join("");
   }
 
-  // 3. Trips Table
+  // 3. Trips Table (Desktop) + Native Cards (Mobile)
   const tbody = document.getElementById("whTripsTableBody");
   const tfoot = document.getElementById("whTripsTableFoot");
+  const mobileList = document.getElementById("whMobileTripsList");
   const trips = currentWhDoc.trips || [];
 
   if (trips.length === 0) {
     tbody.innerHTML = `<tr><td colspan="14" style="padding:20px;color:var(--slate-500);">Sin vueltas registradas en esta fecha. Usa el formulario de arriba cada vez que salga un carro.</td></tr>`;
+    mobileList.innerHTML = `
+      <div class="cart-empty" style="margin-bottom:0;">
+        Sin vueltas registradas en esta fecha. Usa el formulario de arriba cada vez que salga un carro.
+      </div>
+    `;
   } else {
     tbody.innerHTML = trips
       .map((t, idx) => {
@@ -511,6 +517,76 @@ function renderWarehouseModule() {
         `;
       })
       .join("");
+
+    const mobileCardsHtml = trips
+      .map((t, idx) => {
+        const oM = Number(t.out?.M) || 0;
+        const oP = Number(t.out?.P) || 0;
+        const oE = Number(t.out?.E) || 0;
+        const oS = Number(t.out?.S) || 0;
+        const rM = Number(t.ret?.M) || 0;
+        const rP = Number(t.ret?.P) || 0;
+        const rE = Number(t.ret?.E) || 0;
+        const rS = Number(t.ret?.S) || 0;
+        const totO = oM + oP + oE + oS;
+        const totR = rM + rP + rE + rS;
+        const net = totO - totR;
+
+        return `
+          <div class="wh-trip-mcard">
+            <div class="wh-trip-mcard-head">
+              <div>
+                <span style="font-weight:800;color:var(--slate-500);font-size:0.8rem;">#${idx + 1} • ${escapeHtml(t.time || "")}</span>
+                <strong style="display:block;font-size:1.02rem;color:var(--green-950);">🚗 ${escapeHtml(t.driver)}</strong>
+              </div>
+              <span class="ripeness-badge">${escapeHtml(t.ripeness || "Surtido")}</span>
+            </div>
+
+            ${t.note ? `<div style="font-size:0.8rem;color:var(--slate-700);margin-bottom:8px;">📝 ${escapeHtml(t.note)}</div>` : ""}
+
+            <div class="wh-trip-mcard-boxes">
+              <div class="wh-mini-box-group">
+                <div class="wh-mini-box-label">Salida (${totO} cajas)</div>
+                <div class="wh-mini-box-vals">
+                  <span>M:${oM}</span><span>P:${oP}</span><span>E:${oE}</span><span>S:${oS}</span>
+                </div>
+              </div>
+              <div class="wh-mini-box-group is-ret">
+                <div class="wh-mini-box-label">Devolución (${totR} cajas)</div>
+                <div class="wh-mini-box-vals">
+                  <span>M:${rM}</span><span>P:${rP}</span><span>E:${rE}</span><span>S:${rS}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="wh-trip-mcard-foot">
+              <div>
+                <span style="font-size:0.76rem;color:var(--slate-500);font-weight:700;">VENDIDO NETO:</span>
+                <strong style="font-size:1.05rem;color:var(--green-900);margin-left:4px;">${net} cajas</strong>
+              </div>
+              <button type="button" class="btn btn-outline btn-sm" data-edit-trip="${escapeHtml(t.id)}">
+                Devolución / Editar
+              </button>
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+
+    const mobileSummaryCard = `
+      <div class="wh-trip-mcard" style="background:var(--green-100);border-color:var(--green-700);">
+        <div style="font-weight:800;color:var(--green-950);font-size:0.88rem;margin-bottom:6px;">SUMAS DEL DÍA</div>
+        <div style="font-size:0.82rem;color:var(--slate-900);display:flex;flex-direction:column;gap:4px;">
+          <div><strong>Salidas (${totals.totalOut}):</strong> M:${totals.out.M} • P:${totals.out.P} • E:${totals.out.E} • S:${totals.out.S}</div>
+          <div><strong>Devoluciones (${totals.totalRet}):</strong> M:${totals.ret.M} • P:${totals.ret.P} • E:${totals.ret.E} • S:${totals.ret.S}</div>
+          <div style="font-size:0.95rem;color:var(--green-950);padding-top:4px;border-top:1px solid var(--slate-300);">
+            <strong>Total Vendido Neto (Total V.): ${totals.totalSold} cajas</strong>
+          </div>
+        </div>
+      </div>
+    `;
+
+    mobileList.innerHTML = mobileCardsHtml + mobileSummaryCard;
   }
 
   tfoot.innerHTML = `
@@ -659,10 +735,10 @@ document.getElementById("whNewTripForm").addEventListener("submit", async (e) =>
   }
 });
 
-// Edit / Return Modal for Trips
+// Edit / Return Modal for Trips (handles both Desktop table and Mobile cards)
 const returnModal = document.getElementById("returnModal");
 
-document.getElementById("whTripsTableBody").addEventListener("click", (e) => {
+document.getElementById("tabWarehouse").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-edit-trip]");
   if (!btn) return;
   const tripId = btn.dataset.editTrip;
@@ -1370,11 +1446,11 @@ function renderDriversEditor() {
   listEl.innerHTML = drivers
     .map(
       (drv, idx) => `
-      <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:8px;align-items:center;padding:10px;background:var(--green-50);border-radius:10px;border:1px solid var(--slate-200);">
-        <input type="text" class="form-control drv-edit-name" data-idx="${idx}" value="${escapeHtml(drv.name)}" placeholder="Nombre" style="padding:7px 10px;font-weight:700;">
-        <input type="tel" class="form-control drv-edit-phone" data-idx="${idx}" value="${escapeHtml(drv.phone || "")}" placeholder="WhatsApp (10 dígitos)" style="padding:7px 10px;">
+      <div class="driver-edit-row">
+        <input type="text" class="form-control drv-edit-name" data-idx="${idx}" value="${escapeHtml(drv.name)}" placeholder="Nombre" style="font-weight:700;">
+        <input type="tel" class="form-control drv-edit-phone" data-idx="${idx}" value="${escapeHtml(drv.phone || "")}" placeholder="WhatsApp (10 dígitos)">
         <button type="button" class="btn btn-primary btn-sm" data-save-driver="${idx}">Guardar</button>
-        <button type="button" class="btn btn-outline btn-sm" data-remove-driver="${idx}" style="color:var(--red-600);border-color:#eccaca;">✕</button>
+        <button type="button" class="btn btn-outline btn-sm" data-remove-driver="${idx}" style="color:var(--red-600);border-color:#eccaca;">Quitar</button>
       </div>
     `
     )
