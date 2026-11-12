@@ -3,6 +3,7 @@ import {
   getFirestore,
   doc,
   getDoc,
+  getDocs,
   setDoc,
   addDoc,
   updateDoc,
@@ -30,6 +31,7 @@ export const db = getFirestore(app);
 export {
   doc,
   getDoc,
+  getDocs,
   setDoc,
   addDoc,
   updateDoc,

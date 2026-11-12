@@ -39,6 +39,13 @@ service cloud.firestore {
       allow write: if docId != 'security_init' && hasValidAdminProof();
     }
 
+    // Control Diario de Almacén (Inventario Inicial, Vueltas con Madurez, Devoluciones y Corte)
+    match /warehouse_days/{dateId} {
+      allow read: if true;
+      allow write: if hasValidAdminProof();
+    }
+
+    // Pedidos en línea
     match /orders/{orderId} {
       allow read: if true;
 

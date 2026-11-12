@@ -1,0 +1,69 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isKeyActive(keyHash) {
+      let keyDoc = getAfter(/databases/$(database)/documents/admin_keys/$(keyHash));
+      return keyDoc != null && keyDoc.data.active == true;
+    }
+
+    function hasValidAdminProof() {
+      let proofId = request.resource.data.proofId;
+      let proof = getAfter(/databases/$(database)/documents/admin_proofs/$(proofId));
+      return proofId is string
+        && proof != null
+        && proof.data.keyHash is string
+        && isKeyActive(proof.data.keyHash);
+    }
+
+    match /admin_keys/{keyHash} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if !exists(/databases/$(database)/documents/settings/security_init)
+        || hasValidAdminProof();
+      allow update: if hasValidAdminProof();
+      allow delete: if false;
+    }
+
+    match /admin_proofs/{proofId} {
+      allow read: if false;
+      allow create: if request.resource.data.keyHash is string
+        && isKeyActive(request.resource.data.keyHash);
+      allow update, delete: if false;
+    }
+
+    match /settings/{docId} {
+      allow read: if true;
+      allow create: if docId == 'security_init'
+        && !exists(/databases/$(database)/documents/settings/security_init);
+      allow write: if docId != 'security_init' && hasValidAdminProof();
+    }
+
+    // Control Diario de Almacén (Inventario Inicial, Vueltas con Madurez, Devoluciones y Corte)
+    match /warehouse_days/{dateId} {
+      allow read: if true;
+      allow write: if hasValidAdminProof();
+    }
+
+    // Pedidos en línea
+    match /orders/{orderId} {
+      allow read: if true;
+
+      allow create: if request.resource.data.status == 'nuevo'
+        && request.resource.data.customerName is string
+        && request.resource.data.customerName.size() >= 2
+        && request.resource.data.customerName.size() <= 120
+        && request.resource.data.phone is string
+        && request.resource.data.phone.size() >= 8
+        && request.resource.data.phone.size() <= 25
+        && request.resource.data.totalBoxes is number
+        && request.resource.data.totalBoxes >= 1
+        && request.resource.data.totalBoxes <= 2000
+        && request.resource.data.totalAmount is number
+        && request.resource.data.totalAmount >= 0;
+
+      allow update: if hasValidAdminProof();
+      allow delete: if false;
+    }
+  }
+}

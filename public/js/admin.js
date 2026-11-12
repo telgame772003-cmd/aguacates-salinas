@@ -2,6 +2,7 @@ import {
   db,
   doc,
   getDoc,
+  getDocs,
   collection,
   query,
   orderBy,
@@ -17,6 +18,13 @@ import {
 
 const SESSION_HASH_KEY = "salinas_admin_hash_v1";
 
+function getLocalDateStr(dateObj = new Date()) {
+  const y = dateObj.getFullYear();
+  const m = String(dateObj.getMonth() + 1).padStart(2, "0");
+  const d = String(dateObj.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 let currentKeyHash = null;
 let isSystemInitialized = true;
 let storeSettings = structuredClone(DEFAULT_STORE_SETTINGS);
@@ -24,8 +32,24 @@ let allOrders = [];
 let statusFilter = "todos";
 let dateFilter = "all";
 let searchQuery = "";
+
+// Warehouse state
+let selectedWhDate = getLocalDateStr();
+let currentWhDoc = createEmptyWhDoc(selectedWhDate);
+
 let ordersUnsub = null;
 let settingsUnsub = null;
+let whUnsub = null;
+
+function createEmptyWhDoc(dateStr) {
+  return {
+    date: dateStr,
+    openingStock: { M: 0, P: 0, E: 0, S: 0 },
+    extraEntries: { M: 0, P: 0, E: 0, S: 0 },
+    observations: "",
+    trips: []
+  };
+}
 
 // DOM
 const loginView = document.getElementById("loginView");
@@ -35,6 +59,7 @@ const loginSubtitle = document.getElementById("loginSubtitle");
 const adminPasswordInput = document.getElementById("adminPasswordInput");
 const btnLoginSubmit = document.getElementById("btnLoginSubmit");
 const btnLogout = document.getElementById("btnLogout");
+const btnDownloadBackup = document.getElementById("btnDownloadBackup");
 const toastBox = document.getElementById("toastBox");
 
 function showToast(msg) {
@@ -51,13 +76,13 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
-// Check initial security state & saved session
+// ================= AUTHENTICATION =================
 async function checkInitialAuth() {
   try {
     const initSnap = await getDoc(doc(db, "settings", "security_init"));
     isSystemInitialized = initSnap.exists();
     if (!isSystemInitialized) {
-      loginSubtitle.textContent = "Configuración inicial: define tu Clave Maestra de Administración para activar el panel.";
+      loginSubtitle.textContent = "Configuración inicial: define tu Clave Maestra de Administración.";
       btnLoginSubmit.textContent = "Crear Clave y Activar Panel";
     }
 
@@ -94,35 +119,22 @@ loginForm.addEventListener("submit", async (e) => {
 
     if (!isSystemInitialized) {
       await executeAdminBatch(hash, (batch, proofId) => {
-        batch.set(doc(db, "admin_keys", hash), {
-          active: true,
-          proofId,
-          createdAt: serverTimestamp()
-        });
-        batch.set(doc(db, "settings", "security_init"), {
-          initialized: true,
-          createdAt: serverTimestamp()
-        });
-        batch.set(doc(db, "settings", "store"), {
-          ...DEFAULT_STORE_SETTINGS,
-          proofId,
-          updatedAt: serverTimestamp()
-        });
+        batch.set(doc(db, "admin_keys", hash), { active: true, proofId, createdAt: serverTimestamp() });
+        batch.set(doc(db, "settings", "security_init"), { initialized: true, createdAt: serverTimestamp() });
+        batch.set(doc(db, "settings", "store"), { ...DEFAULT_STORE_SETTINGS, proofId, updatedAt: serverTimestamp() });
       });
       isSystemInitialized = true;
       currentKeyHash = hash;
       persistHash(hash);
       adminPasswordInput.value = "";
       enterDashboard();
-      showToast("Panel activado y catálogo inicial publicado.");
+      showToast("Sistema activado correctamente.");
       return;
     }
 
     const keySnap = await getDoc(doc(db, "admin_keys", hash));
     if (!keySnap.exists() || keySnap.data().active !== true) {
       showToast("Clave incorrecta. Verifica e intenta nuevamente.");
-      btnLoginSubmit.disabled = false;
-      btnLoginSubmit.textContent = prevText;
       return;
     }
 
@@ -130,7 +142,7 @@ loginForm.addEventListener("submit", async (e) => {
     persistHash(hash);
     adminPasswordInput.value = "";
     enterDashboard();
-    showToast("Bienvenido al Panel de Administración.");
+    showToast("Sesión iniciada.");
   } catch (err) {
     console.error("Error en login:", err);
     showToast("Error al autenticar. Intenta nuevamente.");
@@ -154,8 +166,10 @@ btnLogout.addEventListener("click", () => {
   sessionStorage.removeItem(SESSION_HASH_KEY);
   if (ordersUnsub) ordersUnsub();
   if (settingsUnsub) settingsUnsub();
+  if (whUnsub) whUnsub();
   dashboardView.style.display = "none";
   btnLogout.style.display = "none";
+  btnDownloadBackup.style.display = "none";
   loginView.style.display = "flex";
 });
 
@@ -163,7 +177,10 @@ function enterDashboard() {
   loginView.style.display = "none";
   dashboardView.style.display = "block";
   btnLogout.style.display = "inline-flex";
+  btnDownloadBackup.style.display = "inline-flex";
+  document.getElementById("whDatePicker").value = selectedWhDate;
   startRealtimeListeners();
+  subscribeWarehouseDay(selectedWhDate);
 }
 
 // Tabs switching
@@ -178,6 +195,44 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
   });
 });
 
+// ================= BACKUP JSON DOWNLOAD =================
+btnDownloadBackup.addEventListener("click", async () => {
+  btnDownloadBackup.disabled = true;
+  btnDownloadBackup.textContent = "Generando...";
+  try {
+    const [ordersSnap, whSnap] = await Promise.all([
+      getDocs(query(collection(db, "orders"), orderBy("createdAtIso", "desc"), limit(500))),
+      getDocs(collection(db, "warehouse_days"))
+    ]);
+
+    const backupPayload = {
+      exportedAt: new Date().toISOString(),
+      project: "Aguacates Salinas",
+      storeSettings,
+      warehouseDays: whSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+      orders: ordersSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
+    };
+
+    const blob = new Blob([JSON.stringify(backupPayload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Respaldo_Aguacates_Salinas_${getLocalDateStr()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showToast("Respaldo completo descargado en tu equipo.");
+  } catch (err) {
+    console.error(err);
+    showToast("Error al generar el respaldo.");
+  } finally {
+    btnDownloadBackup.disabled = false;
+    btnDownloadBackup.textContent = "💾 Respaldar Datos";
+  }
+});
+
+// ================= REALTIME LISTENERS =================
 function startRealtimeListeners() {
   if (settingsUnsub) settingsUnsub();
   if (ordersUnsub) ordersUnsub();
@@ -196,7 +251,9 @@ function startRealtimeListeners() {
       };
     }
     populateCatalogForm();
+    updateBroadcastPreview();
     renderDriversEditor();
+    populateTripDriverSelect();
     renderOrdersList();
   });
 
@@ -208,6 +265,591 @@ function startRealtimeListeners() {
   });
 }
 
+function subscribeWarehouseDay(dateStr) {
+  if (whUnsub) whUnsub();
+  selectedWhDate = dateStr;
+
+  whUnsub = onSnapshot(doc(db, "warehouse_days", dateStr), (snap) => {
+    if (snap.exists()) {
+      const d = snap.data();
+      currentWhDoc = {
+        date: dateStr,
+        openingStock: { M: 0, P: 0, E: 0, S: 0, ...(d.openingStock || {}) },
+        extraEntries: { M: 0, P: 0, E: 0, S: 0, ...(d.extraEntries || {}) },
+        observations: d.observations || "",
+        trips: Array.isArray(d.trips) ? d.trips : []
+      };
+    } else {
+      currentWhDoc = createEmptyWhDoc(dateStr);
+    }
+    renderWarehouseModule();
+    updateKPIs();
+  });
+}
+
+// ================= WAREHOUSE MODULE LOGIC =================
+function computeWarehouseTotals(whDoc) {
+  const cals = ["M", "P", "E", "S"];
+  const init = {};
+  const extra = {};
+  const out = { M: 0, P: 0, E: 0, S: 0 };
+  const ret = { M: 0, P: 0, E: 0, S: 0 };
+  const sold = {};
+  const finalStock = {};
+
+  for (const c of cals) {
+    init[c] = Number(whDoc.openingStock?.[c]) || 0;
+    extra[c] = Number(whDoc.extraEntries?.[c]) || 0;
+  }
+
+  for (const t of whDoc.trips || []) {
+    for (const c of cals) {
+      out[c] += Number(t.out?.[c]) || 0;
+      ret[c] += Number(t.ret?.[c]) || 0;
+    }
+  }
+
+  let totalInit = 0;
+  let totalExtra = 0;
+  let totalOut = 0;
+  let totalRet = 0;
+  let totalSold = 0;
+  let totalFinal = 0;
+
+  for (const c of cals) {
+    sold[c] = out[c] - ret[c];
+    finalStock[c] = init[c] + extra[c] - sold[c];
+    totalInit += init[c];
+    totalExtra += extra[c];
+    totalOut += out[c];
+    totalRet += ret[c];
+    totalSold += sold[c];
+    totalFinal += finalStock[c];
+  }
+
+  return {
+    init, extra, out, ret, sold, finalStock,
+    totalInit, totalExtra, totalOut, totalRet, totalSold, totalFinal
+  };
+}
+
+function populateTripDriverSelect() {
+  const sel = document.getElementById("tripDriver");
+  const drivers = storeSettings.drivers || [];
+  if (drivers.length === 0) {
+    sel.innerHTML = `<option value="Sin nombre">Agrega un chofer en pestaña Choferes</option>`;
+    return;
+  }
+  const prev = sel.value;
+  sel.innerHTML = drivers
+    .map((d) => `<option value="${escapeHtml(d.name)}">${escapeHtml(d.name)}</option>`)
+    .join("");
+  if (prev && drivers.some((d) => d.name === prev)) {
+    sel.value = prev;
+  }
+}
+
+function renderWarehouseModule() {
+  const totals = computeWarehouseTotals(currentWhDoc);
+
+  // Fill Opening Form inputs (only if user isn't actively typing in them)
+  const activeEl = document.activeElement;
+  const setValIfIdle = (id, val) => {
+    const el = document.getElementById(id);
+    if (el && activeEl !== el) el.value = val;
+  };
+  setValIfIdle("whInitM", totals.init.M);
+  setValIfIdle("whInitP", totals.init.P);
+  setValIfIdle("whInitE", totals.init.E);
+  setValIfIdle("whInitS", totals.init.S);
+  setValIfIdle("whExtraM", totals.extra.M);
+  setValIfIdle("whExtraP", totals.extra.P);
+  setValIfIdle("whExtraE", totals.extra.E);
+  setValIfIdle("whExtraS", totals.extra.S);
+  setValIfIdle("whObservations", currentWhDoc.observations || "");
+
+  // 1. Live Stock Cards
+  const calLabels = {
+    M: "M • Media / Seg.",
+    P: "P • Primera",
+    E: "E • Extra",
+    S: "S • Super"
+  };
+
+  const cardsHtml = ["M", "P", "E", "S"]
+    .map((c) => {
+      const availBase = totals.init[c] + totals.extra[c];
+      return `
+        <div class="wh-stock-card">
+          <div class="wh-stock-title">${calLabels[c]}</div>
+          <div class="wh-stock-current">${totals.finalStock[c]} <span style="font-size:0.85rem;font-weight:600;">cajas</span></div>
+          <div class="wh-stock-meta">
+            Base: <strong>${availBase}</strong> &nbsp;•&nbsp; Vendido: <strong>${totals.sold[c]}</strong>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+
+  const totalBase = totals.totalInit + totals.totalExtra;
+  document.getElementById("whStockCards").innerHTML =
+    cardsHtml +
+    `
+      <div class="wh-stock-card wh-total-card">
+        <div class="wh-stock-title">Total en Piso (T. INV.)</div>
+        <div class="wh-stock-current">${totals.totalFinal} <span style="font-size:0.85rem;font-weight:600;">cajas</span></div>
+        <div class="wh-stock-meta">
+          Base: <strong>${totalBase}</strong> &nbsp;•&nbsp; Total V.: <strong>${totals.totalSold}</strong>
+        </div>
+      </div>
+    `;
+
+  // 2. Driver Summary Cards (Concentrado por Chofer)
+  const byDriver = new Map();
+  for (const t of currentWhDoc.trips || []) {
+    const name = t.driver || "Chofer";
+    if (!byDriver.has(name)) {
+      byDriver.set(name, {
+        name,
+        vueltas: 0,
+        lastRipeness: "",
+        lastTime: "",
+        out: { M: 0, P: 0, E: 0, S: 0 },
+        ret: { M: 0, P: 0, E: 0, S: 0 },
+        totalOut: 0,
+        totalRet: 0
+      });
+    }
+    const g = byDriver.get(name);
+    g.vueltas++;
+    g.lastRipeness = t.ripeness || "Surtido";
+    g.lastTime = t.time || "";
+    for (const c of ["M", "P", "E", "S"]) {
+      const o = Number(t.out?.[c]) || 0;
+      const r = Number(t.ret?.[c]) || 0;
+      g.out[c] += o;
+      g.ret[c] += r;
+      g.totalOut += o;
+      g.totalRet += r;
+    }
+  }
+
+  const drvCardsEl = document.getElementById("whDriverSummaryCards");
+  if (byDriver.size === 0) {
+    drvCardsEl.innerHTML = `<div class="cart-empty" style="grid-column:1/-1;margin-bottom:0;">Aún no se han registrado salidas de carros en esta fecha.</div>`;
+  } else {
+    drvCardsEl.innerHTML = Array.from(byDriver.values())
+      .map((g) => {
+        const net = g.totalOut - g.totalRet;
+        const netByCal = ["M", "P", "E", "S"]
+          .map((c) => `${c}:${g.out[c] - g.ret[c]}`)
+          .join(" • ");
+        return `
+          <div class="driver-route-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+              <strong style="font-size:1.02rem;color:var(--green-950);">🚗 ${escapeHtml(g.name)}</strong>
+              <span class="ripeness-badge">${g.vueltas} vuelta${g.vueltas === 1 ? "" : "s"}</span>
+            </div>
+            <div style="font-size:0.8rem;color:var(--slate-700);margin-bottom:6px;">
+              Última carga (${escapeHtml(g.lastTime)}): <strong>${escapeHtml(g.lastRipeness)}</strong>
+            </div>
+            <div style="font-size:0.82rem;color:var(--slate-700);background:var(--green-50);padding:6px 8px;border-radius:8px;">
+              Salida: <strong>${g.totalOut}</strong> &nbsp;|&nbsp; Dev.: <strong>${g.totalRet}</strong> &nbsp;→&nbsp;
+              <strong style="color:var(--green-900);">Neto Vendido: ${net}</strong>
+              <div style="font-size:0.74rem;color:var(--slate-500);margin-top:2px;">Neto por calibre: ${netByCal}</div>
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+  }
+
+  // 3. Trips Table
+  const tbody = document.getElementById("whTripsTableBody");
+  const tfoot = document.getElementById("whTripsTableFoot");
+  const trips = currentWhDoc.trips || [];
+
+  if (trips.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="14" style="padding:20px;color:var(--slate-500);">Sin vueltas registradas en esta fecha. Usa el formulario de arriba cada vez que salga un carro.</td></tr>`;
+  } else {
+    tbody.innerHTML = trips
+      .map((t, idx) => {
+        const oM = Number(t.out?.M) || 0;
+        const oP = Number(t.out?.P) || 0;
+        const oE = Number(t.out?.E) || 0;
+        const oS = Number(t.out?.S) || 0;
+        const rM = Number(t.ret?.M) || 0;
+        const rP = Number(t.ret?.P) || 0;
+        const rE = Number(t.ret?.E) || 0;
+        const rS = Number(t.ret?.S) || 0;
+        const net = (oM + oP + oE + oS) - (rM + rP + rE + rS);
+
+        return `
+          <tr>
+            <td style="font-weight:800;color:var(--slate-500);">${idx + 1}</td>
+            <td style="font-weight:700;">${escapeHtml(t.time || "")}</td>
+            <td style="text-align:left;font-weight:800;color:var(--green-950);">${escapeHtml(t.driver)}</td>
+            <td>
+              <span class="ripeness-badge">${escapeHtml(t.ripeness || "Surtido")}</span>
+              ${t.note ? `<div style="font-size:0.72rem;color:var(--slate-500);margin-top:2px;">${escapeHtml(t.note)}</div>` : ""}
+            </td>
+            <td>${oM || "—"}</td>
+            <td>${oP || "—"}</td>
+            <td>${oE || "—"}</td>
+            <td style="border-right:2px solid var(--green-800);">${oS || "—"}</td>
+            <td>${rM || "0"}</td>
+            <td>${rP || "0"}</td>
+            <td>${rE || "0"}</td>
+            <td style="border-right:2px solid var(--green-800);">${rS || "0"}</td>
+            <td style="font-weight:900;font-size:0.95rem;color:var(--green-900);background:var(--green-50);">${net}</td>
+            <td>
+              <button type="button" class="btn btn-outline btn-sm" data-edit-trip="${escapeHtml(t.id)}">
+                Devolución / Editar
+              </button>
+            </td>
+          </tr>
+        `;
+      })
+      .join("");
+  }
+
+  tfoot.innerHTML = `
+    <tr>
+      <td colspan="4" style="text-align:right;padding-right:12px;">SUMAS DEL DÍA:</td>
+      <td>${totals.out.M}</td>
+      <td>${totals.out.P}</td>
+      <td>${totals.out.E}</td>
+      <td style="border-right:2px solid var(--green-800);">${totals.out.S}</td>
+      <td>${totals.ret.M}</td>
+      <td>${totals.ret.P}</td>
+      <td>${totals.ret.E}</td>
+      <td style="border-right:2px solid var(--green-800);">${totals.ret.S}</td>
+      <td style="font-size:1rem;background:#dce8d8;">${totals.totalSold}</td>
+      <td></td>
+    </tr>
+  `;
+}
+
+async function saveWarehouseDoc(updatedDoc, toastMessage) {
+  await executeAdminBatch(currentKeyHash, (batch, proofId) => {
+    batch.set(doc(db, "warehouse_days", selectedWhDate), {
+      ...updatedDoc,
+      date: selectedWhDate,
+      proofId,
+      updatedAt: serverTimestamp()
+    });
+  });
+  if (toastMessage) showToast(toastMessage);
+}
+
+// Date controls
+document.getElementById("whDatePicker").addEventListener("change", (e) => {
+  if (e.target.value) subscribeWarehouseDay(e.target.value);
+});
+
+document.getElementById("btnWhToday").addEventListener("click", () => {
+  const today = getLocalDateStr();
+  document.getElementById("whDatePicker").value = today;
+  subscribeWarehouseDay(today);
+});
+
+document.getElementById("btnCopyPrevStock").addEventListener("click", async () => {
+  try {
+    const parts = selectedWhDate.split("-").map(Number);
+    const prevDateObj = new Date(parts[0], parts[1] - 1, parts[2] - 1);
+    const prevDateStr = getLocalDateStr(prevDateObj);
+    const prevSnap = await getDoc(doc(db, "warehouse_days", prevDateStr));
+
+    if (!prevSnap.exists()) {
+      showToast(`No hay registro guardado del día anterior (${prevDateStr}).`);
+      return;
+    }
+
+    const prevTotals = computeWarehouseTotals(prevSnap.data());
+    const nextDoc = {
+      ...currentWhDoc,
+      openingStock: {
+        M: Math.max(0, prevTotals.finalStock.M),
+        P: Math.max(0, prevTotals.finalStock.P),
+        E: Math.max(0, prevTotals.finalStock.E),
+        S: Math.max(0, prevTotals.finalStock.S)
+      }
+    };
+    await saveWarehouseDoc(nextDoc, `Inventario final del ${prevDateStr} cargado como inicial.`);
+  } catch (err) {
+    console.error(err);
+    showToast("Error al consultar el cierre anterior.");
+  }
+});
+
+// Save Opening Stock & Extra Entries
+document.getElementById("whOpeningForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const nextDoc = {
+    ...currentWhDoc,
+    openingStock: {
+      M: Math.max(0, Math.floor(Number(document.getElementById("whInitM").value) || 0)),
+      P: Math.max(0, Math.floor(Number(document.getElementById("whInitP").value) || 0)),
+      E: Math.max(0, Math.floor(Number(document.getElementById("whInitE").value) || 0)),
+      S: Math.max(0, Math.floor(Number(document.getElementById("whInitS").value) || 0))
+    },
+    extraEntries: {
+      M: Math.max(0, Math.floor(Number(document.getElementById("whExtraM").value) || 0)),
+      P: Math.max(0, Math.floor(Number(document.getElementById("whExtraP").value) || 0)),
+      E: Math.max(0, Math.floor(Number(document.getElementById("whExtraE").value) || 0)),
+      S: Math.max(0, Math.floor(Number(document.getElementById("whExtraS").value) || 0))
+    },
+    observations: document.getElementById("whObservations").value.trim()
+  };
+
+  try {
+    await saveWarehouseDoc(nextDoc, "Inventario base actualizado.");
+  } catch (err) {
+    console.error(err);
+    showToast("No se pudo guardar el inventario base.");
+  }
+});
+
+// Add New Car Trip
+document.getElementById("whNewTripForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const driver = document.getElementById("tripDriver").value;
+  const ripeness = document.getElementById("tripRipeness").value;
+  const out = {
+    M: Math.max(0, Math.floor(Number(document.getElementById("tripOutM").value) || 0)),
+    P: Math.max(0, Math.floor(Number(document.getElementById("tripOutP").value) || 0)),
+    E: Math.max(0, Math.floor(Number(document.getElementById("tripOutE").value) || 0)),
+    S: Math.max(0, Math.floor(Number(document.getElementById("tripOutS").value) || 0))
+  };
+  const note = document.getElementById("tripNote").value.trim();
+
+  if (out.M + out.P + out.E + out.S <= 0) {
+    showToast("Ingresa al menos 1 caja de salida (M, P, E o S).");
+    return;
+  }
+
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", hour12: false });
+
+  const newTrip = {
+    id: "trp_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 6),
+    time: timeStr,
+    driver,
+    ripeness,
+    out,
+    ret: { M: 0, P: 0, E: 0, S: 0 },
+    note
+  };
+
+  const nextDoc = {
+    ...currentWhDoc,
+    trips: [...(currentWhDoc.trips || []), newTrip]
+  };
+
+  try {
+    await saveWarehouseDoc(nextDoc, `Salida registrada para ${driver} (${ripeness}).`);
+    document.getElementById("tripOutM").value = "0";
+    document.getElementById("tripOutP").value = "0";
+    document.getElementById("tripOutE").value = "0";
+    document.getElementById("tripOutS").value = "0";
+    document.getElementById("tripNote").value = "";
+  } catch (err) {
+    console.error(err);
+    showToast("Error al registrar salida.");
+  }
+});
+
+// Edit / Return Modal for Trips
+const returnModal = document.getElementById("returnModal");
+
+document.getElementById("whTripsTableBody").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-edit-trip]");
+  if (!btn) return;
+  const tripId = btn.dataset.editTrip;
+  const trip = (currentWhDoc.trips || []).find((t) => t.id === tripId);
+  if (!trip) return;
+
+  document.getElementById("editTripId").value = trip.id;
+  document.getElementById("returnModalTitle").textContent = `Vuelta de ${trip.driver} (${trip.time})`;
+  document.getElementById("returnModalSubtitle").textContent = "Captura las cajas devueltas sin vender o corrige la salida.";
+  document.getElementById("editTripRipeness").value = trip.ripeness || "Surtido";
+  document.getElementById("editOutM").value = Number(trip.out?.M) || 0;
+  document.getElementById("editOutP").value = Number(trip.out?.P) || 0;
+  document.getElementById("editOutE").value = Number(trip.out?.E) || 0;
+  document.getElementById("editOutS").value = Number(trip.out?.S) || 0;
+  document.getElementById("editRetM").value = Number(trip.ret?.M) || 0;
+  document.getElementById("editRetP").value = Number(trip.ret?.P) || 0;
+  document.getElementById("editRetE").value = Number(trip.ret?.E) || 0;
+  document.getElementById("editRetS").value = Number(trip.ret?.S) || 0;
+  document.getElementById("editTripNote").value = trip.note || "";
+
+  returnModal.classList.add("open");
+});
+
+document.getElementById("btnCloseReturnModal").addEventListener("click", () => {
+  returnModal.classList.remove("open");
+});
+
+document.getElementById("returnTripForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const tripId = document.getElementById("editTripId").value;
+  const updatedTrips = (currentWhDoc.trips || []).map((t) => {
+    if (t.id !== tripId) return t;
+    return {
+      ...t,
+      ripeness: document.getElementById("editTripRipeness").value,
+      out: {
+        M: Math.max(0, Math.floor(Number(document.getElementById("editOutM").value) || 0)),
+        P: Math.max(0, Math.floor(Number(document.getElementById("editOutP").value) || 0)),
+        E: Math.max(0, Math.floor(Number(document.getElementById("editOutE").value) || 0)),
+        S: Math.max(0, Math.floor(Number(document.getElementById("editOutS").value) || 0))
+      },
+      ret: {
+        M: Math.max(0, Math.floor(Number(document.getElementById("editRetM").value) || 0)),
+        P: Math.max(0, Math.floor(Number(document.getElementById("editRetP").value) || 0)),
+        E: Math.max(0, Math.floor(Number(document.getElementById("editRetE").value) || 0)),
+        S: Math.max(0, Math.floor(Number(document.getElementById("editRetS").value) || 0))
+      },
+      note: document.getElementById("editTripNote").value.trim()
+    };
+  });
+
+  try {
+    await saveWarehouseDoc({ ...currentWhDoc, trips: updatedTrips }, "Devolución actualizada.");
+    returnModal.classList.remove("open");
+  } catch (err) {
+    console.error(err);
+    showToast("Error al guardar devolución.");
+  }
+});
+
+document.getElementById("btnDeleteTrip").addEventListener("click", async () => {
+  const tripId = document.getElementById("editTripId").value;
+  if (!confirm("¿Eliminar este registro de vuelta del almacén?")) return;
+  const updatedTrips = (currentWhDoc.trips || []).filter((t) => t.id !== tripId);
+  try {
+    await saveWarehouseDoc({ ...currentWhDoc, trips: updatedTrips }, "Vuelta eliminada.");
+    returnModal.classList.remove("open");
+  } catch (err) {
+    console.error(err);
+    showToast("No se pudo eliminar la vuelta.");
+  }
+});
+
+// Print Daily Warehouse Sheet
+document.getElementById("btnPrintWarehouse").addEventListener("click", () => {
+  const totals = computeWarehouseTotals(currentWhDoc);
+  const area = document.getElementById("printReceiptArea");
+
+  const rowsHtml = (currentWhDoc.trips || [])
+    .map((t, i) => {
+      const oM = Number(t.out?.M) || 0;
+      const oP = Number(t.out?.P) || 0;
+      const oE = Number(t.out?.E) || 0;
+      const oS = Number(t.out?.S) || 0;
+      const rM = Number(t.ret?.M) || 0;
+      const rP = Number(t.ret?.P) || 0;
+      const rE = Number(t.ret?.E) || 0;
+      const rS = Number(t.ret?.S) || 0;
+      const net = (oM + oP + oE + oS) - (rM + rP + rE + rS);
+      return `
+        <tr>
+          <td style="border:1px solid #264428;padding:4px;text-align:center;">${i + 1}</td>
+          <td style="border:1px solid #264428;padding:4px;text-align:center;">${escapeHtml(t.time)}</td>
+          <td style="border:1px solid #264428;padding:4px;font-weight:700;">${escapeHtml(t.driver)}</td>
+          <td style="border:1px solid #264428;padding:4px;text-align:center;">${escapeHtml(t.ripeness || "")}</td>
+          <td style="border:1px solid #264428;padding:4px;text-align:center;">${oM}</td>
+          <td style="border:1px solid #264428;padding:4px;text-align:center;">${oP}</td>
+          <td style="border:1px solid #264428;padding:4px;text-align:center;">${oE}</td>
+          <td style="border:1px solid #264428;padding:4px;text-align:center;">${oS}</td>
+          <td style="border:1px solid #264428;padding:4px;text-align:center;">${rM}</td>
+          <td style="border:1px solid #264428;padding:4px;text-align:center;">${rP}</td>
+          <td style="border:1px solid #264428;padding:4px;text-align:center;">${rE}</td>
+          <td style="border:1px solid #264428;padding:4px;text-align:center;">${rS}</td>
+          <td style="border:1px solid #264428;padding:4px;text-align:center;font-weight:800;">${net}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  area.innerHTML = `
+    <div style="font-size:9pt;color:#111;">
+      <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #264428;padding-bottom:8px;margin-bottom:10px;">
+        <img src="assets/logo-salinas.png" style="height:16mm;object-fit:contain;" alt="Salinas">
+        <div style="text-align:right;">
+          <strong style="font-size:12pt;color:#264428;">REPORTE DIARIO DE ALMACÉN</strong>
+          <div>Fecha: <strong>${escapeHtml(selectedWhDate)}</strong></div>
+        </div>
+      </div>
+
+      <table style="width:100%;border-collapse:collapse;margin-bottom:12px;">
+        <thead>
+          <tr style="background:#264428;color:#fff;">
+            <th style="padding:5px;border:1px solid #264428;">#</th>
+            <th style="padding:5px;border:1px solid #264428;">HORA</th>
+            <th style="padding:5px;border:1px solid #264428;text-align:left;">CHOFER</th>
+            <th style="padding:5px;border:1px solid #264428;">MADUREZ</th>
+            <th style="padding:5px;border:1px solid #264428;">SAL M</th>
+            <th style="padding:5px;border:1px solid #264428;">SAL P</th>
+            <th style="padding:5px;border:1px solid #264428;">SAL E</th>
+            <th style="padding:5px;border:1px solid #264428;">SAL S</th>
+            <th style="padding:5px;border:1px solid #264428;">DEV M</th>
+            <th style="padding:5px;border:1px solid #264428;">DEV P</th>
+            <th style="padding:5px;border:1px solid #264428;">DEV E</th>
+            <th style="padding:5px;border:1px solid #264428;">DEV S</th>
+            <th style="padding:5px;border:1px solid #264428;">VENDIDO</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+
+      <table style="width:65%;border-collapse:collapse;margin-bottom:16px;">
+        <thead>
+          <tr style="background:#eef4ec;color:#264428;">
+            <th style="border:1px solid #264428;padding:5px;text-align:left;">CORTE DE ALMACÉN</th>
+            <th style="border:1px solid #264428;padding:5px;">M</th>
+            <th style="border:1px solid #264428;padding:5px;">P</th>
+            <th style="border:1px solid #264428;padding:5px;">E</th>
+            <th style="border:1px solid #264428;padding:5px;">S</th>
+            <th style="border:1px solid #264428;padding:5px;">TOTAL</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="border:1px solid #264428;padding:5px;">Inventario Inicial + Cámara</td>
+            <td style="border:1px solid #264428;padding:5px;text-align:center;">${totals.init.M + totals.extra.M}</td>
+            <td style="border:1px solid #264428;padding:5px;text-align:center;">${totals.init.P + totals.extra.P}</td>
+            <td style="border:1px solid #264428;padding:5px;text-align:center;">${totals.init.E + totals.extra.E}</td>
+            <td style="border:1px solid #264428;padding:5px;text-align:center;">${totals.init.S + totals.extra.S}</td>
+            <td style="border:1px solid #264428;padding:5px;text-align:center;font-weight:700;">${totals.totalInit + totals.totalExtra}</td>
+          </tr>
+          <tr>
+            <td style="border:1px solid #264428;padding:5px;">(−) Total Vendido Neto (Total V.)</td>
+            <td style="border:1px solid #264428;padding:5px;text-align:center;">${totals.sold.M}</td>
+            <td style="border:1px solid #264428;padding:5px;text-align:center;">${totals.sold.P}</td>
+            <td style="border:1px solid #264428;padding:5px;text-align:center;">${totals.sold.E}</td>
+            <td style="border:1px solid #264428;padding:5px;text-align:center;">${totals.sold.S}</td>
+            <td style="border:1px solid #264428;padding:5px;text-align:center;font-weight:700;">${totals.totalSold}</td>
+          </tr>
+          <tr style="font-weight:900;background:#f4f8f3;">
+            <td style="border:1px solid #264428;padding:5px;">(=) INVENTARIO FINAL (T. INV.)</td>
+            <td style="border:1px solid #264428;padding:5px;text-align:center;">${totals.finalStock.M}</td>
+            <td style="border:1px solid #264428;padding:5px;text-align:center;">${totals.finalStock.P}</td>
+            <td style="border:1px solid #264428;padding:5px;text-align:center;">${totals.finalStock.E}</td>
+            <td style="border:1px solid #264428;padding:5px;text-align:center;">${totals.finalStock.S}</td>
+            <td style="border:1px solid #264428;padding:5px;text-align:center;">${totals.totalFinal}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  document.body.classList.add("printing-receipt");
+  window.print();
+  setTimeout(() => document.body.classList.remove("printing-receipt"), 500);
+});
+
+// ================= KPI UPDATES =================
 function isSameLocalDay(isoStr) {
   if (!isoStr) return false;
   const d = new Date(isoStr);
@@ -225,7 +867,6 @@ function updateKPIs() {
   let deliveredToday = 0;
   let boxesToday = 0;
   let revToday = 0;
-  const calToday = { M: 0, P: 0, E: 0, S: 0 };
 
   for (const ord of allOrders) {
     if (ord.status === "nuevo") newCount++;
@@ -235,23 +876,21 @@ function updateKPIs() {
       if (ord.status === "entregado") deliveredToday++;
       boxesToday += Number(ord.totalBoxes) || 0;
       revToday += Number(ord.totalAmount) || 0;
-      const b = ord.boxesByCaliber || {};
-      calToday.M += Number(b.M) || 0;
-      calToday.P += Number(b.P) || 0;
-      calToday.E += Number(b.E) || 0;
-      calToday.S += Number(b.S) || 0;
     }
   }
+
+  const whTotals = computeWarehouseTotals(currentWhDoc);
 
   document.getElementById("kpiNewCount").textContent = String(newCount);
   document.getElementById("kpiActiveCount").textContent = String(activeCount);
   document.getElementById("kpiDeliveredSub").textContent = `${deliveredToday} entregado${deliveredToday === 1 ? "" : "s"} hoy`;
-  document.getElementById("kpiBoxesToday").textContent = String(boxesToday);
-  document.getElementById("kpiCalibersSub").textContent = `M:${calToday.M} • P:${calToday.P} • E:${calToday.E} • S:${calToday.S}`;
+  document.getElementById("kpiWarehouseStock").textContent = String(whTotals.totalFinal);
+  document.getElementById("kpiWarehouseSub").textContent = `M:${whTotals.finalStock.M} • P:${whTotals.finalStock.P} • E:${whTotals.finalStock.E} • S:${whTotals.finalStock.S}`;
   document.getElementById("kpiRevenueToday").textContent = formatCurrency(revToday);
+  document.getElementById("kpiCalibersSub").textContent = `Pedidos Web hoy: ${boxesToday} caja${boxesToday === 1 ? "" : "s"}`;
 }
 
-// Filters
+// ================= TAB 2: ORDERS =================
 document.getElementById("statusFilterBar").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-status]");
   if (!btn) return;
@@ -369,10 +1008,7 @@ function renderOrdersList() {
       ].join("");
 
       const statusOptions = Object.entries(STATUS_LABELS)
-        .map(
-          ([val, lbl]) =>
-            `<option value="${val}" ${ord.status === val ? "selected" : ""}>${lbl}</option>`
-        )
+        .map(([val, lbl]) => `<option value="${val}" ${ord.status === val ? "selected" : ""}>${lbl}</option>`)
         .join("");
 
       return `
@@ -385,17 +1021,12 @@ function renderOrdersList() {
             </div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
               <strong style="font-size:1.25rem;color:var(--green-900);">${formatCurrency(ord.totalAmount)}</strong>
-              <button type="button" class="btn btn-outline btn-sm" data-action="edit-total" data-id="${ord.id}" title="Ajustar precio especial para este cliente">
-                Ajustar $
-              </button>
-              <button type="button" class="btn btn-outline btn-sm" data-action="print-order" data-id="${ord.id}">
-                🖨️ Imprimir Nota
-              </button>
+              <button type="button" class="btn btn-outline btn-sm" data-action="edit-total" data-id="${ord.id}">Ajustar $</button>
+              <button type="button" class="btn btn-outline btn-sm" data-action="print-order" data-id="${ord.id}">🖨️ Imprimir Nota</button>
             </div>
           </div>
 
           <div class="order-admin-grid">
-            <!-- Customer Details -->
             <div>
               <div style="font-weight:800;font-size:1.02rem;color:var(--slate-900);">${escapeHtml(ord.customerName)}</div>
               <div style="font-size:0.86rem;color:var(--slate-700);margin-top:3px;">📍 ${escapeHtml(ord.address)}</div>
@@ -410,17 +1041,13 @@ function renderOrdersList() {
               ${ord.notes ? `<div style="margin-top:6px;background:var(--gold-100);color:#6e470b;padding:6px 10px;border-radius:8px;font-size:0.8rem;">📝 ${escapeHtml(ord.notes)}</div>` : ""}
             </div>
 
-            <!-- Boxes Breakdown -->
             <div>
               <div style="font-size:0.8rem;font-weight:800;color:var(--slate-500);text-transform:uppercase;">
                 Desglose (${ord.totalBoxes} caja${ord.totalBoxes === 1 ? "" : "s"})
               </div>
-              <div class="caliber-breakdown-chips">
-                ${chipsHtml}
-              </div>
+              <div class="caliber-breakdown-chips">${chipsHtml}</div>
             </div>
 
-            <!-- Controls & WhatsApp -->
             <div style="display:flex;flex-direction:column;gap:8px;">
               <div class="form-row-2">
                 <div>
@@ -453,7 +1080,6 @@ function renderOrdersList() {
     .join("");
 }
 
-// Order Events Delegation
 document.getElementById("ordersAdminContainer").addEventListener("change", async (e) => {
   const statusSel = e.target.closest(".order-status-select");
   if (statusSel) {
@@ -461,11 +1087,7 @@ document.getElementById("ordersAdminContainer").addEventListener("change", async
     const newStatus = statusSel.value;
     try {
       await executeAdminBatch(currentKeyHash, (batch, proofId) => {
-        batch.update(doc(db, "orders", orderId), {
-          status: newStatus,
-          proofId,
-          updatedAt: serverTimestamp()
-        });
+        batch.update(doc(db, "orders", orderId), { status: newStatus, proofId, updatedAt: serverTimestamp() });
       });
       showToast(`Estatus actualizado a ${STATUS_LABELS[newStatus]}.`);
     } catch (err) {
@@ -514,11 +1136,7 @@ document.getElementById("ordersAdminContainer").addEventListener("click", async 
     }
     try {
       await executeAdminBatch(currentKeyHash, (batch, proofId) => {
-        batch.update(doc(db, "orders", orderId), {
-          totalAmount: newTotal,
-          proofId,
-          updatedAt: serverTimestamp()
-        });
+        batch.update(doc(db, "orders", orderId), { totalAmount: newTotal, proofId, updatedAt: serverTimestamp() });
       });
       showToast(`Total ajustado a ${formatCurrency(newTotal)}.`);
     } catch (err) {
@@ -536,7 +1154,6 @@ document.getElementById("ordersAdminContainer").addEventListener("click", async 
   }
 });
 
-// Print Receipt styled after Comercializadora Salinas physical notes
 function printOrderReceipt(ord) {
   const area = document.getElementById("printReceiptArea");
   const dateStr = ord.createdAtIso
@@ -584,9 +1201,7 @@ function printOrderReceipt(ord) {
             <th style="padding:6px;text-align:right;width:22%;">IMPORTE</th>
           </tr>
         </thead>
-        <tbody>
-          ${rowsHtml}
-        </tbody>
+        <tbody>${rowsHtml}</tbody>
       </table>
 
       <div style="display:flex;justify-content:space-between;align-items:center;padding-top:3mm;border-top:1.5px solid #264428;">
@@ -602,12 +1217,41 @@ function printOrderReceipt(ord) {
 
   document.body.classList.add("printing-receipt");
   window.print();
-  setTimeout(() => {
-    document.body.classList.remove("printing-receipt");
-  }, 500);
+  setTimeout(() => document.body.classList.remove("printing-receipt"), 500);
 }
 
-// ================= TAB 2: CATALOG EDITOR =================
+// ================= TAB 3: CATALOG & BROADCAST GENERATOR =================
+function buildMorningBroadcastText() {
+  const cals = Object.values(storeSettings.calibers || DEFAULT_STORE_SETTINGS.calibers)
+    .filter((c) => c.available !== false)
+    .sort((a, b) => (a.order || 99) - (b.order || 99));
+
+  const lines = cals.map((c) => `🥑 *${c.name}:* ${formatCurrency(c.price)} / caja`).join("\n");
+  const siteUrl = window.location.origin;
+
+  return (
+    `¡Buenos días! ☀️ En *Comercializadora Salinas* ya tenemos aguacate fresco seleccionado para tu negocio.\n\n` +
+    `*Precios por caja de hoy:*\n${lines}\n\n` +
+    `👉 *Haz tu pedido rápido en 20 segundos eligiendo calibre y madurez aquí:*\n${siteUrl}\n\n` +
+    `¡Gracias por tu preferencia!`
+  );
+}
+
+function updateBroadcastPreview() {
+  const el = document.getElementById("broadcastPreviewBox");
+  if (el) el.textContent = buildMorningBroadcastText();
+}
+
+document.getElementById("btnCopyBroadcastMsg").addEventListener("click", async () => {
+  const txt = buildMorningBroadcastText();
+  try {
+    await navigator.clipboard.writeText(txt);
+    showToast("¡Mensaje copiado! Ya puedes pegarlo en tus Listas de Difusión de WhatsApp.");
+  } catch (_) {
+    showToast("Selecciona el texto del recuadro y cópialo.");
+  }
+});
+
 function populateCatalogForm() {
   document.getElementById("cfgStoreOpen").value = String(storeSettings.storeOpen !== false);
   document.getElementById("cfgSchedule").value = storeSettings.scheduleText || "";
@@ -669,27 +1313,19 @@ document.getElementById("catalogForm").addEventListener("submit", async (e) => {
 
     document.querySelectorAll(".cal-price-input").forEach((inp) => {
       const code = inp.dataset.code;
-      if (updatedCalibers[code]) {
-        updatedCalibers[code].price = Math.max(1, Math.round(Number(inp.value) || 0));
-      }
+      if (updatedCalibers[code]) updatedCalibers[code].price = Math.max(1, Math.round(Number(inp.value) || 0));
     });
     document.querySelectorAll(".cal-avail-input").forEach((sel) => {
       const code = sel.dataset.code;
-      if (updatedCalibers[code]) {
-        updatedCalibers[code].available = sel.value === "true";
-      }
+      if (updatedCalibers[code]) updatedCalibers[code].available = sel.value === "true";
     });
     document.querySelectorAll(".cal-badge-input").forEach((inp) => {
       const code = inp.dataset.code;
-      if (updatedCalibers[code]) {
-        updatedCalibers[code].badge = inp.value.trim();
-      }
+      if (updatedCalibers[code]) updatedCalibers[code].badge = inp.value.trim();
     });
     document.querySelectorAll(".cal-desc-input").forEach((inp) => {
       const code = inp.dataset.code;
-      if (updatedCalibers[code]) {
-        updatedCalibers[code].description = inp.value.trim();
-      }
+      if (updatedCalibers[code]) updatedCalibers[code].description = inp.value.trim();
     });
 
     const phone1Display = document.getElementById("cfgPhone1").value.trim() || DEFAULT_STORE_SETTINGS.phoneDisplayPrimary;
@@ -708,11 +1344,7 @@ document.getElementById("catalogForm").addEventListener("submit", async (e) => {
     };
 
     await executeAdminBatch(currentKeyHash, (batch, proofId) => {
-      batch.set(doc(db, "settings", "store"), {
-        ...newSettings,
-        proofId,
-        updatedAt: serverTimestamp()
-      });
+      batch.set(doc(db, "settings", "store"), { ...newSettings, proofId, updatedAt: serverTimestamp() });
     });
 
     showToast("¡Precios y disponibilidad actualizados en tiempo real!");
@@ -725,7 +1357,7 @@ document.getElementById("catalogForm").addEventListener("submit", async (e) => {
   }
 });
 
-// ================= TAB 3: DRIVERS & SECURITY =================
+// ================= TAB 4: EDITABLE DRIVERS & SECURITY =================
 function renderDriversEditor() {
   const listEl = document.getElementById("driversListEditor");
   const drivers = storeSettings.drivers || [];
@@ -738,21 +1370,76 @@ function renderDriversEditor() {
   listEl.innerHTML = drivers
     .map(
       (drv, idx) => `
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--green-50);border-radius:10px;border:1px solid var(--slate-200);">
-        <div>
-          <strong style="color:var(--green-950);">🚗 ${escapeHtml(drv.name)}</strong>
-          <span style="font-size:0.82rem;color:var(--slate-500);margin-left:8px;">
-            ${drv.phone ? "📱 " + escapeHtml(drv.phone) : "Sin celular guardado"}
-          </span>
-        </div>
-        <button type="button" class="btn btn-outline btn-sm" data-remove-driver="${idx}" style="color:var(--red-600);border-color:#eccaca;">
-          Quitar
-        </button>
+      <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:8px;align-items:center;padding:10px;background:var(--green-50);border-radius:10px;border:1px solid var(--slate-200);">
+        <input type="text" class="form-control drv-edit-name" data-idx="${idx}" value="${escapeHtml(drv.name)}" placeholder="Nombre" style="padding:7px 10px;font-weight:700;">
+        <input type="tel" class="form-control drv-edit-phone" data-idx="${idx}" value="${escapeHtml(drv.phone || "")}" placeholder="WhatsApp (10 dígitos)" style="padding:7px 10px;">
+        <button type="button" class="btn btn-primary btn-sm" data-save-driver="${idx}">Guardar</button>
+        <button type="button" class="btn btn-outline btn-sm" data-remove-driver="${idx}" style="color:var(--red-600);border-color:#eccaca;">✕</button>
       </div>
     `
     )
     .join("");
 }
+
+document.getElementById("driversListEditor").addEventListener("click", async (e) => {
+  const saveBtn = e.target.closest("button[data-save-driver]");
+  if (saveBtn) {
+    const idx = Number(saveBtn.dataset.saveDriver);
+    const nameInput = document.querySelector(`.drv-edit-name[data-idx='${idx}']`);
+    const phoneInput = document.querySelector(`.drv-edit-phone[data-idx='${idx}']`);
+    const newName = nameInput ? nameInput.value.trim() : "";
+    const newPhone = phoneInput ? phoneInput.value.trim() : "";
+
+    if (!newName) {
+      showToast("El nombre del chofer no puede quedar vacío.");
+      return;
+    }
+
+    const updatedDrivers = [...(storeSettings.drivers || [])];
+    if (updatedDrivers[idx]) {
+      updatedDrivers[idx] = { ...updatedDrivers[idx], name: newName, phone: newPhone };
+    }
+
+    try {
+      await executeAdminBatch(currentKeyHash, (batch, proofId) => {
+        batch.set(doc(db, "settings", "store"), {
+          ...storeSettings,
+          drivers: updatedDrivers,
+          proofId,
+          updatedAt: serverTimestamp()
+        });
+      });
+      showToast(`Datos de ${newName} guardados.`);
+    } catch (err) {
+      console.error(err);
+      showToast("No se pudieron guardar los cambios del chofer.");
+    }
+    return;
+  }
+
+  const removeBtn = e.target.closest("button[data-remove-driver]");
+  if (removeBtn) {
+    const idx = Number(removeBtn.dataset.removeDriver);
+    const drv = (storeSettings.drivers || [])[idx];
+    if (!confirm(`¿Quitar a ${drv?.name || "este chofer"} de la lista?`)) return;
+    const updatedDrivers = (storeSettings.drivers || []).filter((_, i) => i !== idx);
+
+    try {
+      await executeAdminBatch(currentKeyHash, (batch, proofId) => {
+        batch.set(doc(db, "settings", "store"), {
+          ...storeSettings,
+          drivers: updatedDrivers,
+          proofId,
+          updatedAt: serverTimestamp()
+        });
+      });
+      showToast("Chofer eliminado de la lista.");
+    } catch (err) {
+      console.error(err);
+      showToast("Error al eliminar chofer.");
+    }
+  }
+});
 
 document.getElementById("btnAddDriver").addEventListener("click", async () => {
   const nameInp = document.getElementById("newDriverName");
@@ -774,33 +1461,6 @@ document.getElementById("btnAddDriver").addEventListener("click", async () => {
 
   try {
     await executeAdminBatch(currentKeyHash, (batch, proofId) => {
-      batch.set(
-        doc(db, "settings", "store"),
-        {
-          ...storeSettings,
-          drivers: updatedDrivers,
-          proofId,
-          updatedAt: serverTimestamp()
-        }
-      );
-    });
-    nameInp.value = "";
-    phoneInp.value = "";
-    showToast(`Chofer ${name} agregado.`);
-  } catch (err) {
-    console.error(err);
-    showToast("No se pudo agregar el chofer.");
-  }
-});
-
-document.getElementById("driversListEditor").addEventListener("click", async (e) => {
-  const btn = e.target.closest("button[data-remove-driver]");
-  if (!btn) return;
-  const idx = Number(btn.dataset.removeDriver);
-  const updatedDrivers = (storeSettings.drivers || []).filter((_, i) => i !== idx);
-
-  try {
-    await executeAdminBatch(currentKeyHash, (batch, proofId) => {
       batch.set(doc(db, "settings", "store"), {
         ...storeSettings,
         drivers: updatedDrivers,
@@ -808,10 +1468,12 @@ document.getElementById("driversListEditor").addEventListener("click", async (e)
         updatedAt: serverTimestamp()
       });
     });
-    showToast("Chofer eliminado de la lista.");
+    nameInp.value = "";
+    phoneInp.value = "";
+    showToast(`Chofer ${name} agregado.`);
   } catch (err) {
     console.error(err);
-    showToast("Error al eliminar chofer.");
+    showToast("No se pudo agregar el chofer.");
   }
 });
 
@@ -838,16 +1500,8 @@ document.getElementById("changePassForm").addEventListener("submit", async (e) =
 
     const oldHash = currentKeyHash;
     await executeAdminBatch(oldHash, (batch, proofId) => {
-      batch.set(doc(db, "admin_keys", newHash), {
-        active: true,
-        proofId,
-        createdAt: serverTimestamp()
-      });
-      batch.update(doc(db, "admin_keys", oldHash), {
-        active: false,
-        proofId,
-        revokedAt: serverTimestamp()
-      });
+      batch.set(doc(db, "admin_keys", newHash), { active: true, proofId, createdAt: serverTimestamp() });
+      batch.update(doc(db, "admin_keys", oldHash), { active: false, proofId, revokedAt: serverTimestamp() });
     });
 
     currentKeyHash = newHash;
@@ -859,7 +1513,7 @@ document.getElementById("changePassForm").addEventListener("submit", async (e) =
 
     document.getElementById("newAdminPass1").value = "";
     document.getElementById("newAdminPass2").value = "";
-    showToast("¡Clave de administración actualizada correctamente!");
+    showToast("¡Clave de administración actualizada!");
   } catch (err) {
     console.error(err);
     showToast("Error al actualizar la clave.");
