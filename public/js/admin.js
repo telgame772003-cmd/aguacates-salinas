@@ -268,23 +268,32 @@ function startRealtimeListeners() {
 function subscribeWarehouseDay(dateStr) {
   if (whUnsub) whUnsub();
   selectedWhDate = dateStr;
+  currentWhDoc = createEmptyWhDoc(dateStr);
+  renderWarehouseModule();
 
-  whUnsub = onSnapshot(doc(db, "warehouse_days", dateStr), (snap) => {
-    if (snap.exists()) {
-      const d = snap.data();
-      currentWhDoc = {
-        date: dateStr,
-        openingStock: { M: 0, P: 0, E: 0, S: 0, ...(d.openingStock || {}) },
-        extraEntries: { M: 0, P: 0, E: 0, S: 0, ...(d.extraEntries || {}) },
-        observations: d.observations || "",
-        trips: Array.isArray(d.trips) ? d.trips : []
-      };
-    } else {
-      currentWhDoc = createEmptyWhDoc(dateStr);
+  whUnsub = onSnapshot(
+    doc(db, "warehouse_days", dateStr),
+    (snap) => {
+      if (snap.exists()) {
+        const d = snap.data();
+        currentWhDoc = {
+          date: dateStr,
+          openingStock: { M: 0, P: 0, E: 0, S: 0, ...(d.openingStock || {}) },
+          extraEntries: { M: 0, P: 0, E: 0, S: 0, ...(d.extraEntries || {}) },
+          observations: d.observations || "",
+          trips: Array.isArray(d.trips) ? d.trips : []
+        };
+      } else {
+        currentWhDoc = createEmptyWhDoc(dateStr);
+      }
+      renderWarehouseModule();
+      updateKPIs();
+    },
+    (err) => {
+      console.warn("Aviso leyendo almacén:", err);
+      renderWarehouseModule();
     }
-    renderWarehouseModule();
-    updateKPIs();
-  });
+  );
 }
 
 // ================= WAREHOUSE MODULE LOGIC =================
