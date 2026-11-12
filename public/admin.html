@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Panel de Administración y Almacén | Comercializadora Salinas</title>
   <link rel="icon" type="image/png" href="assets/favicon.png">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body class="admin-body">
@@ -20,6 +21,7 @@
         <button type="button" id="btnDownloadBackup" class="btn btn-outline btn-sm" style="display:none;" title="Descargar respaldo completo">
           💾 <span class="hide-mobile">Respaldar</span>
         </button>
+        <a href="chofer.html" target="_blank" class="btn btn-outline btn-sm" title="Abrir App Móvil de Chofer">🚗 <span class="hide-mobile">App Chofer</span></a>
         <a href="index.html" target="_blank" class="btn btn-outline btn-sm">Tienda ↗</a>
         <button type="button" id="btnLogout" class="btn btn-outline btn-sm" style="display:none;">Salir</button>
       </div>
@@ -81,9 +83,10 @@
     <!-- Navigation Tabs -->
     <div class="admin-tabs">
       <button type="button" class="tab-btn active" data-tab="tabWarehouse">📋 Control de Almacén</button>
+      <button type="button" class="tab-btn" data-tab="tabRoutes">🗺️ Ruta, GPS y Cortes</button>
       <button type="button" class="tab-btn" data-tab="tabOrders">📦 Pedidos en Línea</button>
       <button type="button" class="tab-btn" data-tab="tabCatalog">🏷️ Precios y Difusión</button>
-      <button type="button" class="tab-btn" data-tab="tabDrivers">🚗 Choferes y Clave</button>
+      <button type="button" class="tab-btn" data-tab="tabDrivers">🚗 Choferes y PIN</button>
     </div>
 
     <!-- ================= TAB 1: CONTROL DE ALMACÉN ================= -->
@@ -233,6 +236,48 @@
       <div id="whMobileTripsList" class="wh-mobile-trips"></div>
     </section>
 
+    <!-- ================= TAB 1B: RUTA, MAPA GPS Y CORTES ================= -->
+    <section id="tabRoutes" class="admin-tab-pane" style="display:none;">
+      <div class="order-admin-card" style="margin-bottom:18px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+          <div>
+            <h3 class="serif-title" style="font-size:1.18rem;color:var(--green-950);">📍 Ubicación GPS en Tiempo Real</h3>
+            <p style="font-size:0.82rem;color:var(--slate-500);">
+              Cuando el chofer toca <strong>Activar GPS</strong> en <code>/chofer.html</code>, su posición y carga aparecen aquí en vivo.
+            </p>
+          </div>
+          <span id="gpsOnlineBadge" class="ripeness-badge">0 en vivo</span>
+        </div>
+
+        <div id="gpsDriverChips" class="gps-driver-chips"></div>
+        <div id="adminLiveMap"></div>
+      </div>
+
+      <div class="admin-toolbar-card">
+        <div class="toolbar-group">
+          <strong style="color:var(--green-950);font-size:0.9rem;">📅 Fecha Corte:</strong>
+          <input type="date" id="routeDatePicker" class="form-control" style="width:auto;padding:7px 11px;font-weight:700;">
+          <button type="button" id="btnRouteToday" class="btn btn-outline btn-sm">Hoy</button>
+        </div>
+        <div class="toolbar-group">
+          <select id="routeDriverFilter" class="form-control" style="width:auto;padding:8px 12px;font-size:0.86rem;">
+            <option value="todos">Todos los choferes</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="margin:12px 0 8px;">
+        <h3 style="font-size:1.08rem;color:var(--green-950);">💰 Pre-Corte Automático por Chofer (Almacén vs Ventas en Ruta)</h3>
+      </div>
+      <div id="routeCorteCards" class="route-corte-grid"></div>
+
+      <div style="margin:18px 0 8px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+        <h3 style="font-size:1.08rem;color:var(--green-950);">🧾 Notas Registradas en Ruta</h3>
+        <span id="routeSalesSummaryBadge" class="ripeness-badge">0 notas</span>
+      </div>
+      <div id="routeSalesAdminList"></div>
+    </section>
+
     <!-- ================= TAB 2: ORDERS ================= -->
     <section id="tabOrders" class="admin-tab-pane" style="display:none;">
       <div class="admin-toolbar-card">
@@ -322,21 +367,25 @@
     <section id="tabDrivers" class="admin-tab-pane" style="display:none;">
       <div class="two-col-panel">
         <div class="order-admin-card">
-          <h3 class="serif-title" style="font-size:1.22rem;color:var(--green-950);margin-bottom:6px;">Choferes / Vendedores</h3>
+          <h3 class="serif-title" style="font-size:1.22rem;color:var(--green-950);margin-bottom:6px;">Choferes, WhatsApp y PIN de Ruta</h3>
           <p style="font-size:0.84rem;color:var(--slate-500);margin-bottom:14px;">
-            Edita el nombre o WhatsApp de cualquier chofer y pulsa <strong>Guardar</strong>, o agrega nuevos vendedores.
+            Asigna a cada chofer su <strong>PIN de 4 dígitos</strong> para entrar a <code>/chofer.html</code> y envíale su acceso directo por WhatsApp.
           </p>
 
           <div id="driversListEditor" style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;"></div>
 
           <div class="driver-add-row">
             <div>
-              <label class="form-label" for="newDriverName">Nuevo Chofer</label>
+              <label class="form-label" for="newDriverName">Nuevo Chofer *</label>
               <input type="text" id="newDriverName" class="form-control" placeholder="Ej. Juan">
             </div>
             <div>
               <label class="form-label" for="newDriverPhone">WhatsApp (10 dígitos)</label>
               <input type="tel" id="newDriverPhone" class="form-control" placeholder="Ej. 8441234567">
+            </div>
+            <div>
+              <label class="form-label" for="newDriverPin">PIN Inicial *</label>
+              <input type="text" inputmode="numeric" maxlength="8" id="newDriverPin" class="form-control" placeholder="Ej. 3333">
             </div>
             <button type="button" id="btnAddDriver" class="btn btn-primary" style="height:42px;">+ Agregar</button>
           </div>
@@ -421,6 +470,7 @@
   <!-- Toast -->
   <div id="toastBox" class="toast-box"></div>
 
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script type="module" src="js/admin.js"></script>
 </body>
 </html>

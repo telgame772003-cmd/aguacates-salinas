@@ -10,6 +10,7 @@ import {
   writeBatch,
   collection,
   query,
+  where,
   orderBy,
   limit,
   onSnapshot,
@@ -38,6 +39,7 @@ export {
   writeBatch,
   collection,
   query,
+  where,
   orderBy,
   limit,
   onSnapshot,
@@ -53,8 +55,8 @@ export const DEFAULT_STORE_SETTINGS = {
   phoneDisplaySecondary: "844 677 52 76",
   scheduleText: "Lunes a Sábado • 7:00 AM a 5:00 PM",
   drivers: [
-    { id: "carlos", name: "Carlos", phone: "" },
-    { id: "tello", name: "Tello", phone: "" }
+    { id: "carlos", name: "Carlos", phone: "", hasPin: true },
+    { id: "tello", name: "Tello", phone: "", hasPin: true }
   ],
   calibers: {
     S: {
@@ -64,6 +66,7 @@ export const DEFAULT_STORE_SETTINGS = {
       description: "Piezas grandes de excelente presentación y pulpa cremosa. Ideal para carnicerías, fruterías selectas y exhibición.",
       badge: "Calidad Premium",
       price: 400,
+      minPrice: 340,
       available: true,
       order: 1
     },
@@ -74,6 +77,7 @@ export const DEFAULT_STORE_SETTINGS = {
       description: "Tamaño uniforme de gran rendimiento en mesa y mostrador. Excelente balance entre presencia y costo por pieza.",
       badge: "Alto Rendimiento",
       price: 360,
+      minPrice: 310,
       available: true,
       order: 2
     },
@@ -84,6 +88,7 @@ export const DEFAULT_STORE_SETTINGS = {
       description: "El favorito de abarrotes, cocinas económicas y restaurantes por su rotación diaria y tamaño versátil.",
       badge: "Más Pedido",
       price: 320,
+      minPrice: 280,
       available: true,
       order: 3
     },
@@ -94,6 +99,7 @@ export const DEFAULT_STORE_SETTINGS = {
       description: "Misma frescura y sabor con el mejor precio por caja. Ideal para taquerías, guacamole, salsas y venta popular.",
       badge: "Especial Negocios",
       price: 250,
+      minPrice: 210,
       available: true,
       order: 4
     }
@@ -107,22 +113,42 @@ export async function sha256Hex(message) {
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export function generateProofId() {
-  return "prf_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 10);
+export async function computeDriverPinHash(driverName, pin) {
+  const normalized = `${String(driverName || "").trim().toLowerCase()}::${String(pin || "").trim()}`;
+  return sha256Hex(normalized);
 }
 
-/**
- * Ejecuta una escritura administrativa atómica firmada con prueba criptográfica efímera.
- */
+export function generateProofId(prefix = "prf") {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export async function executeAdminBatch(keyHash, buildBatchFn) {
   const batch = writeBatch(db);
-  const proofId = generateProofId();
+  const proofId = generateProofId("prf");
   batch.set(doc(db, "admin_proofs", proofId), {
     keyHash,
     createdAt: serverTimestamp()
   });
   buildBatchFn(batch, proofId);
   await batch.commit();
+}
+
+export async function executeDriverBatch(driverKeyHash, buildBatchFn) {
+  const batch = writeBatch(db);
+  const proofId = generateProofId("dprf");
+  batch.set(doc(db, "driver_proofs", proofId), {
+    keyHash: driverKeyHash,
+    createdAt: serverTimestamp()
+  });
+  buildBatchFn(batch, proofId);
+  await batch.commit();
+}
+
+export function getLocalDateStr(dateObj = new Date()) {
+  const y = dateObj.getFullYear();
+  const m = String(dateObj.getMonth() + 1).padStart(2, "0");
+  const d = String(dateObj.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 export function formatCurrency(amount) {

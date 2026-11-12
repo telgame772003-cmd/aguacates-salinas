@@ -2,20 +2,33 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function isKeyActive(keyHash) {
+    function isAdminKeyActive(keyHash) {
       let keyDoc = getAfter(/databases/$(database)/documents/admin_keys/$(keyHash));
+      return keyDoc != null && keyDoc.data.active == true;
+    }
+
+    function isDriverKeyActive(keyHash) {
+      let keyDoc = getAfter(/databases/$(database)/documents/driver_keys/$(keyHash));
       return keyDoc != null && keyDoc.data.active == true;
     }
 
     function hasValidAdminProof() {
       let proofId = request.resource.data.proofId;
-      let proof = getAfter(/databases/$(database)/documents/admin_proofs/$(proofId));
       return proofId is string
-        && proof != null
-        && proof.data.keyHash is string
-        && isKeyActive(proof.data.keyHash);
+        && proofId.matches('^prf_.*')
+        && getAfter(/databases/$(database)/documents/admin_proofs/$(proofId)).data.keyHash is string
+        && isAdminKeyActive(getAfter(/databases/$(database)/documents/admin_proofs/$(proofId)).data.keyHash);
     }
 
+    function hasValidDriverProof() {
+      let proofId = request.resource.data.proofId;
+      return proofId is string
+        && proofId.matches('^dprf_.*')
+        && getAfter(/databases/$(database)/documents/driver_proofs/$(proofId)).data.keyHash is string
+        && isDriverKeyActive(getAfter(/databases/$(database)/documents/driver_proofs/$(proofId)).data.keyHash);
+    }
+
+    // Llaves maestras Admin (SHA-256)
     match /admin_keys/{keyHash} {
       allow get: if true;
       allow list: if false;
@@ -28,10 +41,26 @@ service cloud.firestore {
     match /admin_proofs/{proofId} {
       allow read: if false;
       allow create: if request.resource.data.keyHash is string
-        && isKeyActive(request.resource.data.keyHash);
+        && isAdminKeyActive(request.resource.data.keyHash);
       allow update, delete: if false;
     }
 
+    // Llaves PIN Choferes (SHA-256 de chofer + PIN)
+    match /driver_keys/{keyHash} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if hasValidAdminProof();
+      allow delete: if false;
+    }
+
+    match /driver_proofs/{proofId} {
+      allow read: if false;
+      allow create: if request.resource.data.keyHash is string
+        && isDriverKeyActive(request.resource.data.keyHash);
+      allow update, delete: if false;
+    }
+
+    // Configuración pública del catálogo, precios y lista de choferes
     match /settings/{docId} {
       allow read: if true;
       allow create: if docId == 'security_init'
@@ -39,10 +68,23 @@ service cloud.firestore {
       allow write: if docId != 'security_init' && hasValidAdminProof();
     }
 
-    // Control Diario de Almacén (Inventario Inicial, Vueltas con Madurez, Devoluciones y Corte)
+    // Control Diario de Almacén
     match /warehouse_days/{dateId} {
       allow read: if true;
       allow write: if hasValidAdminProof();
+    }
+
+    // Ubicación GPS en tiempo real de cada chofer
+    match /driver_locations/{driverId} {
+      allow read: if true;
+      allow write: if hasValidDriverProof() || hasValidAdminProof();
+    }
+
+    // Ventas registradas en ruta por los choferes (Contado, Transferencia o Crédito/Anticipo)
+    match /route_sales/{saleId} {
+      allow read: if true;
+      allow create, update: if hasValidDriverProof() || hasValidAdminProof();
+      allow delete: if false;
     }
 
     // Pedidos en línea
@@ -62,7 +104,8 @@ service cloud.firestore {
         && request.resource.data.totalAmount is number
         && request.resource.data.totalAmount >= 0;
 
-      allow update: if hasValidAdminProof();
+      // Admin o Chofer autenticado pueden actualizar estatus de entrega
+      allow update: if hasValidAdminProof() || hasValidDriverProof();
       allow delete: if false;
     }
   }

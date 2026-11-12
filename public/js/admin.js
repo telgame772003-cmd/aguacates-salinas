@@ -5,12 +5,14 @@ import {
   getDocs,
   collection,
   query,
+  where,
   orderBy,
   limit,
   onSnapshot,
   serverTimestamp,
   DEFAULT_STORE_SETTINGS,
   sha256Hex,
+  computeDriverPinHash,
   executeAdminBatch,
   formatCurrency,
   cleanPhoneForWhatsApp
@@ -25,6 +27,20 @@ function getLocalDateStr(dateObj = new Date()) {
   return `${y}-${m}-${d}`;
 }
 
+function mergeCalibers(remoteCalibers = {}) {
+  const out = {};
+  for (const code of ["S", "E", "P", "M"]) {
+    out[code] = {
+      ...DEFAULT_STORE_SETTINGS.calibers[code],
+      ...(remoteCalibers[code] || {})
+    };
+    if (!out[code].minPrice) {
+      out[code].minPrice = DEFAULT_STORE_SETTINGS.calibers[code].minPrice;
+    }
+  }
+  return out;
+}
+
 let currentKeyHash = null;
 let isSystemInitialized = true;
 let storeSettings = structuredClone(DEFAULT_STORE_SETTINGS);
@@ -37,9 +53,22 @@ let searchQuery = "";
 let selectedWhDate = getLocalDateStr();
 let currentWhDoc = createEmptyWhDoc(selectedWhDate);
 
+// Route, GPS & Cortes state (Phase 2)
+let selectedRouteDate = getLocalDateStr();
+let routeWhDoc = createEmptyWhDoc(selectedRouteDate);
+let routeSalesList = [];
+let routeDriverFilterVal = "todos";
+let driverLocations = [];
+let leafletMap = null;
+let leafletMarkers = new Map();
+let hasCenteredMapOnce = false;
+
 let ordersUnsub = null;
 let settingsUnsub = null;
 let whUnsub = null;
+let gpsUnsub = null;
+let routeWhUnsub = null;
+let routeSalesUnsub = null;
 
 function createEmptyWhDoc(dateStr) {
   return {
@@ -167,6 +196,9 @@ btnLogout.addEventListener("click", () => {
   if (ordersUnsub) ordersUnsub();
   if (settingsUnsub) settingsUnsub();
   if (whUnsub) whUnsub();
+  if (gpsUnsub) gpsUnsub();
+  if (routeWhUnsub) routeWhUnsub();
+  if (routeSalesUnsub) routeSalesUnsub();
   dashboardView.style.display = "none";
   btnLogout.style.display = "none";
   btnDownloadBackup.style.display = "none";
@@ -179,8 +211,10 @@ function enterDashboard() {
   btnLogout.style.display = "inline-flex";
   btnDownloadBackup.style.display = "inline-flex";
   document.getElementById("whDatePicker").value = selectedWhDate;
+  document.getElementById("routeDatePicker").value = selectedRouteDate;
   startRealtimeListeners();
   subscribeWarehouseDay(selectedWhDate);
+  subscribeRouteCorteDay(selectedRouteDate);
 }
 
 // Tabs switching
@@ -192,6 +226,13 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     document.querySelectorAll(".admin-tab-pane").forEach((pane) => {
       pane.style.display = pane.id === targetId ? "block" : "none";
     });
+    if (targetId === "tabRoutes") {
+      ensureLeafletMap();
+      setTimeout(() => {
+        if (leafletMap) leafletMap.invalidateSize();
+        renderGpsMapAndChips();
+      }, 120);
+    }
   });
 });
 
@@ -200,9 +241,10 @@ btnDownloadBackup.addEventListener("click", async () => {
   btnDownloadBackup.disabled = true;
   btnDownloadBackup.textContent = "Generando...";
   try {
-    const [ordersSnap, whSnap] = await Promise.all([
+    const [ordersSnap, whSnap, routeSalesSnap] = await Promise.all([
       getDocs(query(collection(db, "orders"), orderBy("createdAtIso", "desc"), limit(500))),
-      getDocs(collection(db, "warehouse_days"))
+      getDocs(collection(db, "warehouse_days")),
+      getDocs(collection(db, "route_sales"))
     ]);
 
     const backupPayload = {
@@ -210,6 +252,7 @@ btnDownloadBackup.addEventListener("click", async () => {
       project: "Aguacates Salinas",
       storeSettings,
       warehouseDays: whSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+      routeSales: routeSalesSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
       orders: ordersSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
     };
 
@@ -236,6 +279,7 @@ btnDownloadBackup.addEventListener("click", async () => {
 function startRealtimeListeners() {
   if (settingsUnsub) settingsUnsub();
   if (ordersUnsub) ordersUnsub();
+  if (gpsUnsub) gpsUnsub();
 
   settingsUnsub = onSnapshot(doc(db, "settings", "store"), (snap) => {
     if (snap.exists()) {
@@ -243,18 +287,19 @@ function startRealtimeListeners() {
       storeSettings = {
         ...DEFAULT_STORE_SETTINGS,
         ...data,
-        calibers: {
-          ...DEFAULT_STORE_SETTINGS.calibers,
-          ...(data.calibers || {})
-        },
+        calibers: mergeCalibers(data.calibers || {}),
         drivers: Array.isArray(data.drivers) ? data.drivers : DEFAULT_STORE_SETTINGS.drivers
       };
+    } else {
+      storeSettings.calibers = mergeCalibers({});
     }
     populateCatalogForm();
     updateBroadcastPreview();
     renderDriversEditor();
     populateTripDriverSelect();
+    populateRouteDriverFilter();
     renderOrdersList();
+    renderRouteCortesAndSales();
   });
 
   const q = query(collection(db, "orders"), orderBy("createdAtIso", "desc"), limit(200));
@@ -262,6 +307,11 @@ function startRealtimeListeners() {
     allOrders = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     updateKPIs();
     renderOrdersList();
+  });
+
+  gpsUnsub = onSnapshot(collection(db, "driver_locations"), (snap) => {
+    driverLocations = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    renderGpsMapAndChips();
   });
 }
 
@@ -934,6 +984,385 @@ document.getElementById("btnPrintWarehouse").addEventListener("click", () => {
   setTimeout(() => document.body.classList.remove("printing-receipt"), 500);
 });
 
+// ================= TAB 1B: RUTA, MAPA GPS Y CORTES (FASE 2) =================
+function ensureLeafletMap() {
+  if (leafletMap || typeof window.L === "undefined") return;
+  const mapEl = document.getElementById("adminLiveMap");
+  if (!mapEl) return;
+
+  // Default center: Saltillo / Región comercial
+  leafletMap = window.L.map("adminLiveMap").setView([25.4267, -100.9954], 12);
+  window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap"
+  }).addTo(leafletMap);
+}
+
+function formatMinutesAgo(isoStr) {
+  if (!isoStr) return "sin señal";
+  const diffSec = Math.max(0, Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000));
+  if (diffSec < 60) return "hace instantes";
+  const mins = Math.floor(diffSec / 60);
+  if (mins < 60) return `hace ${mins} min`;
+  const hrs = Math.floor(mins / 60);
+  return `hace ${hrs} h`;
+}
+
+function renderGpsMapAndChips() {
+  const chipsEl = document.getElementById("gpsDriverChips");
+  const badgeEl = document.getElementById("gpsOnlineBadge");
+  if (!chipsEl || !badgeEl) return;
+
+  const validLocs = driverLocations.filter(
+    (loc) => typeof loc.lat === "number" && typeof loc.lng === "number"
+  );
+
+  // Consider "online" if active === true and updated within last 20 minutes
+  const onlineLocs = validLocs.filter((loc) => {
+    if (!loc.active || !loc.updatedAtIso) return false;
+    return Date.now() - new Date(loc.updatedAtIso).getTime() < 20 * 60 * 1000;
+  });
+
+  badgeEl.textContent = `${onlineLocs.length} en vivo`;
+
+  if (validLocs.length === 0) {
+    chipsEl.innerHTML = `<span style="font-size:0.82rem;color:var(--slate-500);">Aún ningún chofer ha activado su GPS hoy.</span>`;
+  } else {
+    chipsEl.innerHTML = validLocs
+      .map((loc) => {
+        const isOnline = onlineLocs.some((o) => o.id === loc.id);
+        const dot = isOnline ? "🟢" : "⚪";
+        const boxesTxt = typeof loc.boxesInCar === "number" ? ` • ${loc.boxesInCar} cajas` : "";
+        return `
+          <button type="button" class="gps-driver-chip ${isOnline ? "online" : ""}" data-focus-driver="${escapeHtml(loc.id)}">
+            <span>${dot} ${escapeHtml(loc.driverName || loc.id)}</span>
+            <span style="font-weight:600;color:var(--slate-500);">${formatMinutesAgo(loc.updatedAtIso)}${boxesTxt}</span>
+          </button>
+        `;
+      })
+      .join("");
+  }
+
+  if (!leafletMap) return;
+
+  const seenIds = new Set();
+  const boundsPoints = [];
+
+  for (const loc of validLocs) {
+    seenIds.add(loc.id);
+    const isOnline = onlineLocs.some((o) => o.id === loc.id);
+    if (isOnline) boundsPoints.push([loc.lat, loc.lng]);
+
+    const popupHtml = `
+      <div style="font-family:sans-serif;min-width:165px;">
+        <strong style="font-size:0.95rem;color:#132615;">🚗 ${escapeHtml(loc.driverName || loc.id)}</strong>
+        <div style="font-size:0.78rem;color:#4e5c50;margin-top:3px;">
+          Señal: <strong>${formatMinutesAgo(loc.updatedAtIso)}</strong> (${isOnline ? "En vivo" : "Pausado"})
+        </div>
+        ${
+          typeof loc.boxesInCar === "number"
+            ? `<div style="font-size:0.8rem;margin-top:4px;background:#eff6ed;padding:4px 7px;border-radius:6px;">
+                📦 En carro: <strong>${loc.boxesInCar} cajas</strong> (${escapeHtml(loc.ripeness || "Surtido")})
+               </div>`
+            : ""
+        }
+      </div>
+    `;
+
+    if (leafletMarkers.has(loc.id)) {
+      const m = leafletMarkers.get(loc.id);
+      m.setLatLng([loc.lat, loc.lng]);
+      m.setPopupContent(popupHtml);
+    } else {
+      const m = window.L.marker([loc.lat, loc.lng]).addTo(leafletMap).bindPopup(popupHtml);
+      leafletMarkers.set(loc.id, m);
+    }
+  }
+
+  for (const [id, marker] of leafletMarkers.entries()) {
+    if (!seenIds.has(id)) {
+      leafletMap.removeLayer(marker);
+      leafletMarkers.delete(id);
+    }
+  }
+
+  if (!hasCenteredMapOnce && boundsPoints.length > 0) {
+    hasCenteredMapOnce = true;
+    if (boundsPoints.length === 1) {
+      leafletMap.setView(boundsPoints[0], 14);
+    } else {
+      leafletMap.fitBounds(boundsPoints, { padding: [36, 36], maxZoom: 15 });
+    }
+  }
+}
+
+document.getElementById("gpsDriverChips").addEventListener("click", (e) => {
+  const chip = e.target.closest("button[data-focus-driver]");
+  if (!chip) return;
+  const id = chip.dataset.focusDriver;
+  const loc = driverLocations.find((d) => d.id === id);
+  if (!loc || typeof loc.lat !== "number") return;
+  ensureLeafletMap();
+  if (leafletMap) {
+    leafletMap.flyTo([loc.lat, loc.lng], 15, { duration: 0.7 });
+    const marker = leafletMarkers.get(id);
+    if (marker) marker.openPopup();
+  }
+});
+
+function populateRouteDriverFilter() {
+  const sel = document.getElementById("routeDriverFilter");
+  if (!sel) return;
+  const prev = sel.value;
+  const drivers = storeSettings.drivers || [];
+  sel.innerHTML = [
+    `<option value="todos">Todos los choferes</option>`,
+    ...drivers.map((d) => `<option value="${escapeHtml(d.name)}">${escapeHtml(d.name)}</option>`)
+  ].join("");
+  if (prev && (prev === "todos" || drivers.some((d) => d.name === prev))) {
+    sel.value = prev;
+  }
+}
+
+function subscribeRouteCorteDay(dateStr) {
+  if (routeWhUnsub) routeWhUnsub();
+  if (routeSalesUnsub) routeSalesUnsub();
+
+  selectedRouteDate = dateStr;
+  routeWhDoc = createEmptyWhDoc(dateStr);
+  routeSalesList = [];
+  renderRouteCortesAndSales();
+
+  routeWhUnsub = onSnapshot(doc(db, "warehouse_days", dateStr), (snap) => {
+    if (snap.exists()) {
+      const d = snap.data();
+      routeWhDoc = {
+        date: dateStr,
+        trips: Array.isArray(d.trips) ? d.trips : []
+      };
+    } else {
+      routeWhDoc = createEmptyWhDoc(dateStr);
+    }
+    renderRouteCortesAndSales();
+  });
+
+  const qSales = query(collection(db, "route_sales"), where("date", "==", dateStr));
+  routeSalesUnsub = onSnapshot(qSales, (snap) => {
+    routeSalesList = snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => String(b.createdAtIso || "").localeCompare(String(a.createdAtIso || "")));
+    renderRouteCortesAndSales();
+    updateKPIs();
+  });
+}
+
+document.getElementById("routeDatePicker").addEventListener("change", (e) => {
+  if (e.target.value) subscribeRouteCorteDay(e.target.value);
+});
+
+document.getElementById("btnRouteToday").addEventListener("click", () => {
+  const today = getLocalDateStr();
+  document.getElementById("routeDatePicker").value = today;
+  subscribeRouteCorteDay(today);
+});
+
+document.getElementById("routeDriverFilter").addEventListener("change", (e) => {
+  routeDriverFilterVal = e.target.value;
+  renderRouteCortesAndSales();
+});
+
+function renderRouteCortesAndSales() {
+  const corteGrid = document.getElementById("routeCorteCards");
+  const salesContainer = document.getElementById("routeSalesAdminList");
+  const summaryBadge = document.getElementById("routeSalesSummaryBadge");
+  if (!corteGrid || !salesContainer) return;
+
+  // Build unified driver set from settings + warehouse trips + route sales
+  const driverMap = new Map();
+  const ensureDriver = (rawName) => {
+    const key = String(rawName || "Chofer").trim();
+    const norm = key.toLowerCase();
+    if (!driverMap.has(norm)) {
+      driverMap.set(norm, {
+        name: key,
+        vueltas: 0,
+        lastRipeness: "",
+        out: { M: 0, P: 0, E: 0, S: 0 },
+        ret: { M: 0, P: 0, E: 0, S: 0 },
+        sold: { M: 0, P: 0, E: 0, S: 0 },
+        totalOut: 0,
+        totalRet: 0,
+        totalSold: 0,
+        notesCount: 0,
+        grossMoney: 0,
+        cashMoney: 0,
+        transfMoney: 0,
+        creditMoney: 0
+      });
+    }
+    return driverMap.get(norm);
+  };
+
+  for (const d of storeSettings.drivers || []) {
+    ensureDriver(d.name);
+  }
+
+  for (const t of routeWhDoc.trips || []) {
+    const rec = ensureDriver(t.driver);
+    rec.vueltas++;
+    rec.lastRipeness = t.ripeness || rec.lastRipeness;
+    for (const c of ["M", "P", "E", "S"]) {
+      const o = Number(t.out?.[c]) || 0;
+      const r = Number(t.ret?.[c]) || 0;
+      rec.out[c] += o;
+      rec.ret[c] += r;
+      rec.totalOut += o;
+      rec.totalRet += r;
+    }
+  }
+
+  for (const s of routeSalesList) {
+    const rec = ensureDriver(s.driver);
+    rec.notesCount++;
+    for (const c of ["M", "P", "E", "S"]) {
+      const b = Number(s.boxesByCaliber?.[c]) || 0;
+      rec.sold[c] += b;
+      rec.totalSold += b;
+    }
+    rec.grossMoney += Number(s.totalAmount) || 0;
+    rec.cashMoney += Number(s.cashCollected) || 0;
+    rec.transfMoney += Number(s.transferCollected) || 0;
+    rec.creditMoney += Number(s.creditBalance) || 0;
+  }
+
+  const allRecords = Array.from(driverMap.values()).filter((r) =>
+    routeDriverFilterVal === "todos"
+      ? true
+      : r.name.toLowerCase() === routeDriverFilterVal.toLowerCase()
+  );
+
+  if (allRecords.length === 0) {
+    corteGrid.innerHTML = `<div class="cart-empty" style="grid-column:1/-1;">Sin actividad registrada en esta fecha.</div>`;
+  } else {
+    corteGrid.innerHTML = allRecords
+      .map((r) => {
+        const pendingReturn = r.totalOut - r.totalSold - r.totalRet;
+        const pendingByCal = ["M", "P", "E", "S"]
+          .map((c) => `${c}:${r.out[c] - r.sold[c] - r.ret[c]}`)
+          .join(" • ");
+
+        return `
+          <div class="route-corte-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;">
+              <strong style="font-size:1.08rem;color:var(--green-950);">🚗 ${escapeHtml(r.name)}</strong>
+              <span class="ripeness-badge">${r.vueltas} vuelta${r.vueltas === 1 ? "" : "s"} • ${r.notesCount} nota${r.notesCount === 1 ? "" : "s"}</span>
+            </div>
+
+            <div style="background:var(--green-50);border:1px solid var(--slate-200);border-radius:10px;padding:9px 11px;font-size:0.82rem;margin-bottom:10px;">
+              <div style="display:flex;justify-content:space-between;"><span>Salidas Almacén:</span><strong>${r.totalOut} cajas</strong></div>
+              <div style="display:flex;justify-content:space-between;"><span>(−) Ventas en Ruta:</span><strong>${r.totalSold} cajas</strong></div>
+              <div style="display:flex;justify-content:space-between;"><span>(−) Ya devueltas a Almacén:</span><strong>${r.totalRet} cajas</strong></div>
+              <div style="display:flex;justify-content:space-between;border-top:1px dashed var(--slate-300);margin-top:5px;padding-top:5px;color:var(--green-950);font-weight:800;">
+                <span>= Trae en carro / Por devolver:</span>
+                <span>${pendingReturn} cajas</span>
+              </div>
+              <div style="font-size:0.73rem;color:var(--slate-500);margin-top:2px;">Por calibre: ${pendingByCal}</div>
+            </div>
+
+            <div style="font-size:0.82rem;display:flex;flex-direction:column;gap:4px;color:var(--slate-700);">
+              <div style="display:flex;justify-content:space-between;"><span>Venta total en ruta:</span><strong>${formatCurrency(r.grossMoney)}</strong></div>
+              <div style="display:flex;justify-content:space-between;"><span>Transferencias:</span><strong>${formatCurrency(r.transfMoney)}</strong></div>
+              <div style="display:flex;justify-content:space-between;"><span>Dejado a Crédito:</span><strong style="color:var(--red-600);">${formatCurrency(r.creditMoney)}</strong></div>
+            </div>
+
+            <div class="route-corte-money-pill">
+              <div>
+                <div style="font-size:0.7rem;color:#b7ecc0;font-weight:800;text-transform:uppercase;">Efectivo a Recibir</div>
+                <div style="font-size:0.72rem;color:#d6f5db;">Contado + anticipos</div>
+              </div>
+              <strong style="font-size:1.3rem;">${formatCurrency(r.cashMoney)}</strong>
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+  }
+
+  // Filter sales list
+  const filteredSales = routeSalesList.filter((s) =>
+    routeDriverFilterVal === "todos"
+      ? true
+      : String(s.driver || "").toLowerCase() === routeDriverFilterVal.toLowerCase()
+  );
+
+  summaryBadge.textContent = `${filteredSales.length} nota${filteredSales.length === 1 ? "" : "s"}`;
+
+  if (filteredSales.length === 0) {
+    salesContainer.innerHTML = `<div class="cart-empty">Aún no hay notas registradas en ruta para esta fecha.</div>`;
+    return;
+  }
+
+  salesContainer.innerHTML = filteredSales
+    .map((s) => {
+      const timeStr = s.createdAtIso
+        ? new Date(s.createdAtIso).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })
+        : "";
+      const chipsHtml = (s.items || [])
+        .map(
+          (i) =>
+            `<span class="cal-chip">${i.qty} × ${escapeHtml(i.name)} (${formatCurrency(i.unitPrice)})</span>`
+        )
+        .join("");
+
+      return `
+        <article class="order-admin-card" style="padding:14px 16px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
+            <div>
+              <strong style="font-size:1rem;color:var(--green-950);">${escapeHtml(s.customerName)}</strong>
+              <span style="font-size:0.8rem;color:var(--slate-500);margin-left:6px;">${escapeHtml(s.folio)} • 🕒 ${escapeHtml(timeStr)}</span>
+              <div style="font-size:0.82rem;color:var(--slate-700);margin-top:3px;">
+                🚗 Chofer: <strong>${escapeHtml(s.driver)}</strong>
+                &nbsp;•&nbsp; 💳 <strong>${escapeHtml(s.paymentMethod)}</strong>
+                ${s.phone ? `&nbsp;•&nbsp; 📞 <a href="tel:${escapeHtml(s.phone)}" style="text-decoration:underline;">${escapeHtml(s.phone)}</a>` : ""}
+              </div>
+              ${s.creditBalance > 0 ? `<div style="margin-top:4px;color:var(--red-600);font-weight:800;font-size:0.84rem;">⚠️ Crédito pendiente: ${formatCurrency(s.creditBalance)} (Anticipo: ${formatCurrency(s.cashCollected)})</div>` : ""}
+              ${s.notes ? `<div style="font-size:0.78rem;color:var(--slate-500);margin-top:3px;">📝 ${escapeHtml(s.notes)}</div>` : ""}
+            </div>
+
+            <div style="display:flex;align-items:center;gap:8px;">
+              <strong style="font-size:1.18rem;color:var(--green-900);">${formatCurrency(s.totalAmount)}</strong>
+              <button type="button" class="btn btn-outline btn-sm" data-print-route-sale="${escapeHtml(s.id)}">🖨️ Nota</button>
+            </div>
+          </div>
+          <div class="caliber-breakdown-chips" style="margin-top:8px;">${chipsHtml}</div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+document.getElementById("routeSalesAdminList").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-print-route-sale]");
+  if (!btn) return;
+  const sale = routeSalesList.find((s) => s.id === btn.dataset.printRouteSale);
+  if (!sale) return;
+  printOrderReceipt({
+    folio: sale.folio,
+    createdAtIso: sale.createdAtIso,
+    customerName: sale.customerName,
+    phone: sale.phone || "—",
+    address: sale.saleType === "pedido_web" ? "Pedido en línea entregado" : "Venta directa en ruta",
+    paymentMethod: sale.creditBalance > 0
+      ? `Crédito (Anticipo ${formatCurrency(sale.cashCollected)} / Resta ${formatCurrency(sale.creditBalance)})`
+      : sale.paymentMethod,
+    ripeness: "Seleccionado en ruta",
+    notes: sale.notes || "",
+    assignedDriver: sale.driver,
+    items: sale.items || [],
+    totalAmount: sale.totalAmount
+  });
+});
+
 // ================= KPI UPDATES =================
 function isSameLocalDay(isoStr) {
   if (!isoStr) return false;
@@ -950,8 +1379,8 @@ function updateKPIs() {
   let newCount = 0;
   let activeCount = 0;
   let deliveredToday = 0;
-  let boxesToday = 0;
-  let revToday = 0;
+  let webBoxesToday = 0;
+  let webRevToday = 0;
 
   for (const ord of allOrders) {
     if (ord.status === "nuevo") newCount++;
@@ -959,8 +1388,20 @@ function updateKPIs() {
 
     if (isSameLocalDay(ord.createdAtIso) && ord.status !== "cancelado") {
       if (ord.status === "entregado") deliveredToday++;
-      boxesToday += Number(ord.totalBoxes) || 0;
-      revToday += Number(ord.totalAmount) || 0;
+      webBoxesToday += Number(ord.totalBoxes) || 0;
+      webRevToday += Number(ord.totalAmount) || 0;
+    }
+  }
+
+  // Add street-only sales if route date is today (avoid double-counting delivered web orders)
+  let streetRevToday = 0;
+  let streetBoxesToday = 0;
+  if (selectedRouteDate === getLocalDateStr()) {
+    for (const s of routeSalesList) {
+      if (s.saleType !== "pedido_web") {
+        streetRevToday += Number(s.totalAmount) || 0;
+        streetBoxesToday += Number(s.totalBoxes) || 0;
+      }
     }
   }
 
@@ -971,8 +1412,11 @@ function updateKPIs() {
   document.getElementById("kpiDeliveredSub").textContent = `${deliveredToday} entregado${deliveredToday === 1 ? "" : "s"} hoy`;
   document.getElementById("kpiWarehouseStock").textContent = String(whTotals.totalFinal);
   document.getElementById("kpiWarehouseSub").textContent = `M:${whTotals.finalStock.M} • P:${whTotals.finalStock.P} • E:${whTotals.finalStock.E} • S:${whTotals.finalStock.S}`;
-  document.getElementById("kpiRevenueToday").textContent = formatCurrency(revToday);
-  document.getElementById("kpiCalibersSub").textContent = `Pedidos Web hoy: ${boxesToday} caja${boxesToday === 1 ? "" : "s"}`;
+  document.getElementById("kpiRevenueToday").textContent = formatCurrency(webRevToday + streetRevToday);
+  document.getElementById("kpiCalibersSub").textContent =
+    streetBoxesToday > 0
+      ? `Web: ${webBoxesToday} • Calle: ${streetBoxesToday} cajas`
+      : `Pedidos Web hoy: ${webBoxesToday} caja${webBoxesToday === 1 ? "" : "s"}`;
 }
 
 // ================= TAB 2: ORDERS =================
@@ -1352,7 +1796,7 @@ function populateCatalogForm() {
     .map(
       (cal) => `
       <div class="order-admin-card" style="margin-bottom:0;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
           <div style="display:flex;align-items:center;gap:10px;">
             <div class="caliber-letter">${escapeHtml(cal.code)}</div>
             <div>
@@ -1366,13 +1810,17 @@ function populateCatalogForm() {
           </select>
         </div>
 
-        <div class="form-row-2">
+        <div class="form-row-3">
           <div class="form-group">
-            <label class="form-label">Precio por Caja ($ MXN)</label>
+            <label class="form-label">Precio Lista / Web ($)</label>
             <input type="number" min="1" max="9999" class="form-control cal-price-input" data-code="${cal.code}" value="${Number(cal.price) || 0}" style="font-weight:800;font-size:1.05rem;">
           </div>
           <div class="form-group">
-            <label class="form-label">Etiqueta Destacada</label>
+            <label class="form-label" title="El chofer no podrá vender por debajo de este precio">Mínimo Ruta ($)</label>
+            <input type="number" min="1" max="9999" class="form-control cal-minprice-input" data-code="${cal.code}" value="${Number(cal.minPrice) || Number(DEFAULT_STORE_SETTINGS.calibers[cal.code]?.minPrice) || 1}" style="font-weight:800;">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Etiqueta</label>
             <input type="text" class="form-control cal-badge-input" data-code="${cal.code}" value="${escapeHtml(cal.badge || "")}" maxlength="28">
           </div>
         </div>
@@ -1399,6 +1847,10 @@ document.getElementById("catalogForm").addEventListener("submit", async (e) => {
     document.querySelectorAll(".cal-price-input").forEach((inp) => {
       const code = inp.dataset.code;
       if (updatedCalibers[code]) updatedCalibers[code].price = Math.max(1, Math.round(Number(inp.value) || 0));
+    });
+    document.querySelectorAll(".cal-minprice-input").forEach((inp) => {
+      const code = inp.dataset.code;
+      if (updatedCalibers[code]) updatedCalibers[code].minPrice = Math.max(1, Math.round(Number(inp.value) || 0));
     });
     document.querySelectorAll(".cal-avail-input").forEach((sel) => {
       const code = sel.dataset.code;
@@ -1432,7 +1884,7 @@ document.getElementById("catalogForm").addEventListener("submit", async (e) => {
       batch.set(doc(db, "settings", "store"), { ...newSettings, proofId, updatedAt: serverTimestamp() });
     });
 
-    showToast("¡Precios y disponibilidad actualizados en tiempo real!");
+    showToast("¡Precios de lista y mínimos de ruta actualizados!");
   } catch (err) {
     console.error(err);
     showToast("Error al guardar catálogo.");
@@ -1442,7 +1894,25 @@ document.getElementById("catalogForm").addEventListener("submit", async (e) => {
   }
 });
 
-// ================= TAB 4: EDITABLE DRIVERS & SECURITY =================
+// ================= TAB 4: EDITABLE DRIVERS, PIN & SECURITY =================
+function buildDriverInviteWhatsAppUrl(drv, typedPin = "") {
+  const appUrl = `${window.location.origin}/chofer.html?chofer=${encodeURIComponent(drv.name)}`;
+  const cleanPhone = cleanPhoneForWhatsApp(drv.phone || "");
+  const pinLine = typedPin
+    ? `🔑 *Tu PIN de acceso:* ${typedPin}\n`
+    : `🔑 *Ingresa con tu PIN de 4 dígitos asignado en oficina.*\n`;
+
+  const msg =
+    `Hola *${drv.name}*, aquí tienes el enlace de tu *App de Ruta — Comercializadora Salinas* 🥑🚗:\n\n` +
+    `👉 ${appUrl}\n\n` +
+    pinLine +
+    `Ahí verás tus cajas cargadas, pedidos asignados, registro de ventas y tu corte automático.`;
+
+  return cleanPhone
+    ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`
+    : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+}
+
 function renderDriversEditor() {
   const listEl = document.getElementById("driversListEditor");
   const drivers = storeSettings.drivers || [];
@@ -1455,11 +1925,26 @@ function renderDriversEditor() {
   listEl.innerHTML = drivers
     .map(
       (drv, idx) => `
-      <div class="driver-edit-row">
-        <input type="text" class="form-control drv-edit-name" data-idx="${idx}" value="${escapeHtml(drv.name)}" placeholder="Nombre" style="font-weight:700;">
-        <input type="tel" class="form-control drv-edit-phone" data-idx="${idx}" value="${escapeHtml(drv.phone || "")}" placeholder="WhatsApp (10 dígitos)">
-        <button type="button" class="btn btn-primary btn-sm" data-save-driver="${idx}">Guardar</button>
-        <button type="button" class="btn btn-outline btn-sm" data-remove-driver="${idx}" style="color:var(--red-600);border-color:#eccaca;">Quitar</button>
+      <div class="driver-card-editor">
+        <div class="driver-card-inputs">
+          <div>
+            <label class="form-label">Nombre</label>
+            <input type="text" class="form-control drv-edit-name" data-idx="${idx}" value="${escapeHtml(drv.name)}" placeholder="Nombre" style="font-weight:700;">
+          </div>
+          <div>
+            <label class="form-label">WhatsApp (10 dígitos)</label>
+            <input type="tel" class="form-control drv-edit-phone" data-idx="${idx}" value="${escapeHtml(drv.phone || "")}" placeholder="Ej. 8441234567">
+          </div>
+          <div>
+            <label class="form-label">${drv.hasPin ? "PIN Activo (Cambiar)" : "Asignar PIN *"}</label>
+            <input type="text" inputmode="numeric" maxlength="8" class="form-control drv-edit-pin" data-idx="${idx}" placeholder="${drv.hasPin ? "••••" : "Ej. 1111"}">
+          </div>
+        </div>
+        <div class="driver-card-actions">
+          <button type="button" class="btn btn-whatsapp btn-sm" data-invite-driver="${idx}">📲 Mandar App</button>
+          <button type="button" class="btn btn-primary btn-sm" data-save-driver="${idx}">Guardar</button>
+          <button type="button" class="btn btn-outline btn-sm" data-remove-driver="${idx}" style="color:var(--red-600);border-color:#eccaca;">Quitar</button>
+        </div>
       </div>
     `
     )
@@ -1467,22 +1952,50 @@ function renderDriversEditor() {
 }
 
 document.getElementById("driversListEditor").addEventListener("click", async (e) => {
+  const inviteBtn = e.target.closest("button[data-invite-driver]");
+  if (inviteBtn) {
+    const idx = Number(inviteBtn.dataset.inviteDriver);
+    const drv = (storeSettings.drivers || [])[idx];
+    if (!drv) return;
+    const pinInp = document.querySelector(`.drv-edit-pin[data-idx='${idx}']`);
+    const typedPin = pinInp ? pinInp.value.trim() : "";
+    window.open(buildDriverInviteWhatsAppUrl(drv, typedPin), "_blank", "noopener");
+    return;
+  }
+
   const saveBtn = e.target.closest("button[data-save-driver]");
   if (saveBtn) {
     const idx = Number(saveBtn.dataset.saveDriver);
     const nameInput = document.querySelector(`.drv-edit-name[data-idx='${idx}']`);
     const phoneInput = document.querySelector(`.drv-edit-phone[data-idx='${idx}']`);
+    const pinInput = document.querySelector(`.drv-edit-pin[data-idx='${idx}']`);
+
     const newName = nameInput ? nameInput.value.trim() : "";
     const newPhone = phoneInput ? phoneInput.value.trim() : "";
+    const newPin = pinInput ? pinInput.value.trim() : "";
 
     if (!newName) {
       showToast("El nombre del chofer no puede quedar vacío.");
       return;
     }
+    if (newPin && newPin.length < 4) {
+      showToast("El PIN debe tener al menos 4 dígitos.");
+      return;
+    }
 
     const updatedDrivers = [...(storeSettings.drivers || [])];
+    let pinHashToSave = null;
+    if (newPin) {
+      pinHashToSave = await computeDriverPinHash(newName, newPin);
+    }
+
     if (updatedDrivers[idx]) {
-      updatedDrivers[idx] = { ...updatedDrivers[idx], name: newName, phone: newPhone };
+      updatedDrivers[idx] = {
+        ...updatedDrivers[idx],
+        name: newName,
+        phone: newPhone,
+        hasPin: Boolean(pinHashToSave || updatedDrivers[idx].hasPin)
+      };
     }
 
     try {
@@ -1493,8 +2006,17 @@ document.getElementById("driversListEditor").addEventListener("click", async (e)
           proofId,
           updatedAt: serverTimestamp()
         });
+        if (pinHashToSave) {
+          batch.set(doc(db, "driver_keys", pinHashToSave), {
+            driverName: newName,
+            active: true,
+            proofId,
+            updatedAt: serverTimestamp()
+          });
+        }
       });
-      showToast(`Datos de ${newName} guardados.`);
+      if (pinInput) pinInput.value = "";
+      showToast(pinHashToSave ? `Datos y PIN de ${newName} activados.` : `Datos de ${newName} guardados.`);
     } catch (err) {
       console.error(err);
       showToast("No se pudieron guardar los cambios del chofer.");
@@ -1529,19 +2051,28 @@ document.getElementById("driversListEditor").addEventListener("click", async (e)
 document.getElementById("btnAddDriver").addEventListener("click", async () => {
   const nameInp = document.getElementById("newDriverName");
   const phoneInp = document.getElementById("newDriverPhone");
+  const pinInp = document.getElementById("newDriverPin");
   const name = nameInp.value.trim();
   const phone = phoneInp.value.trim();
+  const pin = pinInp ? pinInp.value.trim() : "";
 
   if (!name) {
     showToast("Escribe el nombre del chofer.");
     return;
   }
+  if (!pin || pin.length < 4) {
+    showToast("Asigna un PIN inicial de al menos 4 dígitos (ej. 3333).");
+    return;
+  }
+
+  const pinHash = await computeDriverPinHash(name, pin);
 
   const updatedDrivers = [...(storeSettings.drivers || [])];
   updatedDrivers.push({
     id: name.toLowerCase().replace(/\s+/g, "_") + "_" + Date.now().toString(36),
     name,
-    phone
+    phone,
+    hasPin: true
   });
 
   try {
@@ -1552,10 +2083,17 @@ document.getElementById("btnAddDriver").addEventListener("click", async () => {
         proofId,
         updatedAt: serverTimestamp()
       });
+      batch.set(doc(db, "driver_keys", pinHash), {
+        driverName: name,
+        active: true,
+        proofId,
+        createdAt: serverTimestamp()
+      });
     });
     nameInp.value = "";
     phoneInp.value = "";
-    showToast(`Chofer ${name} agregado.`);
+    if (pinInp) pinInp.value = "";
+    showToast(`Chofer ${name} agregado con su PIN activo.`);
   } catch (err) {
     console.error(err);
     showToast("No se pudo agregar el chofer.");
