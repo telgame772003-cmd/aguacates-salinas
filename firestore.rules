@@ -87,6 +87,20 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Puntos de compra registrados (Tiendas, Carnicerías, Restaurantes, Fruterías, etc.)
+    match /places/{placeId} {
+      allow read: if true;
+      allow create, update: if hasValidDriverProof() || hasValidAdminProof();
+      allow delete: if false;
+    }
+
+    // Bitácora diaria de visitas en ruta (con o sin venta, validadas por GPS)
+    match /place_visits/{visitId} {
+      allow read: if true;
+      allow create, update: if hasValidDriverProof() || hasValidAdminProof();
+      allow delete: if false;
+    }
+
     // Pedidos en línea
     match /orders/{orderId} {
       allow read: if true;

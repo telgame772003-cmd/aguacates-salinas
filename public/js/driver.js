@@ -10,6 +10,8 @@ import {
   onSnapshot,
   serverTimestamp,
   DEFAULT_STORE_SETTINGS,
+  PLACE_CATEGORIES,
+  haversineMeters,
   computeDriverPinHash,
   executeDriverBatch,
   getLocalDateStr,
@@ -28,7 +30,11 @@ let currentDriverKeyHash = null;
 let todayStr = getLocalDateStr();
 let whTripsToday = [];
 let assignedOrders = [];
+let allSalesToday = [];
 let mySalesToday = [];
+let allPlaces = [];
+let visitsToday = [];
+let placeSearchQuery = "";
 
 // Street sale form state
 let saleQtys = { S: 0, E: 0, P: 0, M: 0 };
@@ -39,10 +45,17 @@ let salePayMethod = "Efectivo";
 let whUnsub = null;
 let ordersUnsub = null;
 let salesUnsub = null;
+let placesUnsub = null;
+let visitsUnsub = null;
 let gpsWatchId = null;
 let gpsActive = false;
 let lastGpsSentAt = 0;
 let lastGpsCoords = null;
+let myTrailToday = [];
+let wakeLockSentinel = null;
+
+// Temporary GPS coords for New Place Modal
+let pendingNewPlaceCoords = null;
 
 // DOM Elements
 const driverLoginView = document.getElementById("driverLoginView");
@@ -82,6 +95,11 @@ function driverSlug(name) {
     .replace(/^_|_$/g, "") || "chofer";
 }
 
+function normalizePhone10(raw) {
+  const digits = String(raw || "").replace(/\D/g, "");
+  return digits.length >= 10 ? digits.slice(-10) : digits;
+}
+
 function mergeCalibers(remoteCalibers = {}) {
   const out = {};
   for (const code of ["S", "E", "P", "M"]) {
@@ -94,6 +112,16 @@ function mergeCalibers(remoteCalibers = {}) {
     }
   }
   return out;
+}
+
+function switchToDriverPane(paneId) {
+  document.querySelectorAll(".drv-nav-btn").forEach((b) => {
+    b.classList.toggle("active", b.dataset.pane === paneId);
+  });
+  document.querySelectorAll(".drv-pane").forEach((p) => {
+    p.style.display = p.id === paneId ? "block" : "none";
+  });
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 // ================= STORE SETTINGS & LOGIN SELECT =================
@@ -132,7 +160,6 @@ function populateLoginDrivers() {
     .map((d) => `<option value="${escapeHtml(d.name)}">${escapeHtml(d.name)}</option>`)
     .join("");
 
-  // Support URL query ?chofer=Carlos
   const urlDriver = new URLSearchParams(window.location.search).get("chofer");
   if (urlDriver && drivers.some((d) => d.name.toLowerCase() === urlDriver.toLowerCase())) {
     const match = drivers.find((d) => d.name.toLowerCase() === urlDriver.toLowerCase());
@@ -226,6 +253,8 @@ document.getElementById("btnDriverLogout").addEventListener("click", async () =>
   if (whUnsub) whUnsub();
   if (ordersUnsub) ordersUnsub();
   if (salesUnsub) salesUnsub();
+  if (placesUnsub) placesUnsub();
+  if (visitsUnsub) visitsUnsub();
 
   currentDriverName = null;
   currentDriverKeyHash = null;
@@ -239,7 +268,7 @@ document.getElementById("btnDriverLogout").addEventListener("click", async () =>
   driverLoginView.style.display = "flex";
 });
 
-function enterDriverApp() {
+async function enterDriverApp() {
   driverLoginView.style.display = "none";
   driverAppMain.style.display = "block";
   driverBottomNav.style.display = "grid";
@@ -250,22 +279,51 @@ function enterDriverApp() {
   syncDefaultSalePrices();
   renderStreetSaleCalibers();
   startDriverListeners();
+
+  // Preload today's existing trail if any so we append instead of resetting
+  try {
+    const locSnap = await getDoc(doc(db, "driver_locations", driverSlug(currentDriverName)));
+    if (locSnap.exists()) {
+      const ld = locSnap.data();
+      if (ld.trailDate === getLocalDateStr() && Array.isArray(ld.trail)) {
+        myTrailToday = ld.trail;
+      }
+    }
+  } catch (_) {}
 }
 
 // ================= BOTTOM NAVIGATION =================
 document.querySelectorAll(".drv-nav-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".drv-nav-btn").forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    const paneId = btn.dataset.pane;
-    document.querySelectorAll(".drv-pane").forEach((p) => {
-      p.style.display = p.id === paneId ? "block" : "none";
-    });
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  });
+  btn.addEventListener("click", () => switchToDriverPane(btn.dataset.pane));
 });
 
-// ================= LIVE GPS TRACKING =================
+// ================= SCREEN WAKE LOCK & LIVE GPS TRACKING =================
+async function requestRouteWakeLock() {
+  try {
+    if ("wakeLock" in navigator && !wakeLockSentinel) {
+      wakeLockSentinel = await navigator.wakeLock.request("screen");
+      wakeLockSentinel.addEventListener("release", () => {
+        wakeLockSentinel = null;
+      });
+    }
+  } catch (_) {}
+}
+
+async function releaseRouteWakeLock() {
+  try {
+    if (wakeLockSentinel) {
+      await wakeLockSentinel.release();
+      wakeLockSentinel = null;
+    }
+  } catch (_) {}
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && gpsActive) {
+    requestRouteWakeLock();
+  }
+});
+
 btnToggleGps.addEventListener("click", () => {
   if (gpsActive) {
     stopGpsSharing(true);
@@ -284,35 +342,61 @@ function startGpsSharing() {
   btnToggleGps.classList.add("active");
   gpsDot.textContent = "🟢";
   gpsLabel.textContent = "GPS En Vivo";
-  showToast("Compartiendo ubicación en vivo con oficina.");
+  requestRouteWakeLock();
+  showToast("GPS activo: Oficina y Alejandro ven tu ruta en tiempo real.");
 
   gpsWatchId = navigator.geolocation.watchPosition(
     async (pos) => {
       const now = Date.now();
-      const { latitude, longitude, accuracy, speed } = pos.coords;
+      const lat = Number(pos.coords.latitude.toFixed(6));
+      const lng = Number(pos.coords.longitude.toFixed(6));
+      const { accuracy, speed } = pos.coords;
 
-      // Throttle writes to every 18 seconds unless moved > 40m
-      if (lastGpsSentAt && now - lastGpsSentAt < 18000 && lastGpsCoords) {
-        const dLat = Math.abs(latitude - lastGpsCoords.lat);
-        const dLng = Math.abs(longitude - lastGpsCoords.lng);
-        if (dLat < 0.00035 && dLng < 0.00035) return;
+      const prevCoords = lastGpsCoords;
+      lastGpsCoords = { lat, lng };
+      renderPlacesList();
+
+      // Throttle Firestore writes to ~15s unless moved >= 35m
+      if (lastGpsSentAt && now - lastGpsSentAt < 15000 && prevCoords) {
+        const movedM = haversineMeters(prevCoords.lat, prevCoords.lng, lat, lng) || 0;
+        if (movedM < 35) return;
       }
 
       lastGpsSentAt = now;
-      lastGpsCoords = { lat: latitude, lng: longitude };
-
       if (!currentDriverKeyHash || !currentDriverName) return;
+
+      const currDate = getLocalDateStr();
+      if (currDate !== todayStr) {
+        myTrailToday = [];
+      }
+
+      // Append to daily route trail if moved >= 35m from last trail point
+      const lastTrailPt = myTrailToday[myTrailToday.length - 1];
+      const distFromLastTrail = lastTrailPt
+        ? haversineMeters(lastTrailPt.lat, lastTrailPt.lng, lat, lng)
+        : 9999;
+
+      if (!lastTrailPt || (distFromLastTrail !== null && distFromLastTrail >= 35)) {
+        const hhmm = new Date().toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", hour12: false });
+        myTrailToday.push({ lat, lng, t: hhmm });
+        if (myTrailToday.length > 120) {
+          myTrailToday = myTrailToday.slice(-120);
+        }
+      }
+
       const trunk = computeMyTrunkAndCorte();
 
       try {
         await executeDriverBatch(currentDriverKeyHash, (batch, proofId) => {
           batch.set(doc(db, "driver_locations", driverSlug(currentDriverName)), {
             driverName: currentDriverName,
-            lat: latitude,
-            lng: longitude,
+            lat,
+            lng,
             accuracy: Math.round(accuracy || 0),
             speedKmh: speed && speed > 0 ? Math.round(speed * 3.6) : 0,
             active: true,
+            trailDate: currDate,
+            trail: myTrailToday,
             boxesInCar: trunk.totalAvailable,
             boxesBreakdown: trunk.avail,
             ripeness: trunk.lastRipeness || "Surtido",
@@ -330,7 +414,7 @@ function startGpsSharing() {
       showToast("Permite el acceso a tu ubicación en el navegador para activar GPS.");
       stopGpsSharing(false);
     },
-    { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 }
+    { enableHighAccuracy: true, maximumAge: 8000, timeout: 20000 }
   );
 }
 
@@ -339,6 +423,7 @@ async function stopGpsSharing(notifyServer = true) {
     navigator.geolocation.clearWatch(gpsWatchId);
     gpsWatchId = null;
   }
+  await releaseRouteWakeLock();
   const wasActive = gpsActive;
   gpsActive = false;
   lastGpsSentAt = 0;
@@ -369,12 +454,38 @@ async function stopGpsSharing(notifyServer = true) {
   }
 }
 
+function getOneShotGpsPosition() {
+  return new Promise((resolve) => {
+    if (lastGpsCoords) {
+      resolve(lastGpsCoords);
+    }
+    if (!("geolocation" in navigator)) {
+      resolve(lastGpsCoords);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const coords = {
+          lat: Number(pos.coords.latitude.toFixed(6)),
+          lng: Number(pos.coords.longitude.toFixed(6))
+        };
+        lastGpsCoords = coords;
+        resolve(coords);
+      },
+      () => resolve(lastGpsCoords),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 }
+    );
+  });
+}
+
 // ================= REALTIME OPERATIONAL LISTENERS =================
 function startDriverListeners() {
   todayStr = getLocalDateStr();
   if (whUnsub) whUnsub();
   if (ordersUnsub) ordersUnsub();
   if (salesUnsub) salesUnsub();
+  if (placesUnsub) placesUnsub();
+  if (visitsUnsub) visitsUnsub();
 
   // 1. Today's warehouse car trips for this driver
   whUnsub = onSnapshot(doc(db, "warehouse_days", todayStr), (snap) => {
@@ -402,17 +513,323 @@ function startDriverListeners() {
     renderAssignedOrders();
   });
 
-  // 3. Today's route sales
+  // 3. Today's route sales (all drivers for store visit status + my own for Mi Corte)
   const salesQ = query(collection(db, "route_sales"), where("date", "==", todayStr));
   salesUnsub = onSnapshot(salesQ, (snap) => {
-    mySalesToday = snap.docs
-      .map((d) => ({ id: d.id, ...d.data() }))
+    allSalesToday = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    mySalesToday = allSalesToday
       .filter((s) => String(s.driver || "").toLowerCase() === String(currentDriverName || "").toLowerCase())
       .sort((a, b) => String(b.createdAtIso || "").localeCompare(String(a.createdAtIso || "")));
     refreshAllViews();
+    renderPlacesList();
+  });
+
+  // 4. Registered Points of Purchase (Tiendas, Carnicerías, Restaurantes, Fruterías)
+  placesUnsub = onSnapshot(collection(db, "places"), (snap) => {
+    allPlaces = snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((p) => p.active !== false);
+    loadRecentClientsDatalist();
+    renderPlacesList();
+  });
+
+  // 5. Today's GPS-verified No-Sale Visits
+  const visitsQ = query(collection(db, "place_visits"), where("date", "==", todayStr));
+  visitsUnsub = onSnapshot(visitsQ, (snap) => {
+    visitsToday = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    renderPlacesList();
   });
 }
 
+function findMatchingPlace(name, phone) {
+  const normName = String(name || "").trim().toLowerCase();
+  const normPhone = normalizePhone10(phone);
+  for (const p of allPlaces) {
+    if (normName && String(p.name || "").trim().toLowerCase() === normName) return p;
+    if (normPhone && normPhone.length === 10 && normalizePhone10(p.phone) === normPhone) return p;
+  }
+  return null;
+}
+
+function getPlaceStatusToday(place) {
+  const pNormName = String(place.name || "").trim().toLowerCase();
+  const pNormPhone = normalizePhone10(place.phone);
+
+  const saleMatch = allSalesToday.find(
+    (s) =>
+      s.placeId === place.id ||
+      (pNormName && String(s.customerName || "").trim().toLowerCase() === pNormName) ||
+      (pNormPhone && pNormPhone.length === 10 && normalizePhone10(s.phone) === pNormPhone)
+  );
+  if (saleMatch) {
+    return {
+      code: "sold",
+      badge: `🟢 Vendido hoy (${saleMatch.totalBoxes} cj)`,
+      style: "background:var(--green-100);color:var(--green-800);"
+    };
+  }
+
+  const visitMatch = visitsToday.find((v) => v.placeId === place.id);
+  if (visitMatch) {
+    return {
+      code: "visited",
+      badge: `🟡 Visitado (${visitMatch.driver})`,
+      style: "background:var(--gold-100);color:#7a4f08;"
+    };
+  }
+
+  return {
+    code: "pending",
+    badge: "⚪ Pendiente hoy",
+    style: "background:var(--slate-100);color:var(--slate-700);"
+  };
+}
+
+// ================= VIEW 1B: PUNTOS DE COMPRA / CLIENTES =================
+document.getElementById("driverPlaceSearch").addEventListener("input", (e) => {
+  placeSearchQuery = e.target.value.trim().toLowerCase();
+  renderPlacesList();
+});
+
+function renderPlacesList() {
+  const badgeEl = document.getElementById("placesCountBadge");
+  const listEl = document.getElementById("driverPlacesList");
+  if (!badgeEl || !listEl) return;
+
+  badgeEl.textContent = `${allPlaces.length} punto${allPlaces.length === 1 ? "" : "s"}`;
+
+  const enriched = allPlaces
+    .filter((p) => {
+      if (!placeSearchQuery) return true;
+      const hay = `${p.name || ""} ${p.address || ""} ${p.phone || ""} ${p.category || ""}`.toLowerCase();
+      return hay.includes(placeSearchQuery);
+    })
+    .map((p) => {
+      const dist = lastGpsCoords ? haversineMeters(lastGpsCoords.lat, lastGpsCoords.lng, p.lat, p.lng) : null;
+      return { ...p, dist };
+    })
+    .sort((a, b) => {
+      if (a.dist !== null && b.dist !== null) return a.dist - b.dist;
+      return String(a.name || "").localeCompare(String(b.name || ""));
+    });
+
+  if (enriched.length === 0) {
+    listEl.innerHTML = `
+      <div class="cart-empty" style="background:var(--white);">
+        ${allPlaces.length === 0
+          ? "Aún no hay negocios guardados en el mapa. Toca el botón verde arriba cuando estés afuera de un cliente nuevo."
+          : "Ningún punto coincide con tu búsqueda."}
+      </div>
+    `;
+    return;
+  }
+
+  listEl.innerHTML = enriched
+    .map((p) => {
+      const cat = PLACE_CATEGORIES[p.category] || PLACE_CATEGORIES.tienda;
+      const st = getPlaceStatusToday(p);
+      const distTxt = p.dist !== null
+        ? (p.dist < 1000 ? `📍 a ${p.dist} m` : `📍 a ${(p.dist / 1000).toFixed(1)} km`)
+        : "";
+      const navUrl = `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`;
+
+      return `
+        <article class="corte-summary-box" style="padding:13px;margin-bottom:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+            <div>
+              <strong style="font-size:0.98rem;color:var(--green-950);">${cat.emoji} ${escapeHtml(p.name)}</strong>
+              <div style="font-size:0.75rem;color:var(--slate-500);">
+                ${escapeHtml(cat.label)} ${distTxt ? `• <strong>${distTxt}</strong>` : ""}
+              </div>
+            </div>
+            <span class="ripeness-badge" style="${st.style}">${escapeHtml(st.badge)}</span>
+          </div>
+
+          ${p.address ? `<div style="font-size:0.8rem;color:var(--slate-700);margin-top:4px;">${escapeHtml(p.address)}</div>` : ""}
+
+          <div style="display:grid;grid-template-columns:1.2fr 1.2fr auto;gap:6px;margin-top:10px;">
+            <button type="button" class="btn btn-primary btn-sm" data-sell-place="${escapeHtml(p.id)}" style="padding:8px 6px;font-size:0.76rem;">
+              ➕ Venderle
+            </button>
+            <button type="button" class="btn btn-outline btn-sm" data-visit-place="${escapeHtml(p.id)}" style="padding:8px 6px;font-size:0.76rem;">
+              📍 Pasé (Sin venta)
+            </button>
+            <a href="${navUrl}" target="_blank" rel="noopener" class="btn btn-outline btn-sm" style="padding:8px 10px;font-size:0.76rem;" title="Ir con Google Maps">
+              🗺️
+            </a>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+// Place card actions (Venderle / Registrar Visita)
+const visitNoSaleModal = document.getElementById("visitNoSaleModal");
+
+document.getElementById("driverPlacesList").addEventListener("click", (e) => {
+  const sellBtn = e.target.closest("button[data-sell-place]");
+  if (sellBtn) {
+    const place = allPlaces.find((p) => p.id === sellBtn.dataset.sellPlace);
+    if (!place) return;
+    document.getElementById("saleSelectedPlaceId").value = place.id;
+    document.getElementById("saleClientName").value = place.name || "";
+    document.getElementById("saleClientPhone").value = place.phone || "";
+    const badge = document.getElementById("saleLinkedPlaceBadge");
+    badge.style.display = "block";
+    badge.textContent = `✓ Vinculado en el mapa: ${place.name}`;
+    switchToDriverPane("drvPaneSell");
+    return;
+  }
+
+  const visitBtn = e.target.closest("button[data-visit-place]");
+  if (visitBtn) {
+    const place = allPlaces.find((p) => p.id === visitBtn.dataset.visitPlace);
+    if (!place) return;
+    document.getElementById("visitPlaceId").value = place.id;
+    document.getElementById("visitModalSubtitle").textContent =
+      `Confirmar visita presencial a ${place.name}. Se validará tu distancia GPS.`;
+    visitNoSaleModal.classList.add("open");
+  }
+});
+
+document.getElementById("btnCloseVisitModal").addEventListener("click", () => {
+  visitNoSaleModal.classList.remove("open");
+});
+
+document.getElementById("visitNoSaleForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const placeId = document.getElementById("visitPlaceId").value;
+  const place = allPlaces.find((p) => p.id === placeId);
+  if (!place) {
+    visitNoSaleModal.classList.remove("open");
+    return;
+  }
+
+  const btn = document.getElementById("btnSubmitVisit");
+  btn.disabled = true;
+  btn.textContent = "Verificando GPS...";
+
+  try {
+    const coords = await getOneShotGpsPosition();
+    const dist = coords ? haversineMeters(coords.lat, coords.lng, place.lat, place.lng) : null;
+    const reason = document.getElementById("visitReasonSelect").value;
+    const visitDocId = `${getLocalDateStr()}_${place.id}_${driverSlug(currentDriverName)}`;
+
+    await executeDriverBatch(currentDriverKeyHash, (batch, proofId) => {
+      batch.set(doc(db, "place_visits", visitDocId), {
+        date: getLocalDateStr(),
+        placeId: place.id,
+        placeName: place.name,
+        driver: currentDriverName,
+        reason,
+        driverLat: coords ? coords.lat : null,
+        driverLng: coords ? coords.lng : null,
+        distanceMeters: dist,
+        createdAtIso: new Date().toISOString(),
+        createdAt: serverTimestamp(),
+        proofId
+      });
+    });
+
+    visitNoSaleModal.classList.remove("open");
+    showToast(
+      dist !== null
+        ? `Visita registrada en ${place.name} (GPS a ${dist} m).`
+        : `Visita registrada en ${place.name}.`
+    );
+  } catch (err) {
+    console.error(err);
+    showToast("Error al guardar la visita.");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "✅ Confirmar que pasé aquí (GPS)";
+  }
+});
+
+// New Place Modal (Alta de tienda con GPS del chofer)
+const newPlaceModal = document.getElementById("newPlaceModal");
+const newPlaceGpsStatus = document.getElementById("newPlaceGpsStatus");
+
+document.getElementById("btnOpenNewPlaceModal").addEventListener("click", async () => {
+  pendingNewPlaceCoords = null;
+  newPlaceGpsStatus.textContent = "📡 Leyendo coordenadas GPS de donde estás parado...";
+  newPlaceGpsStatus.style.color = "var(--gold-600)";
+  newPlaceModal.classList.add("open");
+
+  const coords = await getOneShotGpsPosition();
+  if (coords) {
+    pendingNewPlaceCoords = coords;
+    newPlaceGpsStatus.textContent = `✓ Ubicación GPS lista (${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)})`;
+    newPlaceGpsStatus.style.color = "var(--green-800)";
+  } else {
+    newPlaceGpsStatus.textContent = "⚠️ Activa el permiso de ubicación en tu celular para guardar el punto.";
+    newPlaceGpsStatus.style.color = "var(--red-600)";
+  }
+});
+
+document.getElementById("btnCloseNewPlaceModal").addEventListener("click", () => {
+  newPlaceModal.classList.remove("open");
+});
+
+document.getElementById("newPlaceForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!pendingNewPlaceCoords) {
+    const retry = await getOneShotGpsPosition();
+    if (!retry) {
+      showToast("Necesitas permitir el GPS del teléfono para guardar la ubicación del negocio.");
+      return;
+    }
+    pendingNewPlaceCoords = retry;
+  }
+
+  const category = document.getElementById("placeCategoryInput").value;
+  const name = document.getElementById("placeNameInput").value.trim();
+  const phone = document.getElementById("placePhoneInput").value.trim();
+  const address = document.getElementById("placeAddressInput").value.trim();
+
+  if (!name) {
+    showToast("Escribe el nombre del negocio.");
+    return;
+  }
+
+  const btn = document.getElementById("btnSubmitNewPlace");
+  btn.disabled = true;
+  btn.textContent = "Guardando en mapa...";
+
+  try {
+    const newRef = doc(collection(db, "places"));
+    await executeDriverBatch(currentDriverKeyHash, (batch, proofId) => {
+      batch.set(newRef, {
+        name,
+        category,
+        phone,
+        address,
+        lat: pendingNewPlaceCoords.lat,
+        lng: pendingNewPlaceCoords.lng,
+        active: true,
+        createdBy: currentDriverName,
+        createdAtIso: new Date().toISOString(),
+        createdAt: serverTimestamp(),
+        proofId
+      });
+    });
+
+    document.getElementById("placeNameInput").value = "";
+    document.getElementById("placePhoneInput").value = "";
+    document.getElementById("placeAddressInput").value = "";
+    newPlaceModal.classList.remove("open");
+    showToast(`¡${name} guardado en el mapa de Salinas!`);
+  } catch (err) {
+    console.error(err);
+    showToast("Error al guardar el punto de compra.");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "💾 Guardar Punto en Mapa";
+  }
+});
+
+// ================= TRUNK & CORTE CALCULATIONS =================
 function computeMyTrunkAndCorte() {
   const cals = ["M", "P", "E", "S"];
   const out = { M: 0, P: 0, E: 0, S: 0 };
@@ -481,7 +898,6 @@ function computeMyTrunkAndCorte() {
 function refreshAllViews() {
   const stats = computeMyTrunkAndCorte();
 
-  // Trunk Banner
   document.getElementById("trunkTotalAvailable").textContent = `${stats.totalAvailable} caja${stats.totalAvailable === 1 ? "" : "s"}`;
   document.getElementById("trunkRipenessTag").textContent = stats.vueltas > 0
     ? `${stats.vueltas} vuelta${stats.vueltas === 1 ? "" : "s"} • ${stats.lastRipeness || "Surtido"}`
@@ -492,13 +908,11 @@ function refreshAllViews() {
   document.getElementById("trunkE").textContent = String(stats.avail.E);
   document.getElementById("trunkS").textContent = String(stats.avail.S);
 
-  // Update available badges inside Street Sale form
   document.querySelectorAll("[data-avail-badge]").forEach((el) => {
     const code = el.dataset.availBadge;
     el.textContent = `En carro: ${stats.avail[code] ?? 0}`;
   });
 
-  // Mi Corte Pane
   document.getElementById("corteBoxesOut").textContent = `${stats.totalOut} cajas`;
   document.getElementById("corteBoxesSold").textContent = `${stats.totalSold} cajas`;
   document.getElementById("corteBoxesRet").textContent = `${stats.totalRet} cajas`;
@@ -523,7 +937,7 @@ function renderAssignedOrders() {
     listEl.innerHTML = `
       <div class="cart-empty" style="background:var(--white);">
         No tienes pedidos pendientes asignados por oficina en este momento.<br>
-        <span style="font-size:0.8rem;">Para registrar ventas directas a clientes en ruta, toca <strong>➕ Vender</strong> abajo.</span>
+        <span style="font-size:0.8rem;">Toca <strong>🏪 Clientes</strong> para ver tus tiendas o <strong>➕ Vender</strong> abajo.</span>
       </div>
     `;
     return;
@@ -531,7 +945,9 @@ function renderAssignedOrders() {
 
   listEl.innerHTML = assignedOrders
     .map((ord) => {
-      const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ord.address || "")}`;
+      const mapsUrl = typeof ord.lat === "number" && typeof ord.lng === "number"
+        ? `https://www.google.com/maps/dir/?api=1&destination=${ord.lat},${ord.lng}`
+        : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ord.address || "")}`;
       const itemsHtml = (ord.items || [])
         .map((i) => `<span class="cal-chip">${i.qty} × ${escapeHtml(i.name)} (${escapeHtml(i.code)})</span>`)
         .join("");
@@ -580,7 +996,6 @@ function renderAssignedOrders() {
     .join("");
 }
 
-// Assigned orders actions
 const deliverOrderModal = document.getElementById("deliverOrderModal");
 const deliverPayMethod = document.getElementById("deliverPayMethod");
 const deliverCreditWrap = document.getElementById("deliverCreditWrap");
@@ -666,6 +1081,8 @@ document.getElementById("deliverOrderForm").addEventListener("submit", async (e)
     }
   }
 
+  const matchedPlace = findMatchingPlace(ord.customerName, ord.phone);
+
   const saleRecord = {
     folio: ord.folio || "WEB-" + ord.id.slice(0, 5).toUpperCase(),
     sourceOrderId: ord.id,
@@ -674,6 +1091,7 @@ document.getElementById("deliverOrderForm").addEventListener("submit", async (e)
     driver: currentDriverName,
     customerName: ord.customerName,
     phone: ord.phone || "",
+    ...(matchedPlace ? { placeId: matchedPlace.id } : {}),
     items: ord.items || [],
     boxesByCaliber,
     totalBoxes: Number(ord.totalBoxes) || 0,
@@ -792,7 +1210,6 @@ document.getElementById("streetSaleCalibersContainer").addEventListener("input",
   }
 });
 
-// Payment method pills
 document.getElementById("salePayMethodGroup").addEventListener("click", (e) => {
   const btn = e.target.closest(".pay-pill-btn");
   if (!btn) return;
@@ -855,11 +1272,31 @@ function generateRouteFolio() {
 
 function loadRecentClientsDatalist() {
   try {
-    const list = JSON.parse(localStorage.getItem(RECENT_CLIENTS_KEY) || "[]");
+    const localList = JSON.parse(localStorage.getItem(RECENT_CLIENTS_KEY) || "[]");
+    const seen = new Set();
+    const merged = [];
+
+    for (const p of allPlaces) {
+      const k = String(p.name || "").toLowerCase();
+      if (k && !seen.has(k)) {
+        seen.add(k);
+        merged.push({ name: p.name, phone: p.phone || "" });
+      }
+    }
+    for (const c of localList) {
+      const k = String(c.name || "").toLowerCase();
+      if (k && !seen.has(k)) {
+        seen.add(k);
+        merged.push({ name: c.name, phone: c.phone || "" });
+      }
+    }
+
     const dl = document.getElementById("recentClientsDatalist");
-    dl.innerHTML = list
-      .map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.phone || "")}</option>`)
-      .join("");
+    if (dl) {
+      dl.innerHTML = merged
+        .map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.phone || "")}</option>`)
+        .join("");
+    }
   } catch (_) {}
 }
 
@@ -873,16 +1310,29 @@ function rememberClient(name, phone) {
   } catch (_) {}
 }
 
-document.getElementById("saleClientName").addEventListener("change", (e) => {
-  try {
-    const val = e.target.value.trim().toLowerCase();
-    const list = JSON.parse(localStorage.getItem(RECENT_CLIENTS_KEY) || "[]");
-    const found = list.find((c) => c.name.toLowerCase() === val);
-    const phoneEl = document.getElementById("saleClientPhone");
-    if (found && found.phone && !phoneEl.value) {
-      phoneEl.value = found.phone;
+document.getElementById("saleClientName").addEventListener("input", (e) => {
+  const val = e.target.value.trim();
+  const matchedPlace = findMatchingPlace(val, "");
+  const badge = document.getElementById("saleLinkedPlaceBadge");
+  const placeInp = document.getElementById("saleSelectedPlaceId");
+  const phoneEl = document.getElementById("saleClientPhone");
+
+  if (matchedPlace) {
+    placeInp.value = matchedPlace.id;
+    badge.style.display = "block";
+    badge.textContent = `✓ Vinculado en el mapa: ${matchedPlace.name}`;
+    if (matchedPlace.phone && !phoneEl.value) {
+      phoneEl.value = matchedPlace.phone;
     }
-  } catch (_) {}
+  } else {
+    placeInp.value = "";
+    badge.style.display = "none";
+    try {
+      const list = JSON.parse(localStorage.getItem(RECENT_CLIENTS_KEY) || "[]");
+      const found = list.find((c) => c.name.toLowerCase() === val.toLowerCase());
+      if (found && found.phone && !phoneEl.value) phoneEl.value = found.phone;
+    } catch (_) {}
+  }
 });
 
 document.getElementById("streetSaleForm").addEventListener("submit", async (e) => {
@@ -891,6 +1341,7 @@ document.getElementById("streetSaleForm").addEventListener("submit", async (e) =
   const customerName = document.getElementById("saleClientName").value.trim();
   const phone = document.getElementById("saleClientPhone").value.trim();
   const notes = document.getElementById("saleNotes").value.trim();
+  const explicitPlaceId = document.getElementById("saleSelectedPlaceId").value;
 
   if (!customerName) {
     showToast("Escribe el nombre del cliente o negocio.");
@@ -907,7 +1358,6 @@ document.getElementById("streetSaleForm").addEventListener("submit", async (e) =
   let totalBoxes = 0;
   let totalAmount = 0;
 
-  // Validate minPrice per caliber
   for (const code of ["S", "E", "P", "M"]) {
     const qty = saleQtys[code] || 0;
     if (qty <= 0) continue;
@@ -922,13 +1372,7 @@ document.getElementById("streetSaleForm").addEventListener("submit", async (e) =
     }
 
     const subtotal = qty * unitPrice;
-    items.push({
-      code,
-      name: cal.name,
-      qty,
-      unitPrice,
-      subtotal
-    });
+    items.push({ code, name: cal.name, qty, unitPrice, subtotal });
     boxesByCaliber[code] = qty;
     totalBoxes += qty;
     totalAmount += subtotal;
@@ -953,6 +1397,10 @@ document.getElementById("streetSaleForm").addEventListener("submit", async (e) =
     creditBalance = Math.max(0, totalAmount - adv);
   }
 
+  const matchedPlace = explicitPlaceId
+    ? allPlaces.find((p) => p.id === explicitPlaceId)
+    : findMatchingPlace(customerName, phone);
+
   const folio = generateRouteFolio();
   const saleRecord = {
     folio,
@@ -961,6 +1409,8 @@ document.getElementById("streetSaleForm").addEventListener("submit", async (e) =
     driver: currentDriverName,
     customerName,
     phone,
+    ...(matchedPlace ? { placeId: matchedPlace.id } : {}),
+    ...(lastGpsCoords ? { saleLat: lastGpsCoords.lat, saleLng: lastGpsCoords.lng } : {}),
     items,
     boxesByCaliber,
     totalBoxes,
@@ -986,9 +1436,10 @@ document.getElementById("streetSaleForm").addEventListener("submit", async (e) =
 
     rememberClient(customerName, phone);
 
-    // Reset form
     saleQtys = { S: 0, E: 0, P: 0, M: 0 };
     syncDefaultSalePrices();
+    document.getElementById("saleSelectedPlaceId").value = "";
+    document.getElementById("saleLinkedPlaceBadge").style.display = "none";
     document.getElementById("saleClientName").value = "";
     document.getElementById("saleClientPhone").value = "";
     document.getElementById("saleNotes").value = "";
@@ -1090,5 +1541,4 @@ function renderTodaySalesList() {
     .join("");
 }
 
-// Kickoff
 restoreDriverSession();

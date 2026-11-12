@@ -169,3 +169,50 @@ export function cleanPhoneForWhatsApp(rawPhone) {
   if (digits.length === 13 && digits.startsWith("521")) return "52" + digits.slice(3);
   return digits;
 }
+
+export const PLACE_CATEGORIES = {
+  tienda: { id: "tienda", label: "Tienda / Abarrotes", emoji: "🏪" },
+  carniceria: { id: "carniceria", label: "Carnicería", emoji: "🥩" },
+  restaurante: { id: "restaurante", label: "Restaurante / Taquería", emoji: "🍽️" },
+  fruteria: { id: "fruteria", label: "Frutería / Verdulería", emoji: "🥑" },
+  otro: { id: "otro", label: "Otro Giro", emoji: "🏢" }
+};
+
+export function haversineMeters(lat1, lng1, lat2, lng2) {
+  if (
+    typeof lat1 !== "number" || typeof lng1 !== "number" ||
+    typeof lat2 !== "number" || typeof lng2 !== "number"
+  ) {
+    return null;
+  }
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const R = 6371000;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return Math.round(2 * R * Math.asin(Math.sqrt(a)));
+}
+
+export function parseCoordsFromInput(raw) {
+  const txt = String(raw || "").trim();
+  if (!txt) return null;
+
+  // Match !3dLAT!4dLNG in Google Maps URLs
+  const m3d = txt.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+  if (m3d) {
+    return { lat: parseFloat(m3d[1]), lng: parseFloat(m3d[2]) };
+  }
+
+  // Match ?q=LAT,LNG or @LAT,LNG or ll=LAT,LNG or plain "LAT, LNG"
+  const pair = txt.match(/(-?\d{1,2}\.\d{3,})\s*[,\s]\s*(-?\d{2,3}\.\d{3,})/);
+  if (pair) {
+    const lat = parseFloat(pair[1]);
+    const lng = parseFloat(pair[2]);
+    if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+      return { lat, lng };
+    }
+  }
+  return null;
+}

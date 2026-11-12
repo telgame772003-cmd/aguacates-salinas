@@ -15,6 +15,7 @@ const STORAGE_ORDERS_KEY = "salinas_my_order_ids_v1";
 
 let storeSettings = structuredClone(DEFAULT_STORE_SETTINGS);
 let cart = { S: 0, E: 0, P: 0, M: 0 };
+let customerCoords = null;
 let activeOrderUnsubs = [];
 
 // DOM References
@@ -245,7 +246,39 @@ function loadSavedCustomer() {
     if (data.address) document.getElementById("customerAddress").value = data.address;
     if (data.paymentMethod) document.getElementById("paymentMethod").value = data.paymentMethod;
     if (data.ripeness) document.getElementById("ripenessPref").value = data.ripeness;
+    if (typeof data.lat === "number" && typeof data.lng === "number") {
+      customerCoords = { lat: data.lat, lng: data.lng };
+      const st = document.getElementById("orderGpsStatus");
+      if (st) st.textContent = "✓ Ubicación guardada lista";
+    }
   } catch (_) {}
+}
+
+const btnAttachOrderGps = document.getElementById("btnAttachOrderGps");
+if (btnAttachOrderGps) {
+  btnAttachOrderGps.addEventListener("click", () => {
+    if (!("geolocation" in navigator)) {
+      showToast("Tu navegador no soporta GPS.");
+      return;
+    }
+    const st = document.getElementById("orderGpsStatus");
+    if (st) st.textContent = "Obteniendo punto...";
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        customerCoords = {
+          lat: Number(pos.coords.latitude.toFixed(6)),
+          lng: Number(pos.coords.longitude.toFixed(6))
+        };
+        if (st) st.textContent = "✓ Ubicación exacta adjunta";
+        showToast("Ubicación GPS adjuntada a tu pedido.");
+      },
+      () => {
+        if (st) st.textContent = "";
+        showToast("No se pudo leer el GPS (puedes enviar tu pedido normal con la dirección escrita).");
+      },
+      { enableHighAccuracy: true, timeout: 12000 }
+    );
+  });
 }
 
 function saveCustomerProfile(profile) {
@@ -366,6 +399,7 @@ orderForm.addEventListener("submit", async (e) => {
       boxesByCaliber,
       totalBoxes,
       totalAmount,
+      ...(customerCoords ? { lat: customerCoords.lat, lng: customerCoords.lng } : {}),
       status: "nuevo",
       assignedDriver: "",
       createdAt: serverTimestamp(),
@@ -373,7 +407,14 @@ orderForm.addEventListener("submit", async (e) => {
     };
 
     const docRef = await addDoc(collection(db, "orders"), orderPayload);
-    saveCustomerProfile({ customerName, phone, address, paymentMethod, ripeness });
+    saveCustomerProfile({
+      customerName,
+      phone,
+      address,
+      paymentMethod,
+      ripeness,
+      ...(customerCoords ? { lat: customerCoords.lat, lng: customerCoords.lng } : {})
+    });
     saveOrderIdLocally(docRef.id);
 
     // Clear cart & notes

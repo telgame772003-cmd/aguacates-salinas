@@ -11,6 +11,8 @@ import {
   onSnapshot,
   serverTimestamp,
   DEFAULT_STORE_SETTINGS,
+  PLACE_CATEGORIES,
+  parseCoordsFromInput,
   sha256Hex,
   computeDriverPinHash,
   executeAdminBatch,
@@ -25,6 +27,11 @@ function getLocalDateStr(dateObj = new Date()) {
   const m = String(dateObj.getMonth() + 1).padStart(2, "0");
   const d = String(dateObj.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
+}
+
+function normalizePhone10(raw) {
+  const digits = String(raw || "").replace(/\D/g, "");
+  return digits.length >= 10 ? digits.slice(-10) : digits;
 }
 
 function mergeCalibers(remoteCalibers = {}) {
@@ -49,26 +56,38 @@ let statusFilter = "todos";
 let dateFilter = "all";
 let searchQuery = "";
 
+// Live New-Order Alert state
+let soundAlertsEnabled = localStorage.getItem("salinas_sound_alerts") !== "off";
+let audioCtx = null;
+let knownOrderIds = new Set();
+let initialOrdersLoaded = false;
+
 // Warehouse state
 let selectedWhDate = getLocalDateStr();
 let currentWhDoc = createEmptyWhDoc(selectedWhDate);
 
-// Route, GPS & Cortes state (Phase 2)
+// Route, GPS, Places & Cortes state
 let selectedRouteDate = getLocalDateStr();
 let routeWhDoc = createEmptyWhDoc(selectedRouteDate);
 let routeSalesList = [];
+let routeVisitsList = [];
+let allPlaces = [];
 let routeDriverFilterVal = "todos";
 let driverLocations = [];
 let leafletMap = null;
-let leafletMarkers = new Map();
+let mapLayerGroup = null;
+let mapFocusMarkers = new Map();
 let hasCenteredMapOnce = false;
+let mapPickCallback = null;
 
 let ordersUnsub = null;
 let settingsUnsub = null;
 let whUnsub = null;
 let gpsUnsub = null;
+let placesUnsub = null;
 let routeWhUnsub = null;
 let routeSalesUnsub = null;
+let routeVisitsUnsub = null;
 
 function createEmptyWhDoc(dateStr) {
   return {
@@ -189,6 +208,120 @@ function persistHash(hash) {
   }
 }
 
+const btnToggleAlertSound = document.getElementById("btnToggleAlertSound");
+const soundBtnLabel = document.getElementById("soundBtnLabel");
+const liveNewOrdersAlertBar = document.getElementById("liveNewOrdersAlertBar");
+
+function playOrderChime() {
+  if (!soundAlertsEnabled) return;
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!audioCtx) audioCtx = new Ctx();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+
+    const now = audioCtx.currentTime;
+    const notes = [
+      { freq: 587.33, start: 0, dur: 0.16 },
+      { freq: 880.0, start: 0.18, dur: 0.34 }
+    ];
+    for (const n of notes) {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(n.freq, now + n.start);
+      gain.gain.setValueAtTime(0.001, now + n.start);
+      gain.gain.exponentialRampToValueAtTime(0.24, now + n.start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + n.start + n.dur);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(now + n.start);
+      osc.stop(now + n.start + n.dur + 0.02);
+    }
+  } catch (err) {
+    console.warn("Audio bloqueado hasta interacción:", err);
+  }
+}
+
+function updateSoundButtonUI() {
+  if (!btnToggleAlertSound) return;
+  btnToggleAlertSound.innerHTML = soundAlertsEnabled
+    ? '🔔 <span class="hide-mobile" id="soundBtnLabel">Sonido</span>'
+    : '🔕 <span class="hide-mobile" id="soundBtnLabel">Silencio</span>';
+}
+updateSoundButtonUI();
+
+if (btnToggleAlertSound) {
+  btnToggleAlertSound.addEventListener("click", async () => {
+    soundAlertsEnabled = !soundAlertsEnabled;
+    localStorage.setItem("salinas_sound_alerts", soundAlertsEnabled ? "on" : "off");
+    updateSoundButtonUI();
+    if (soundAlertsEnabled) {
+      playOrderChime();
+      if ("Notification" in window && Notification.permission === "default") {
+        try {
+          await Notification.requestPermission();
+        } catch (_) {}
+      }
+      showToast("🔔 Alarma sonora de pedidos nuevos activada.");
+    } else {
+      showToast("🔕 Alarma sonora silenciada.");
+    }
+  });
+}
+
+function switchAdminTab(targetId) {
+  document.querySelectorAll(".tab-btn").forEach((b) => {
+    b.classList.toggle("active", b.dataset.tab === targetId);
+  });
+  document.querySelectorAll(".admin-tab-pane").forEach((pane) => {
+    pane.style.display = pane.id === targetId ? "block" : "none";
+  });
+  if (targetId === "tabRoutes") {
+    ensureLeafletMap();
+    setTimeout(() => {
+      if (leafletMap) leafletMap.invalidateSize();
+      renderGpsMapAndChips();
+    }, 120);
+  }
+}
+
+function updateLiveOrderAlertBar() {
+  if (!liveNewOrdersAlertBar) return;
+  const newOrders = allOrders.filter((o) => o.status === "nuevo");
+  if (newOrders.length === 0) {
+    liveNewOrdersAlertBar.classList.remove("active");
+    return;
+  }
+  const latest = newOrders[0];
+  const titleEl = document.getElementById("liveNewOrdersTitle");
+  const subEl = document.getElementById("liveNewOrdersSub");
+  if (titleEl) {
+    titleEl.textContent =
+      newOrders.length === 1
+        ? `¡1 pedido nuevo sin asignar! (${latest.customerName || latest.folio})`
+        : `¡Tienes ${newOrders.length} pedidos nuevos esperando asignación!`;
+  }
+  if (subEl) {
+    subEl.textContent = `Último: ${latest.folio || ""} • ${latest.totalBoxes || 0} caja(s) • ${formatCurrency(latest.totalAmount || 0)}`;
+  }
+  liveNewOrdersAlertBar.classList.add("active");
+}
+
+document.getElementById("btnAlertJumpMap")?.addEventListener("click", () => {
+  switchAdminTab("tabRoutes");
+  document.getElementById("adminMapCard")?.scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+document.getElementById("btnAlertJumpOrders")?.addEventListener("click", () => {
+  statusFilter = "nuevo";
+  document.querySelectorAll("#statusFilterBar button").forEach((b) => {
+    b.className = b.dataset.status === "nuevo" ? "btn btn-sm btn-primary" : "btn btn-sm btn-outline";
+  });
+  renderOrdersList();
+  switchAdminTab("tabOrders");
+});
+
 btnLogout.addEventListener("click", () => {
   currentKeyHash = null;
   localStorage.removeItem(SESSION_HASH_KEY);
@@ -197,11 +330,17 @@ btnLogout.addEventListener("click", () => {
   if (settingsUnsub) settingsUnsub();
   if (whUnsub) whUnsub();
   if (gpsUnsub) gpsUnsub();
+  if (placesUnsub) placesUnsub();
   if (routeWhUnsub) routeWhUnsub();
   if (routeSalesUnsub) routeSalesUnsub();
+  if (routeVisitsUnsub) routeVisitsUnsub();
+  initialOrdersLoaded = false;
+  knownOrderIds.clear();
   dashboardView.style.display = "none";
   btnLogout.style.display = "none";
   btnDownloadBackup.style.display = "none";
+  if (btnToggleAlertSound) btnToggleAlertSound.style.display = "none";
+  if (liveNewOrdersAlertBar) liveNewOrdersAlertBar.classList.remove("active");
   loginView.style.display = "flex";
 });
 
@@ -210,6 +349,7 @@ function enterDashboard() {
   dashboardView.style.display = "block";
   btnLogout.style.display = "inline-flex";
   btnDownloadBackup.style.display = "inline-flex";
+  if (btnToggleAlertSound) btnToggleAlertSound.style.display = "inline-flex";
   document.getElementById("whDatePicker").value = selectedWhDate;
   document.getElementById("routeDatePicker").value = selectedRouteDate;
   startRealtimeListeners();
@@ -219,21 +359,7 @@ function enterDashboard() {
 
 // Tabs switching
 document.querySelectorAll(".tab-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    const targetId = btn.dataset.tab;
-    document.querySelectorAll(".admin-tab-pane").forEach((pane) => {
-      pane.style.display = pane.id === targetId ? "block" : "none";
-    });
-    if (targetId === "tabRoutes") {
-      ensureLeafletMap();
-      setTimeout(() => {
-        if (leafletMap) leafletMap.invalidateSize();
-        renderGpsMapAndChips();
-      }, 120);
-    }
-  });
+  btn.addEventListener("click", () => switchAdminTab(btn.dataset.tab));
 });
 
 // ================= BACKUP JSON DOWNLOAD =================
@@ -241,16 +367,20 @@ btnDownloadBackup.addEventListener("click", async () => {
   btnDownloadBackup.disabled = true;
   btnDownloadBackup.textContent = "Generando...";
   try {
-    const [ordersSnap, whSnap, routeSalesSnap] = await Promise.all([
+    const [ordersSnap, whSnap, routeSalesSnap, placesSnap, visitsSnap] = await Promise.all([
       getDocs(query(collection(db, "orders"), orderBy("createdAtIso", "desc"), limit(500))),
       getDocs(collection(db, "warehouse_days")),
-      getDocs(collection(db, "route_sales"))
+      getDocs(collection(db, "route_sales")),
+      getDocs(collection(db, "places")),
+      getDocs(collection(db, "place_visits"))
     ]);
 
     const backupPayload = {
       exportedAt: new Date().toISOString(),
       project: "Aguacates Salinas",
       storeSettings,
+      places: placesSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+      placeVisits: visitsSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
       warehouseDays: whSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
       routeSales: routeSalesSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
       orders: ordersSnap.docs.map((d) => ({ id: d.id, ...d.data() }))
@@ -280,6 +410,7 @@ function startRealtimeListeners() {
   if (settingsUnsub) settingsUnsub();
   if (ordersUnsub) ordersUnsub();
   if (gpsUnsub) gpsUnsub();
+  if (placesUnsub) placesUnsub();
 
   settingsUnsub = onSnapshot(doc(db, "settings", "store"), (snap) => {
     if (snap.exists()) {
@@ -300,18 +431,52 @@ function startRealtimeListeners() {
     populateRouteDriverFilter();
     renderOrdersList();
     renderRouteCortesAndSales();
+    renderGpsMapAndChips();
   });
 
   const q = query(collection(db, "orders"), orderBy("createdAtIso", "desc"), limit(200));
   ordersUnsub = onSnapshot(q, (snap) => {
-    allOrders = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const incoming = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+    if (initialOrdersLoaded) {
+      const brandNew = incoming.filter((o) => !knownOrderIds.has(o.id) && o.status === "nuevo");
+      if (brandNew.length > 0) {
+        const newest = brandNew[0];
+        playOrderChime();
+        showToast(`🚨 ¡Nuevo pedido de ${newest.customerName} (${newest.totalBoxes} cajas)!`);
+        if ("Notification" in window && Notification.permission === "granted") {
+          try {
+            new Notification("🥑 Nuevo Pedido — Aguacates Salinas", {
+              body: `${newest.customerName}: ${newest.totalBoxes} caja(s) • ${formatCurrency(newest.totalAmount)}`,
+              icon: "assets/avocados-icon.png"
+            });
+          } catch (_) {}
+        }
+      }
+    }
+    for (const o of incoming) knownOrderIds.add(o.id);
+    initialOrdersLoaded = true;
+
+    allOrders = incoming;
     updateKPIs();
+    updateLiveOrderAlertBar();
     renderOrdersList();
+    renderGpsMapAndChips();
   });
 
   gpsUnsub = onSnapshot(collection(db, "driver_locations"), (snap) => {
     driverLocations = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     renderGpsMapAndChips();
+  });
+
+  placesUnsub = onSnapshot(collection(db, "places"), (snap) => {
+    allPlaces = snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((p) => p.active !== false)
+      .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "es"));
+    renderGpsMapAndChips();
+    renderAdminPlacesDirectory();
+    renderOrdersList();
   });
 }
 
@@ -984,7 +1149,7 @@ document.getElementById("btnPrintWarehouse").addEventListener("click", () => {
   setTimeout(() => document.body.classList.remove("printing-receipt"), 500);
 });
 
-// ================= TAB 1B: RUTA, MAPA GPS Y CORTES (FASE 2) =================
+// ================= TAB 1B: RUTA, MAPA GPS, PUNTOS Y CORTES (FASE 2.5) =================
 function ensureLeafletMap() {
   if (leafletMap || typeof window.L === "undefined") return;
   const mapEl = document.getElementById("adminLiveMap");
@@ -996,7 +1161,31 @@ function ensureLeafletMap() {
     maxZoom: 19,
     attribution: "&copy; OpenStreetMap"
   }).addTo(leafletMap);
+
+  mapLayerGroup = window.L.layerGroup().addTo(leafletMap);
+
+  leafletMap.on("click", (ev) => {
+    if (typeof mapPickCallback === "function") {
+      const cb = mapPickCallback;
+      mapPickCallback = null;
+      const hintEl = document.getElementById("mapPickHint");
+      if (hintEl) hintEl.style.display = "none";
+      cb({ lat: Number(ev.latlng.lat.toFixed(6)), lng: Number(ev.latlng.lng.toFixed(6)) });
+    }
+  });
 }
+
+document.getElementById("btnToggleMapFullscreen")?.addEventListener("click", () => {
+  const card = document.getElementById("adminMapCard");
+  const btn = document.getElementById("btnToggleMapFullscreen");
+  if (!card) return;
+  const isFull = card.classList.toggle("is-fullscreen");
+  if (btn) btn.textContent = isFull ? "✕ Salir Pantalla Completa" : "⛶ Pantalla Completa";
+  ensureLeafletMap();
+  setTimeout(() => {
+    if (leafletMap) leafletMap.invalidateSize();
+  }, 150);
+});
 
 function formatMinutesAgo(isoStr) {
   if (!isoStr) return "sin señal";
@@ -1008,9 +1197,72 @@ function formatMinutesAgo(isoStr) {
   return `hace ${hrs} h`;
 }
 
+function resolveOrderCoords(ord) {
+  if (typeof ord.lat === "number" && typeof ord.lng === "number") {
+    return { lat: ord.lat, lng: ord.lng, source: "gps_pedido" };
+  }
+  const ordPhone10 = normalizePhone10(ord.phone);
+  const ordNameNorm = String(ord.customerName || "").trim().toLowerCase();
+
+  for (const p of allPlaces) {
+    if (typeof p.lat !== "number" || typeof p.lng !== "number") continue;
+    const pPhone10 = normalizePhone10(p.phone);
+    const pNameNorm = String(p.name || "").trim().toLowerCase();
+    if ((ordPhone10 && pPhone10 && ordPhone10 === pPhone10) || (ordNameNorm && pNameNorm && ordNameNorm === pNameNorm)) {
+      return { lat: p.lat, lng: p.lng, source: "punto_guardado", placeName: p.name };
+    }
+  }
+  return null;
+}
+
+function getPlaceDailyStatus(place) {
+  const pPhone10 = normalizePhone10(place.phone);
+  const pNameNorm = String(place.name || "").trim().toLowerCase();
+
+  const matchingSales = routeSalesList.filter((s) => {
+    if (s.placeId && s.placeId === place.id) return true;
+    const sPhone10 = normalizePhone10(s.phone);
+    const sNameNorm = String(s.customerName || "").trim().toLowerCase();
+    return (pPhone10 && sPhone10 && pPhone10 === sPhone10) || (pNameNorm && sNameNorm && pNameNorm === sNameNorm);
+  });
+
+  if (matchingSales.length > 0) {
+    const boxes = matchingSales.reduce((acc, s) => acc + (Number(s.totalBoxes) || 0), 0);
+    const amount = matchingSales.reduce((acc, s) => acc + (Number(s.totalAmount) || 0), 0);
+    const lastSale = matchingSales[0];
+    return {
+      state: "sold",
+      boxes,
+      amount,
+      driver: lastSale.driver || "",
+      timeIso: lastSale.createdAtIso || ""
+    };
+  }
+
+  const matchingVisits = routeVisitsList.filter((v) => {
+    if (v.placeId && v.placeId === place.id) return true;
+    const vNameNorm = String(v.placeName || "").trim().toLowerCase();
+    return pNameNorm && vNameNorm && pNameNorm === vNameNorm;
+  });
+
+  if (matchingVisits.length > 0) {
+    const v = matchingVisits[0];
+    return {
+      state: "visited",
+      reason: v.reason || "Visitado sin venta",
+      driver: v.driver || "",
+      distanceMeters: typeof v.distanceMeters === "number" ? v.distanceMeters : null,
+      timeIso: v.createdAtIso || ""
+    };
+  }
+
+  return { state: "pending" };
+}
+
 function renderGpsMapAndChips() {
   const chipsEl = document.getElementById("gpsDriverChips");
   const badgeEl = document.getElementById("gpsOnlineBadge");
+  const summaryEl = document.getElementById("placesSupervisionSummary");
   if (!chipsEl || !badgeEl) return;
 
   const validLocs = driverLocations.filter(
@@ -1023,7 +1275,7 @@ function renderGpsMapAndChips() {
     return Date.now() - new Date(loc.updatedAtIso).getTime() < 20 * 60 * 1000;
   });
 
-  badgeEl.textContent = `${onlineLocs.length} en vivo`;
+  badgeEl.textContent = `${onlineLocs.length} carro${onlineLocs.length === 1 ? "" : "s"} en vivo`;
 
   if (validLocs.length === 0) {
     chipsEl.innerHTML = `<span style="font-size:0.82rem;color:var(--slate-500);">Aún ningún chofer ha activado su GPS hoy.</span>`;
@@ -1043,47 +1295,191 @@ function renderGpsMapAndChips() {
       .join("");
   }
 
-  if (!leafletMap) return;
+  // Compute daily place supervision counts even if map is hidden
+  let soldCount = 0;
+  let visitedCount = 0;
+  let pendingCount = 0;
+  const validPlaces = allPlaces.filter((p) => typeof p.lat === "number" && typeof p.lng === "number");
+  const placeEvaluations = validPlaces.map((p) => {
+    const st = getPlaceDailyStatus(p);
+    if (st.state === "sold") soldCount++;
+    else if (st.state === "visited") visitedCount++;
+    else pendingCount++;
+    return { place: p, status: st };
+  });
 
-  const seenIds = new Set();
+  // Active orders with coordinates ("Foquitos")
+  const activeOrders = allOrders.filter(
+    (o) => o.status === "nuevo" || o.status === "confirmado" || o.status === "en_ruta"
+  );
+  const pinnedOrders = [];
+  let unpinnedActiveCount = 0;
+  for (const ord of activeOrders) {
+    const coords = resolveOrderCoords(ord);
+    if (coords) pinnedOrders.push({ ord, coords });
+    else unpinnedActiveCount++;
+  }
+
+  if (summaryEl) {
+    summaryEl.innerHTML = `
+      <span><strong>🏪 Negocios (${validPlaces.length}):</strong> 🟢 Compraron: <strong>${soldCount}</strong> • 🟡 Visitados s/venta: <strong>${visitedCount}</strong> • ⚪ Sin visita: <strong>${pendingCount}</strong></span>
+      <span><strong>💡 Foquitos Pedidos:</strong> <strong>${pinnedOrders.length}</strong> en mapa${unpinnedActiveCount > 0 ? ` (${unpinnedActiveCount} sin GPS aún)` : ""}</span>
+    `;
+  }
+
+  if (!leafletMap || !mapLayerGroup) return;
+
+  mapLayerGroup.clearLayers();
+  mapFocusMarkers.clear();
+
   const boundsPoints = [];
+  const todayStr = getLocalDateStr();
 
-  for (const loc of validLocs) {
-    seenIds.add(loc.id);
+  // 1. Registered Places (Tiendas, Carnicerías, Restaurantes, Fruterías)
+  for (const { place, status } of placeEvaluations) {
+    boundsPoints.push([place.lat, place.lng]);
+    const cat = PLACE_CATEGORIES[place.category] || PLACE_CATEGORIES.tienda;
+    const stClass =
+      status.state === "sold" ? "st-sold" : status.state === "visited" ? "st-visited" : "st-pending";
+    const stBadge =
+      status.state === "sold"
+        ? `<div style="margin-top:5px;background:#dcfce7;color:#14532d;padding:4px 7px;border-radius:6px;font-size:0.78rem;font-weight:700;">🟢 Compró hoy: ${status.boxes} caja(s) (${formatCurrency(status.amount)}) • ${escapeHtml(status.driver)}</div>`
+        : status.state === "visited"
+          ? `<div style="margin-top:5px;background:#fef9c3;color:#713f12;padding:4px 7px;border-radius:6px;font-size:0.78rem;font-weight:700;">🟡 Visitado hoy por ${escapeHtml(status.driver)}: ${escapeHtml(status.reason)}${status.distanceMeters !== null ? ` (GPS a ${status.distanceMeters} m)` : ""}</div>`
+          : `<div style="margin-top:5px;background:#f1f5f9;color:#475569;padding:4px 7px;border-radius:6px;font-size:0.78rem;">⚪ Aún sin visita registrada en esta fecha</div>`;
+
+    const icon = window.L.divIcon({
+      className: "salinas-div-icon",
+      html: `<div class="pin-place-dot ${stClass}" title="${escapeHtml(place.name)}">${cat.emoji}</div>`,
+      iconSize: [26, 26],
+      iconAnchor: [13, 13],
+      popupAnchor: [0, -12]
+    });
+
+    const popupHtml = `
+      <div style="font-family:sans-serif;min-width:190px;">
+        <div style="font-size:0.72rem;font-weight:800;color:#475569;text-transform:uppercase;">${cat.emoji} ${escapeHtml(cat.label)}</div>
+        <strong style="font-size:0.95rem;color:#132615;">${escapeHtml(place.name)}</strong>
+        ${place.address ? `<div style="font-size:0.78rem;color:#475569;margin-top:2px;">📍 ${escapeHtml(place.address)}</div>` : ""}
+        ${place.phone ? `<div style="font-size:0.78rem;color:#475569;margin-top:2px;">📞 ${escapeHtml(place.phone)}</div>` : ""}
+        ${stBadge}
+        <div style="margin-top:6px;">
+          <a href="https://maps.google.com/?q=${place.lat},${place.lng}" target="_blank" rel="noopener" style="font-size:0.76rem;font-weight:800;color:#15803d;text-decoration:underline;">Abrir en Google Maps ↗</a>
+        </div>
+      </div>
+    `;
+
+    const m = window.L.marker([place.lat, place.lng], { icon }).addTo(mapLayerGroup).bindPopup(popupHtml);
+    mapFocusMarkers.set(`place:${place.id}`, m);
+  }
+
+  // 2. Driver Daily Trajectory Trails + Live Car Markers
+  const trailColors = ["#15803d", "#0284c7", "#7c3aed", "#b45309"];
+  validLocs.forEach((loc, idx) => {
     const isOnline = onlineLocs.some((o) => o.id === loc.id);
     if (isOnline) boundsPoints.push([loc.lat, loc.lng]);
 
+    if (loc.trailDate === todayStr && Array.isArray(loc.trail) && loc.trail.length >= 2) {
+      const latlngs = loc.trail
+        .filter((pt) => typeof pt.lat === "number" && typeof pt.lng === "number")
+        .map((pt) => [pt.lat, pt.lng]);
+      if (latlngs.length >= 2) {
+        window.L.polyline(latlngs, {
+          color: trailColors[idx % trailColors.length],
+          weight: 4,
+          opacity: 0.72,
+          dashArray: isOnline ? null : "6, 6"
+        }).addTo(mapLayerGroup);
+      }
+    }
+
+    const boxesBadge = typeof loc.boxesInCar === "number" ? ` • ${loc.boxesInCar}c` : "";
+    const carIcon = window.L.divIcon({
+      className: "salinas-div-icon",
+      html: `<div class="pin-car-badge ${isOnline ? "" : "paused"}">🚗 ${escapeHtml(loc.driverName || loc.id)}${boxesBadge}</div>`,
+      iconSize: [110, 28],
+      iconAnchor: [40, 14],
+      popupAnchor: [0, -14]
+    });
+
+    const speedTxt =
+      typeof loc.speedKmh === "number" && loc.speedKmh > 1 ? ` • ${Math.round(loc.speedKmh)} km/h` : "";
+    const trailPts = loc.trailDate === todayStr && Array.isArray(loc.trail) ? loc.trail.length : 0;
+
     const popupHtml = `
-      <div style="font-family:sans-serif;min-width:165px;">
-        <strong style="font-size:0.95rem;color:#132615;">🚗 ${escapeHtml(loc.driverName || loc.id)}</strong>
+      <div style="font-family:sans-serif;min-width:185px;">
+        <strong style="font-size:0.96rem;color:#132615;">🚗 ${escapeHtml(loc.driverName || loc.id)}</strong>
         <div style="font-size:0.78rem;color:#4e5c50;margin-top:3px;">
-          Señal: <strong>${formatMinutesAgo(loc.updatedAtIso)}</strong> (${isOnline ? "En vivo" : "Pausado"})
+          Señal: <strong>${formatMinutesAgo(loc.updatedAtIso)}</strong> (${isOnline ? "En vivo" : "Pausado"})${speedTxt}
         </div>
         ${
           typeof loc.boxesInCar === "number"
-            ? `<div style="font-size:0.8rem;margin-top:4px;background:#eff6ed;padding:4px 7px;border-radius:6px;">
+            ? `<div style="font-size:0.8rem;margin-top:5px;background:#eff6ed;padding:5px 8px;border-radius:6px;">
                 📦 En carro: <strong>${loc.boxesInCar} cajas</strong> (${escapeHtml(loc.ripeness || "Surtido")})
                </div>`
             : ""
         }
+        ${trailPts >= 2 ? `<div style="font-size:0.74rem;color:#64748b;margin-top:4px;">🛣️ Recorrido hoy: ${trailPts} puntos GPS trazados</div>` : ""}
       </div>
     `;
 
-    if (leafletMarkers.has(loc.id)) {
-      const m = leafletMarkers.get(loc.id);
-      m.setLatLng([loc.lat, loc.lng]);
-      m.setPopupContent(popupHtml);
-    } else {
-      const m = window.L.marker([loc.lat, loc.lng]).addTo(leafletMap).bindPopup(popupHtml);
-      leafletMarkers.set(loc.id, m);
-    }
-  }
+    const m = window.L.marker([loc.lat, loc.lng], { icon: carIcon, zIndexOffset: 600 })
+      .addTo(mapLayerGroup)
+      .bindPopup(popupHtml);
+    mapFocusMarkers.set(`driver:${loc.id}`, m);
+  });
 
-  for (const [id, marker] of leafletMarkers.entries()) {
-    if (!seenIds.has(id)) {
-      leafletMap.removeLayer(marker);
-      leafletMarkers.delete(id);
-    }
+  // 3. Blinking Order "Foquitos" (New & En-Ruta Online Orders)
+  const drivers = storeSettings.drivers || [];
+  for (const { ord, coords } of pinnedOrders) {
+    boundsPoints.push([coords.lat, coords.lng]);
+    const isNew = ord.status === "nuevo";
+    const wrapClass = isNew ? "pin-foquito-wrap" : "pin-foquito-wrap is-route";
+    const coreEmoji = isNew ? "🚨" : "📦";
+
+    const foquitoIcon = window.L.divIcon({
+      className: "salinas-div-icon",
+      html: `<div class="${wrapClass}"><span class="pulse-ring"></span><div class="pin-foquito-core">${coreEmoji}</div></div>`,
+      iconSize: [34, 34],
+      iconAnchor: [17, 17],
+      popupAnchor: [0, -16]
+    });
+
+    const itemsSummary = (ord.items || []).map((i) => `${i.qty}×${escapeHtml(i.code)}`).join(", ");
+    const driverOpts = [
+      `<option value="">— Asignar chofer —</option>`,
+      ...drivers.map(
+        (d) =>
+          `<option value="${escapeHtml(d.name)}" ${ord.assignedDriver === d.name ? "selected" : ""}>${escapeHtml(d.name)}</option>`
+      )
+    ].join("");
+
+    const popupHtml = `
+      <div style="font-family:sans-serif;min-width:215px;">
+        <div style="font-size:0.72rem;font-weight:900;color:${isNew ? "#dc2626" : "#0284c7"};text-transform:uppercase;">
+          ${isNew ? "🔴 PEDIDO NUEVO EN VIVO" : `🔵 PEDIDO ${escapeHtml((STATUS_LABELS[ord.status] || ord.status).toUpperCase())}`}
+        </div>
+        <strong style="font-size:0.96rem;color:#132615;">${escapeHtml(ord.customerName)} (${escapeHtml(ord.folio || "")})</strong>
+        <div style="font-size:0.78rem;color:#334155;margin-top:3px;">📍 ${escapeHtml(ord.address || "")}</div>
+        <div style="font-size:0.8rem;margin-top:5px;background:#fef2f2;padding:5px 8px;border-radius:6px;color:#7f1d1d;">
+          🥑 <strong>${ord.totalBoxes} caja(s)</strong> (${itemsSummary}) • <strong>${formatCurrency(ord.totalAmount)}</strong><br>
+          Madurez: <strong>${escapeHtml(ord.ripeness || "Surtido")}</strong>
+        </div>
+        <div style="margin-top:7px;display:flex;gap:5px;align-items:center;">
+          <select id="mapAssignSel_${escapeHtml(ord.id)}" style="flex:1;padding:5px 6px;border-radius:6px;border:1px solid #cbd5e1;font-size:0.78rem;font-weight:700;">
+            ${driverOpts}
+          </select>
+          <button type="button" data-map-assign-btn="${escapeHtml(ord.id)}" style="background:#15803d;color:#fff;border:none;border-radius:6px;padding:6px 9px;font-size:0.76rem;font-weight:800;cursor:pointer;">
+            Asignar
+          </button>
+        </div>
+      </div>
+    `;
+
+    const m = window.L.marker([coords.lat, coords.lng], { icon: foquitoIcon, zIndexOffset: 1000 })
+      .addTo(mapLayerGroup)
+      .bindPopup(popupHtml);
+    mapFocusMarkers.set(`order:${ord.id}`, m);
   }
 
   if (!hasCenteredMapOnce && boundsPoints.length > 0) {
@@ -1105,8 +1501,195 @@ document.getElementById("gpsDriverChips").addEventListener("click", (e) => {
   ensureLeafletMap();
   if (leafletMap) {
     leafletMap.flyTo([loc.lat, loc.lng], 15, { duration: 0.7 });
-    const marker = leafletMarkers.get(id);
+    const marker = mapFocusMarkers.get(`driver:${id}`);
     if (marker) marker.openPopup();
+  }
+});
+
+// Delegated listener for assigning driver right inside a Map Foquito Popup
+document.getElementById("adminLiveMap")?.addEventListener("click", async (e) => {
+  const assignBtn = e.target.closest("button[data-map-assign-btn]");
+  if (!assignBtn) return;
+  const orderId = assignBtn.dataset.mapAssignBtn;
+  const sel = document.getElementById(`mapAssignSel_${orderId}`);
+  if (!sel) return;
+  const driverName = sel.value;
+  const ord = allOrders.find((o) => o.id === orderId);
+  if (!ord) return;
+  const nextStatus = ord.status === "nuevo" && driverName ? "confirmado" : ord.status;
+
+  assignBtn.disabled = true;
+  assignBtn.textContent = "...";
+  try {
+    await executeAdminBatch(currentKeyHash, (batch, proofId) => {
+      batch.update(doc(db, "orders", orderId), {
+        assignedDriver: driverName,
+        status: nextStatus,
+        proofId,
+        updatedAt: serverTimestamp()
+      });
+    });
+    showToast(driverName ? `🚗 Pedido asignado a ${driverName} desde el mapa.` : "Chofer desasignado.");
+  } catch (err) {
+    console.error(err);
+    showToast("Error al asignar chofer.");
+  } finally {
+    assignBtn.disabled = false;
+    assignBtn.textContent = "Asignar";
+  }
+});
+
+// ================= PLACES DIRECTORY & ADMIN MODAL =================
+function renderAdminPlacesDirectory() {
+  const listEl = document.getElementById("adminPlacesList");
+  const pillEl = document.getElementById("placesDirCountPill");
+  if (pillEl) pillEl.textContent = `${allPlaces.length} registrado${allPlaces.length === 1 ? "" : "s"} ▾`;
+  if (!listEl) return;
+
+  if (allPlaces.length === 0) {
+    listEl.innerHTML = `<div class="cart-empty">Aún no hay tiendas, carnicerías o restaurantes guardados. Tus choferes pueden guardarlos con 1 toque al visitarlos o tú puedes agregarlos con <strong>➕ Punto / Tienda</strong>.</div>`;
+    return;
+  }
+
+  listEl.innerHTML = allPlaces
+    .map((p) => {
+      const cat = PLACE_CATEGORIES[p.category] || PLACE_CATEGORIES.tienda;
+      const st = getPlaceDailyStatus(p);
+      const badge =
+        st.state === "sold"
+          ? `<span style="background:#dcfce7;color:#14532d;padding:3px 8px;border-radius:999px;font-size:0.74rem;font-weight:800;">🟢 Compró (${st.boxes}c)</span>`
+          : st.state === "visited"
+            ? `<span style="background:#fef9c3;color:#713f12;padding:3px 8px;border-radius:999px;font-size:0.74rem;font-weight:800;">🟡 Visitado s/venta</span>`
+            : `<span style="background:#f1f5f9;color:#475569;padding:3px 8px;border-radius:999px;font-size:0.74rem;font-weight:700;">⚪ Pendiente hoy</span>`;
+
+      return `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--slate-200);">
+          <div style="min-width:200px;flex:1;">
+            <div style="font-weight:800;color:var(--green-950);font-size:0.92rem;">
+              ${cat.emoji} ${escapeHtml(p.name)} ${badge}
+            </div>
+            <div style="font-size:0.78rem;color:var(--slate-500);margin-top:2px;">
+              ${escapeHtml(cat.label)}${p.address ? ` • 📍 ${escapeHtml(p.address)}` : ""}${p.phone ? ` • 📞 ${escapeHtml(p.phone)}` : ""}${p.createdBy ? ` • Alta: ${escapeHtml(p.createdBy)}` : ""}
+            </div>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button type="button" class="btn btn-outline btn-sm" data-place-focus="${escapeHtml(p.id)}">🗺️ Ver en Mapa</button>
+            <button type="button" class="btn btn-outline btn-sm" data-place-remove="${escapeHtml(p.id)}" style="color:var(--red-600);border-color:#eccaca;">Quitar</button>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+document.getElementById("adminPlacesList")?.addEventListener("click", async (e) => {
+  const focusBtn = e.target.closest("button[data-place-focus]");
+  if (focusBtn) {
+    const pid = focusBtn.dataset.placeFocus;
+    const p = allPlaces.find((x) => x.id === pid);
+    if (!p || typeof p.lat !== "number") return;
+    ensureLeafletMap();
+    document.getElementById("adminMapCard")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (leafletMap) {
+      leafletMap.flyTo([p.lat, p.lng], 16, { duration: 0.6 });
+      const m = mapFocusMarkers.get(`place:${pid}`);
+      if (m) m.openPopup();
+    }
+    return;
+  }
+
+  const remBtn = e.target.closest("button[data-place-remove]");
+  if (remBtn) {
+    const pid = remBtn.dataset.placeRemove;
+    const p = allPlaces.find((x) => x.id === pid);
+    if (!p) return;
+    if (!confirm(`¿Quitar "${p.name}" del directorio activo del mapa?`)) return;
+    try {
+      await executeAdminBatch(currentKeyHash, (batch, proofId) => {
+        batch.update(doc(db, "places", pid), {
+          active: false,
+          proofId,
+          updatedAt: serverTimestamp()
+        });
+      });
+      showToast("Punto retirado del mapa.");
+    } catch (err) {
+      console.error(err);
+      showToast("No se pudo retirar el punto.");
+    }
+  }
+});
+
+const adminPlaceModal = document.getElementById("adminPlaceModal");
+document.getElementById("btnAdminOpenPlaceModal")?.addEventListener("click", () => {
+  if (adminPlaceModal) adminPlaceModal.classList.add("open");
+});
+document.getElementById("btnCloseAdminPlaceModal")?.addEventListener("click", () => {
+  if (adminPlaceModal) adminPlaceModal.classList.remove("open");
+});
+
+document.getElementById("btnPickOnMap")?.addEventListener("click", () => {
+  if (adminPlaceModal) adminPlaceModal.classList.remove("open");
+  switchAdminTab("tabRoutes");
+  ensureLeafletMap();
+  const hintEl = document.getElementById("mapPickHint");
+  if (hintEl) {
+    hintEl.textContent = "👆 Toca el punto exacto en el mapa donde está el negocio...";
+    hintEl.style.display = "block";
+  }
+  document.getElementById("adminMapCard")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  mapPickCallback = ({ lat, lng }) => {
+    const coordsInput = document.getElementById("admPlaceCoordsInput");
+    if (coordsInput) coordsInput.value = `${lat}, ${lng}`;
+    if (adminPlaceModal) adminPlaceModal.classList.add("open");
+    showToast("📍 Coordenadas capturadas del mapa.");
+  };
+});
+
+document.getElementById("adminPlaceForm")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const category = document.getElementById("admPlaceCategory").value || "tienda";
+  const phone = document.getElementById("admPlacePhone").value.trim();
+  const name = document.getElementById("admPlaceName").value.trim();
+  const address = document.getElementById("admPlaceAddress").value.trim();
+  const rawCoords = document.getElementById("admPlaceCoordsInput").value.trim();
+
+  if (!name) {
+    showToast("Escribe el nombre del negocio.");
+    return;
+  }
+
+  const parsed = parseCoordsFromInput(rawCoords);
+  if (!parsed) {
+    showToast("No se detectaron coordenadas en el texto. Usa '👆 Elegir en Mapa' o pega coordenadas tipo 25.4267, -100.9954.");
+    return;
+  }
+
+  const placeId = `plc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  try {
+    await executeAdminBatch(currentKeyHash, (batch, proofId) => {
+      batch.set(doc(db, "places", placeId), {
+        name,
+        category,
+        phone,
+        address,
+        lat: parsed.lat,
+        lng: parsed.lng,
+        active: true,
+        createdBy: "Oficina",
+        createdAtIso: new Date().toISOString(),
+        proofId,
+        updatedAt: serverTimestamp()
+      });
+    });
+    document.getElementById("adminPlaceForm").reset();
+    if (adminPlaceModal) adminPlaceModal.classList.remove("open");
+    ensureLeafletMap();
+    if (leafletMap) leafletMap.flyTo([parsed.lat, parsed.lng], 15, { duration: 0.6 });
+    showToast(`🏪 "${name}" guardado en el mapa.`);
+  } catch (err) {
+    console.error(err);
+    showToast("Error al guardar el negocio.");
   }
 });
 
@@ -1127,11 +1710,15 @@ function populateRouteDriverFilter() {
 function subscribeRouteCorteDay(dateStr) {
   if (routeWhUnsub) routeWhUnsub();
   if (routeSalesUnsub) routeSalesUnsub();
+  if (routeVisitsUnsub) routeVisitsUnsub();
 
   selectedRouteDate = dateStr;
   routeWhDoc = createEmptyWhDoc(dateStr);
   routeSalesList = [];
+  routeVisitsList = [];
   renderRouteCortesAndSales();
+  renderGpsMapAndChips();
+  renderAdminPlacesDirectory();
 
   routeWhUnsub = onSnapshot(doc(db, "warehouse_days", dateStr), (snap) => {
     if (snap.exists()) {
@@ -1152,7 +1739,18 @@ function subscribeRouteCorteDay(dateStr) {
       .map((d) => ({ id: d.id, ...d.data() }))
       .sort((a, b) => String(b.createdAtIso || "").localeCompare(String(a.createdAtIso || "")));
     renderRouteCortesAndSales();
+    renderGpsMapAndChips();
+    renderAdminPlacesDirectory();
     updateKPIs();
+  });
+
+  const qVisits = query(collection(db, "place_visits"), where("date", "==", dateStr));
+  routeVisitsUnsub = onSnapshot(qVisits, (snap) => {
+    routeVisitsList = snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => String(b.createdAtIso || "").localeCompare(String(a.createdAtIso || "")));
+    renderGpsMapAndChips();
+    renderAdminPlacesDirectory();
   });
 }
 
@@ -1476,6 +2074,8 @@ function buildDriverWhatsAppUrl(ord) {
   const driverObj = (storeSettings.drivers || []).find((d) => d.name === ord.assignedDriver);
   const driverPhone = driverObj && driverObj.phone ? cleanPhoneForWhatsApp(driverObj.phone) : "";
   const itemsLines = (ord.items || []).map((i) => `  - ${i.qty} caja(s) ${i.name} [${i.code}]`).join("\n");
+  const coords = resolveOrderCoords(ord);
+  const mapLine = coords ? `*Mapa GPS:* https://maps.google.com/?q=${coords.lat},${coords.lng}\n` : "";
 
   const msg =
     `📦 *ORDEN DE ENTREGA — SALINAS*\n` +
@@ -1483,6 +2083,7 @@ function buildDriverWhatsAppUrl(ord) {
     `*Cliente:* ${ord.customerName}\n` +
     `*Tel. Cliente:* ${ord.phone}\n` +
     `*Dirección:* ${ord.address}\n` +
+    mapLine +
     `*Horario:* ${ord.deliveryWindow || "Lo antes posible"}\n` +
     `*Madurez:* ${ord.ripeness || "Surtido"}\n` +
     (ord.notes ? `*Notas:* ${ord.notes}\n` : "") +
@@ -1520,6 +2121,10 @@ function renderOrdersList() {
         ? new Date(ord.createdAtIso).toLocaleString("es-MX", { dateStyle: "short", timeStyle: "short" })
         : "";
       const stLabel = STATUS_LABELS[ord.status] || "Nuevo";
+      const coords = resolveOrderCoords(ord);
+      const mapBtnHtml = coords
+        ? `<button type="button" class="btn btn-outline btn-sm" data-action="focus-order-map" data-id="${ord.id}" style="border-color:#dc2626;color:#991b1b;">🔴 Ver Foquito Mapa</button>`
+        : `<button type="button" class="btn btn-outline btn-sm" data-action="pin-order" data-id="${ord.id}">📍 Ubicar en Mapa</button>`;
 
       const chipsHtml = (ord.items || [])
         .map(
@@ -1550,6 +2155,7 @@ function renderOrdersList() {
             </div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
               <strong style="font-size:1.25rem;color:var(--green-900);">${formatCurrency(ord.totalAmount)}</strong>
+              ${mapBtnHtml}
               <button type="button" class="btn btn-outline btn-sm" data-action="edit-total" data-id="${ord.id}">Ajustar $</button>
               <button type="button" class="btn btn-outline btn-sm" data-action="print-order" data-id="${ord.id}">🖨️ Imprimir Nota</button>
             </div>
@@ -1672,6 +2278,76 @@ document.getElementById("ordersAdminContainer").addEventListener("click", async 
       console.error(err);
       showToast("Error al ajustar el total.");
     }
+    return;
+  }
+
+  const focusMapBtn = e.target.closest("button[data-action='focus-order-map']");
+  if (focusMapBtn) {
+    const orderId = focusMapBtn.dataset.id;
+    const ord = allOrders.find((o) => o.id === orderId);
+    if (!ord) return;
+    const coords = resolveOrderCoords(ord);
+    if (!coords) return;
+    switchAdminTab("tabRoutes");
+    setTimeout(() => {
+      ensureLeafletMap();
+      document.getElementById("adminMapCard")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (leafletMap) {
+        leafletMap.flyTo([coords.lat, coords.lng], 16, { duration: 0.7 });
+        const m = mapFocusMarkers.get(`order:${orderId}`);
+        if (m) m.openPopup();
+      }
+    }, 180);
+    return;
+  }
+
+  const pinOrderBtn = e.target.closest("button[data-action='pin-order']");
+  if (pinOrderBtn) {
+    const orderId = pinOrderBtn.dataset.id;
+    const ord = allOrders.find((o) => o.id === orderId);
+    if (!ord) return;
+    switchAdminTab("tabRoutes");
+    ensureLeafletMap();
+    const hintEl = document.getElementById("mapPickHint");
+    if (hintEl) {
+      hintEl.textContent = `👆 Toca en el mapa dónde se ubica el pedido de "${ord.customerName}" (${ord.address || ""})...`;
+      hintEl.style.display = "block";
+    }
+    document.getElementById("adminMapCard")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    mapPickCallback = async ({ lat, lng }) => {
+      try {
+        const placeId = `plc_ord_${orderId.slice(0, 8)}`;
+        await executeAdminBatch(currentKeyHash, (batch, proofId) => {
+          batch.update(doc(db, "orders", orderId), {
+            lat,
+            lng,
+            proofId,
+            updatedAt: serverTimestamp()
+          });
+          batch.set(
+            doc(db, "places", placeId),
+            {
+              name: ord.customerName || "Cliente Web",
+              category: "tienda",
+              phone: ord.phone || "",
+              address: ord.address || "",
+              lat,
+              lng,
+              active: true,
+              createdBy: "Pedido Web",
+              createdAtIso: new Date().toISOString(),
+              proofId,
+              updatedAt: serverTimestamp()
+            },
+            { merge: true }
+          );
+        });
+        showToast(`🔴 ¡Foquito encendido en el mapa para ${ord.customerName}!`);
+      } catch (err) {
+        console.error(err);
+        showToast("No se pudo guardar la ubicación del pedido.");
+      }
+    };
     return;
   }
 

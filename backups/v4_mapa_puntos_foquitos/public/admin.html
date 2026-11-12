@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Panel de Administración y Almacén | Comercializadora Salinas</title>
+  <link rel="icon" type="image/png" href="assets/favicon.png">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="admin-body">
+
+  <!-- Navbar -->
+  <header class="navbar">
+    <div class="container navbar-inner">
+      <div class="brand-link">
+        <img src="assets/logo-salinas.png" alt="Comercializadora Salinas">
+        <span class="brand-badge">SISTEMA CENTRAL</span>
+      </div>
+      <div class="nav-actions">
+        <button type="button" id="btnToggleAlertSound" class="btn btn-outline btn-sm" style="display:none;" title="Activar o probar alarma sonora de pedidos nuevos">
+          🔔 <span class="hide-mobile" id="soundBtnLabel">Sonido</span>
+        </button>
+        <button type="button" id="btnDownloadBackup" class="btn btn-outline btn-sm" style="display:none;" title="Descargar respaldo completo">
+          💾 <span class="hide-mobile">Respaldar</span>
+        </button>
+        <a href="chofer.html" target="_blank" class="btn btn-outline btn-sm" title="Abrir App Móvil de Chofer">🚗 <span class="hide-mobile">App Chofer</span></a>
+        <a href="index.html" target="_blank" class="btn btn-outline btn-sm">Tienda ↗</a>
+        <button type="button" id="btnLogout" class="btn btn-outline btn-sm" style="display:none;">Salir</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- LOGIN VIEW -->
+  <section id="loginView" class="login-wrap">
+    <div class="login-card">
+      <img src="assets/avocados-icon.png" alt="Salinas" style="width:74px;height:74px;object-fit:contain;margin-bottom:10px;">
+      <h2 class="serif-title" style="color:var(--green-950);font-size:1.45rem;margin-bottom:6px;">Administración y Almacén</h2>
+      <p id="loginSubtitle" style="font-size:0.86rem;color:var(--slate-500);margin-bottom:18px;">
+        Ingresa tu clave administrativa para gestionar almacén, pedidos, precios y choferes.
+      </p>
+
+      <form id="loginForm">
+        <div class="form-group" style="text-align:left;">
+          <label class="form-label" for="adminPasswordInput">Clave de Acceso</label>
+          <input type="password" id="adminPasswordInput" class="form-control" placeholder="••••••••" required>
+        </div>
+        <label class="remember-check" style="justify-content:flex-start;">
+          <input type="checkbox" id="rememberAdminSession" checked>
+          <span>Mantener sesión abierta en este dispositivo</span>
+        </label>
+        <button type="submit" id="btnLoginSubmit" class="btn btn-primary" style="width:100%;padding:12px;">
+          Entrar al Sistema
+        </button>
+      </form>
+    </div>
+  </section>
+
+  <!-- DASHBOARD VIEW -->
+  <main id="dashboardView" class="container" style="display:none;padding-bottom:60px;">
+
+    <!-- Live Blinking Alert Bar for New Online Orders -->
+    <div id="liveNewOrdersAlertBar" class="live-order-alert-bar">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:1.4rem;">🚨</span>
+        <div>
+          <strong id="liveNewOrdersTitle" style="font-size:0.98rem;display:block;">¡Tienes pedidos nuevos por asignar!</strong>
+          <span id="liveNewOrdersSub" style="font-size:0.8rem;opacity:0.92;">Revisa el mapa o asigna un chofer.</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button type="button" id="btnAlertJumpMap" class="btn btn-sm" style="background:#fff;color:#991b1b;font-weight:800;">
+          🗺️ Ver Foquitos en Mapa
+        </button>
+        <button type="button" id="btnAlertJumpOrders" class="btn btn-sm" style="background:rgba(0,0,0,0.28);color:#fff;border:1px solid rgba(255,255,255,0.4);">
+          📦 Ir a Pedidos
+        </button>
+      </div>
+    </div>
+
+    <!-- KPI Row -->
+    <div class="admin-kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Pedidos Web</div>
+        <div class="kpi-value" id="kpiNewCount" style="color:var(--gold-600);">0</div>
+        <div class="kpi-sub">Nuevos por confirmar</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">En Ruta / Activos</div>
+        <div class="kpi-value" id="kpiActiveCount" style="color:var(--blue-600);">0</div>
+        <div class="kpi-sub" id="kpiDeliveredSub">0 entregados hoy</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Existencia en Piso</div>
+        <div class="kpi-value" id="kpiWarehouseStock">0</div>
+        <div class="kpi-sub" id="kpiWarehouseSub">M:0 • P:0 • E:0 • S:0</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Venta Web Hoy</div>
+        <div class="kpi-value" id="kpiRevenueToday">$0</div>
+        <div class="kpi-sub" id="kpiCalibersSub">0 cajas hoy</div>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="admin-tabs">
+      <button type="button" class="tab-btn active" data-tab="tabWarehouse">📋 Control de Almacén</button>
+      <button type="button" class="tab-btn" data-tab="tabRoutes">🗺️ Ruta, GPS y Cortes</button>
+      <button type="button" class="tab-btn" data-tab="tabOrders">📦 Pedidos en Línea</button>
+      <button type="button" class="tab-btn" data-tab="tabCatalog">🏷️ Precios y Difusión</button>
+      <button type="button" class="tab-btn" data-tab="tabDrivers">🚗 Choferes y PIN</button>
+    </div>
+
+    <!-- ================= TAB 1: CONTROL DE ALMACÉN ================= -->
+    <section id="tabWarehouse" class="admin-tab-pane">
+      <!-- Date & Print Bar -->
+      <div class="admin-toolbar-card">
+        <div class="toolbar-group">
+          <strong style="color:var(--green-950);font-size:0.9rem;">📅 Fecha:</strong>
+          <input type="date" id="whDatePicker" class="form-control" style="width:auto;padding:7px 11px;font-weight:700;">
+          <button type="button" id="btnWhToday" class="btn btn-outline btn-sm">Hoy</button>
+        </div>
+        <div class="toolbar-group">
+          <button type="button" id="btnCopyPrevStock" class="btn btn-outline btn-sm" style="flex:1;">
+            ↺ Jalar Cierre Ayer
+          </button>
+          <button type="button" id="btnPrintWarehouse" class="btn btn-primary btn-sm" style="flex:1;">
+            🖨️ Imprimir Corte
+          </button>
+        </div>
+      </div>
+
+      <!-- Live Warehouse Stock Cards -->
+      <div id="whStockCards" class="wh-stock-grid"></div>
+
+      <!-- Opening Stock & Cold Room Pulls -->
+      <details id="whOpeningDetails" class="order-admin-card" open>
+        <summary class="wh-details-summary">
+          <span>1. Inventario Inicial y Cámara Fría (Cajas)</span>
+          <span class="wh-chevron-pill">Ver / Editar ▾</span>
+        </summary>
+        <form id="whOpeningForm" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--slate-200);">
+          <div class="two-col-panel">
+            <div>
+              <div style="font-size:0.78rem;font-weight:800;color:var(--green-900);margin-bottom:8px;">INVENTARIO INICIAL AL ABRIR EL DÍA</div>
+              <div class="caliber-4-inputs">
+                <div><label class="form-label">M · Media</label><input type="number" min="0" inputmode="numeric" id="whInitM" class="form-control" value="0"></div>
+                <div><label class="form-label">P · Primera</label><input type="number" min="0" inputmode="numeric" id="whInitP" class="form-control" value="0"></div>
+                <div><label class="form-label">E · Extra</label><input type="number" min="0" inputmode="numeric" id="whInitE" class="form-control" value="0"></div>
+                <div><label class="form-label">S · Super</label><input type="number" min="0" inputmode="numeric" id="whInitS" class="form-control" value="0"></div>
+              </div>
+            </div>
+
+            <div>
+              <div style="font-size:0.78rem;font-weight:800;color:var(--blue-600);margin-bottom:8px;">(+) SACADO DE CÁMARA / ENTRADAS HOY</div>
+              <div class="caliber-4-inputs">
+                <div><label class="form-label">+ M</label><input type="number" min="0" inputmode="numeric" id="whExtraM" class="form-control" value="0"></div>
+                <div><label class="form-label">+ P</label><input type="number" min="0" inputmode="numeric" id="whExtraP" class="form-control" value="0"></div>
+                <div><label class="form-label">+ E</label><input type="number" min="0" inputmode="numeric" id="whExtraE" class="form-control" value="0"></div>
+                <div><label class="form-label">+ S</label><input type="number" min="0" inputmode="numeric" id="whExtraS" class="form-control" value="0"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="wh-opening-actions">
+            <input type="text" id="whObservations" class="form-control" placeholder="Observaciones generales del día (opcional)...">
+            <button type="submit" class="btn btn-primary">Guardar Inventario Base</button>
+          </div>
+        </form>
+      </details>
+
+      <!-- Register New Car Trip (Salida) -->
+      <div class="order-admin-card" style="background:linear-gradient(180deg,#ffffff 0%,#f7fbf5 100%);border-color:var(--green-600);">
+        <h3 style="font-size:1.08rem;color:var(--green-950);margin-bottom:12px;">2. Registrar Salida de Carro (Nueva Vuelta)</h3>
+        <form id="whNewTripForm">
+          <div class="wh-trip-top-row">
+            <div>
+              <label class="form-label" for="tripDriver">Chofer / Vendedor *</label>
+              <select id="tripDriver" class="form-control" required></select>
+            </div>
+            <div>
+              <label class="form-label" for="tripRipeness">Maduración que lleva *</label>
+              <select id="tripRipeness" class="form-control">
+                <option value="Maduro">Maduro</option>
+                <option value="Sazón">Sazón</option>
+                <option value="Quebrado">Quebrado</option>
+                <option value="Verde">Verde</option>
+                <option value="Maduro y Sazón">Maduro y Sazón</option>
+                <option value="Quebrado y Sazón">Quebrado y Sazón</option>
+                <option value="Surtido">Surtido (Varios)</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="font-size:0.78rem;font-weight:800;color:var(--green-900);margin-bottom:6px;">CAJAS QUE SUBE AL CARRO</div>
+          <div class="caliber-4-inputs">
+            <div>
+              <label class="form-label" for="tripOutM">M · Media</label>
+              <input type="number" min="0" max="500" inputmode="numeric" id="tripOutM" class="form-control" value="0">
+            </div>
+            <div>
+              <label class="form-label" for="tripOutP">P · Primera</label>
+              <input type="number" min="0" max="500" inputmode="numeric" id="tripOutP" class="form-control" value="0">
+            </div>
+            <div>
+              <label class="form-label" for="tripOutE">E · Extra</label>
+              <input type="number" min="0" max="500" inputmode="numeric" id="tripOutE" class="form-control" value="0">
+            </div>
+            <div>
+              <label class="form-label" for="tripOutS">S · Super</label>
+              <input type="number" min="0" max="500" inputmode="numeric" id="tripOutS" class="form-control" value="0">
+            </div>
+          </div>
+
+          <div class="wh-trip-bottom-row">
+            <input type="text" id="tripNote" class="form-control" placeholder="Detalle opcional (ej. Super maduro, Primera quebrado)...">
+            <button type="submit" class="btn btn-primary">+ Dar Salida de Carro</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Active Drivers Summary -->
+      <div style="margin:18px 0 8px;">
+        <h3 style="font-size:1.05rem;color:var(--green-950);">Concentrado en Vivo por Chofer</h3>
+      </div>
+      <div id="whDriverSummaryCards" class="driver-route-grid"></div>
+
+      <!-- Chronological Trips: Desktop Table + Mobile Native Cards -->
+      <div style="margin:18px 0 8px;">
+        <h3 style="font-size:1.05rem;color:var(--green-950);">3. Bitácora de Vueltas y Devoluciones</h3>
+      </div>
+
+      <!-- Desktop Table -->
+      <div class="wh-table-wrap">
+        <table class="wh-table">
+          <thead>
+            <tr>
+              <th rowspan="2">#</th>
+              <th rowspan="2">HORA</th>
+              <th rowspan="2">CHOFER</th>
+              <th rowspan="2">MADURACIÓN</th>
+              <th colspan="4">SALIDA (CAJAS)</th>
+              <th colspan="4" style="background:#385e3a;">DEVOLUCIÓN</th>
+              <th rowspan="2">NETO<br>VENDIDO</th>
+              <th rowspan="2">ACCIONES</th>
+            </tr>
+            <tr class="wh-subhead">
+              <th>M</th><th>P</th><th>E</th><th>S</th>
+              <th>M</th><th>P</th><th>E</th><th>S</th>
+            </tr>
+          </thead>
+          <tbody id="whTripsTableBody"></tbody>
+          <tfoot id="whTripsTableFoot"></tfoot>
+        </table>
+      </div>
+
+      <!-- Mobile Native Trip Cards (Zero horizontal overflow!) -->
+      <div id="whMobileTripsList" class="wh-mobile-trips"></div>
+    </section>
+
+    <!-- ================= TAB 1B: RUTA, MAPA GPS Y CORTES ================= -->
+    <section id="tabRoutes" class="admin-tab-pane" style="display:none;">
+      <div id="adminMapCard" class="order-admin-card" style="margin-bottom:18px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+          <div>
+            <h3 class="serif-title" style="font-size:1.18rem;color:var(--green-950);">🗺️ Monitor en Vivo: Choferes, Tiendas y Pedidos</h3>
+            <p style="font-size:0.8rem;color:var(--slate-500);">
+              Supervisión para Alejandro y Oficina: carros en movimiento, negocios visitados y <strong>foquitos de pedidos en vivo</strong>.
+            </p>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+            <span id="gpsOnlineBadge" class="ripeness-badge">0 carros en vivo</span>
+            <button type="button" id="btnAdminOpenPlaceModal" class="btn btn-primary btn-sm">➕ Punto / Tienda</button>
+            <button type="button" id="btnToggleMapFullscreen" class="btn btn-outline btn-sm">⛶ Pantalla Completa</button>
+          </div>
+        </div>
+
+        <div class="map-legend-bar">
+          <span class="map-legend-item">🔴 Foquito Pedido Nuevo</span>
+          <span class="map-legend-item">🔵 Pedido En Ruta</span>
+          <span class="map-legend-item">🚗 Chofer + Recorrido</span>
+          <span class="map-legend-item">🟢 Compró hoy</span>
+          <span class="map-legend-item">🟡 Visitado sin venta</span>
+          <span class="map-legend-item">⚪ Sin visita hoy</span>
+        </div>
+
+        <div id="gpsDriverChips" class="gps-driver-chips"></div>
+        <div id="mapPickHint" style="display:none;background:var(--gold-100);color:#6e470b;padding:8px 12px;border-radius:10px;font-size:0.82rem;font-weight:800;margin-bottom:8px;">
+          👆 Toca cualquier punto exacto en el mapa para ubicar el negocio...
+        </div>
+        <div id="adminLiveMap"></div>
+
+        <div id="placesSupervisionSummary" style="margin-top:10px;font-size:0.82rem;color:var(--slate-700);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;background:var(--green-50);padding:8px 12px;border-radius:10px;">
+          <span>Cargando puntos de compra...</span>
+        </div>
+      </div>
+
+      <!-- Collapsible Directory of Saved Places -->
+      <details class="order-admin-card" style="margin-bottom:18px;">
+        <summary class="wh-details-summary">
+          <span>🏪 Directorio de Puntos de Compra y Visitas de Hoy</span>
+          <span class="wh-chevron-pill" id="placesDirCountPill">0 registrados ▾</span>
+        </summary>
+        <div id="adminPlacesList" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--slate-200);"></div>
+      </details>
+
+      <div class="admin-toolbar-card">
+        <div class="toolbar-group">
+          <strong style="color:var(--green-950);font-size:0.9rem;">📅 Fecha Corte:</strong>
+          <input type="date" id="routeDatePicker" class="form-control" style="width:auto;padding:7px 11px;font-weight:700;">
+          <button type="button" id="btnRouteToday" class="btn btn-outline btn-sm">Hoy</button>
+        </div>
+        <div class="toolbar-group">
+          <select id="routeDriverFilter" class="form-control" style="width:auto;padding:8px 12px;font-size:0.86rem;">
+            <option value="todos">Todos los choferes</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="margin:12px 0 8px;">
+        <h3 style="font-size:1.08rem;color:var(--green-950);">💰 Pre-Corte Automático por Chofer (Almacén vs Ventas en Ruta)</h3>
+      </div>
+      <div id="routeCorteCards" class="route-corte-grid"></div>
+
+      <div style="margin:18px 0 8px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+        <h3 style="font-size:1.08rem;color:var(--green-950);">🧾 Notas Registradas en Ruta</h3>
+        <span id="routeSalesSummaryBadge" class="ripeness-badge">0 notas</span>
+      </div>
+      <div id="routeSalesAdminList"></div>
+    </section>
+
+    <!-- ================= TAB 2: ORDERS ================= -->
+    <section id="tabOrders" class="admin-tab-pane" style="display:none;">
+      <div class="admin-toolbar-card">
+        <div class="toolbar-group" id="statusFilterBar">
+          <button type="button" class="btn btn-sm btn-primary" data-status="todos">Todos</button>
+          <button type="button" class="btn btn-sm btn-outline" data-status="nuevo">Nuevos</button>
+          <button type="button" class="btn btn-sm btn-outline" data-status="confirmado">Confirmados</button>
+          <button type="button" class="btn btn-sm btn-outline" data-status="en_ruta">En Ruta</button>
+          <button type="button" class="btn btn-sm btn-outline" data-status="entregado">Entregados</button>
+          <button type="button" class="btn btn-sm btn-outline" data-status="cancelado">Cancelados</button>
+        </div>
+
+        <div class="toolbar-group">
+          <select id="dateRangeFilter" class="form-control" style="width:auto;padding:8px 12px;font-size:0.86rem;">
+            <option value="all">Todos los recientes</option>
+            <option value="today">Solo de hoy</option>
+          </select>
+          <input type="search" id="searchOrdersInput" class="form-control" placeholder="Buscar cliente, folio o chofer..." style="width:220px;padding:8px 12px;font-size:0.86rem;">
+        </div>
+      </div>
+
+      <div id="ordersAdminContainer">
+        <div class="cart-empty">Cargando pedidos en tiempo real...</div>
+      </div>
+    </section>
+
+    <!-- ================= TAB 3: CATALOG & MORNING BROADCAST ================= -->
+    <section id="tabCatalog" class="admin-tab-pane" style="display:none;">
+
+      <div class="order-admin-card" style="margin-bottom:20px;background:var(--green-50);border-color:var(--green-600);">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+          <div>
+            <h3 class="serif-title" style="font-size:1.18rem;color:var(--green-950);">📲 Mensaje Matutino para Listas de Difusión</h3>
+            <p style="font-size:0.84rem;color:var(--slate-700);margin-top:4px;max-width:680px;">
+              Copia este texto con los precios actualizados de hoy y pégalo en tus <strong>2 Listas de Difusión de WhatsApp Business</strong> para llegar a los 450 contactos gratis.
+            </p>
+          </div>
+          <button type="button" id="btnCopyBroadcastMsg" class="btn btn-whatsapp" style="width:100%;max-width:260px;">
+            📋 Copiar Mensaje de Hoy
+          </button>
+        </div>
+        <pre id="broadcastPreviewBox" style="margin-top:12px;background:var(--white);padding:12px;border-radius:10px;border:1px solid var(--slate-200);font-family:inherit;font-size:0.84rem;white-space:pre-wrap;word-break:break-word;color:var(--slate-900);"></pre>
+      </div>
+
+      <form id="catalogForm">
+        <div class="order-admin-card" style="margin-bottom:20px;">
+          <h3 class="serif-title" style="font-size:1.22rem;color:var(--green-950);margin-bottom:14px;">Estatus General de la Tienda</h3>
+          <div class="order-admin-grid">
+            <div class="form-group">
+              <label class="form-label" for="cfgStoreOpen">Recepción de Pedidos en Línea</label>
+              <select id="cfgStoreOpen" class="form-control">
+                <option value="true">🟢 Abierta — Recibiendo pedidos</option>
+                <option value="false">🟠 Cerrada temporalmente</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="cfgSchedule">Horario Visible</label>
+              <input type="text" id="cfgSchedule" class="form-control" placeholder="Lunes a Sábado • 7:00 AM a 5:00 PM">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="cfgBanner">Aviso Superior en la Página</label>
+              <input type="text" id="cfgBanner" class="form-control" placeholder="Entregas el mismo día...">
+            </div>
+          </div>
+          <div class="form-row-2" style="margin-top:6px;">
+            <div class="form-group">
+              <label class="form-label" for="cfgPhone1">Teléfono / WhatsApp Principal</label>
+              <input type="text" id="cfgPhone1" class="form-control" placeholder="452 171 50 74">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="cfgPhone2">Teléfono Secundario</label>
+              <input type="text" id="cfgPhone2" class="form-control" placeholder="844 677 52 76">
+            </div>
+          </div>
+        </div>
+
+        <h3 class="serif-title" style="font-size:1.28rem;color:var(--green-950);margin-bottom:14px;">Precios por Caja (4 Calibres)</h3>
+        <div id="adminCalibersEditor" class="caliber-list" style="margin-bottom:20px;"></div>
+
+        <button type="submit" id="btnSaveCatalog" class="btn btn-primary" style="width:100%;max-width:360px;padding:14px 24px;font-size:1rem;">
+          Guardar y Actualizar Precios en Vivo
+        </button>
+      </form>
+    </section>
+
+    <!-- ================= TAB 4: DRIVERS & SECURITY ================= -->
+    <section id="tabDrivers" class="admin-tab-pane" style="display:none;">
+      <div class="two-col-panel">
+        <div class="order-admin-card">
+          <h3 class="serif-title" style="font-size:1.22rem;color:var(--green-950);margin-bottom:6px;">Choferes, WhatsApp y PIN de Ruta</h3>
+          <p style="font-size:0.84rem;color:var(--slate-500);margin-bottom:14px;">
+            Asigna a cada chofer su <strong>PIN de 4 dígitos</strong> para entrar a <code>/chofer.html</code> y envíale su acceso directo por WhatsApp.
+          </p>
+
+          <div id="driversListEditor" style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;"></div>
+
+          <div class="driver-add-row">
+            <div>
+              <label class="form-label" for="newDriverName">Nuevo Chofer *</label>
+              <input type="text" id="newDriverName" class="form-control" placeholder="Ej. Juan">
+            </div>
+            <div>
+              <label class="form-label" for="newDriverPhone">WhatsApp (10 dígitos)</label>
+              <input type="tel" id="newDriverPhone" class="form-control" placeholder="Ej. 8441234567">
+            </div>
+            <div>
+              <label class="form-label" for="newDriverPin">PIN Inicial *</label>
+              <input type="text" inputmode="numeric" maxlength="8" id="newDriverPin" class="form-control" placeholder="Ej. 3333">
+            </div>
+            <button type="button" id="btnAddDriver" class="btn btn-primary" style="height:42px;">+ Agregar</button>
+          </div>
+        </div>
+
+        <div class="order-admin-card">
+          <h3 class="serif-title" style="font-size:1.22rem;color:var(--green-950);margin-bottom:6px;">Cambiar Clave de Acceso</h3>
+          <p style="font-size:0.84rem;color:var(--slate-500);margin-bottom:14px;">
+            Actualiza la contraseña con la que almacén y administración entran a este sistema.
+          </p>
+          <form id="changePassForm">
+            <div class="form-group">
+              <label class="form-label" for="newAdminPass1">Nueva Clave (mínimo 6 caracteres)</label>
+              <input type="password" id="newAdminPass1" class="form-control" minlength="6" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="newAdminPass2">Confirmar Nueva Clave</label>
+              <input type="password" id="newAdminPass2" class="form-control" minlength="6" required>
+            </div>
+            <button type="submit" class="btn btn-outline" style="width:100%;margin-top:6px;">Actualizar Clave</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Modal: Capturar Devolución / Editar Vuelta de Almacén -->
+  <div id="returnModal" class="modal-backdrop" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <button type="button" id="btnCloseReturnModal" class="modal-close" aria-label="Cerrar">✕</button>
+      <h3 class="serif-title" id="returnModalTitle" style="font-size:1.3rem;color:var(--green-950);margin-bottom:4px;padding-right:34px;">Capturar Devolución</h3>
+      <p id="returnModalSubtitle" style="font-size:0.84rem;color:var(--slate-500);margin-bottom:14px;"></p>
+
+      <form id="returnTripForm">
+        <input type="hidden" id="editTripId">
+        <div class="form-group">
+          <label class="form-label">Maduración llevada en esta vuelta</label>
+          <select id="editTripRipeness" class="form-control">
+            <option value="Maduro">Maduro</option>
+            <option value="Sazón">Sazón</option>
+            <option value="Quebrado">Quebrado</option>
+            <option value="Verde">Verde</option>
+            <option value="Maduro y Sazón">Maduro y Sazón</option>
+            <option value="Quebrado y Sazón">Quebrado y Sazón</option>
+            <option value="Surtido">Surtido (Varios)</option>
+          </select>
+        </div>
+
+        <div style="font-size:0.78rem;font-weight:800;color:var(--green-900);margin-bottom:6px;">SALIDA REGISTRADA (CAJAS)</div>
+        <div class="caliber-4-inputs" style="margin-bottom:14px;">
+          <div><label class="form-label">M</label><input type="number" min="0" inputmode="numeric" id="editOutM" class="form-control"></div>
+          <div><label class="form-label">P</label><input type="number" min="0" inputmode="numeric" id="editOutP" class="form-control"></div>
+          <div><label class="form-label">E</label><input type="number" min="0" inputmode="numeric" id="editOutE" class="form-control"></div>
+          <div><label class="form-label">S</label><input type="number" min="0" inputmode="numeric" id="editOutS" class="form-control"></div>
+        </div>
+
+        <div style="font-size:0.78rem;font-weight:800;color:var(--gold-600);margin-bottom:6px;">DEVOLUCIÓN QUE REGRESA SIN VENDER</div>
+        <div class="caliber-4-inputs" style="margin-bottom:14px;">
+          <div><label class="form-label">Dev. M</label><input type="number" min="0" inputmode="numeric" id="editRetM" class="form-control"></div>
+          <div><label class="form-label">Dev. P</label><input type="number" min="0" inputmode="numeric" id="editRetP" class="form-control"></div>
+          <div><label class="form-label">Dev. E</label><input type="number" min="0" inputmode="numeric" id="editRetE" class="form-control"></div>
+          <div><label class="form-label">Dev. S</label><input type="number" min="0" inputmode="numeric" id="editRetS" class="form-control"></div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Nota / Detalle</label>
+          <input type="text" id="editTripNote" class="form-control" placeholder="Opcional...">
+        </div>
+
+        <div style="display:flex;justify-content:space-between;gap:10px;margin-top:16px;flex-wrap:wrap;">
+          <button type="button" id="btnDeleteTrip" class="btn btn-outline btn-sm" style="color:var(--red-600);border-color:#eccaca;">Eliminar vuelta</button>
+          <button type="submit" class="btn btn-primary" style="flex:1;">Guardar Cambios</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Agregar / Editar Punto de Compra desde Admin (Link WhatsApp / Mapa) -->
+  <div id="adminPlaceModal" class="modal-backdrop" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <button type="button" id="btnCloseAdminPlaceModal" class="modal-close">✕</button>
+      <h3 class="serif-title" style="font-size:1.25rem;color:var(--green-950);margin-bottom:4px;padding-right:32px;">🏪 Guardar Punto de Compra</h3>
+      <p style="font-size:0.82rem;color:var(--slate-500);margin-bottom:12px;">
+        Pega el enlace de Google Maps que mandaron por WhatsApp (o coordenadas), o elige el punto tocando el mapa.
+      </p>
+
+      <form id="adminPlaceForm">
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label" for="admPlaceCategory">Giro del Negocio *</label>
+            <select id="admPlaceCategory" class="form-control">
+              <option value="tienda">🏪 Tienda / Abarrotes</option>
+              <option value="carniceria">🥩 Carnicería</option>
+              <option value="restaurante">🍽️ Restaurante / Taquería</option>
+              <option value="fruteria">🥑 Frutería / Verdulería</option>
+              <option value="otro">🏢 Otro Giro</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="admPlacePhone">Teléfono / WhatsApp</label>
+            <input type="tel" id="admPlacePhone" class="form-control" placeholder="10 dígitos">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="admPlaceName">Nombre del Negocio *</label>
+          <input type="text" id="admPlaceName" class="form-control" placeholder="Ej. Carnicería La Especial" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="admPlaceAddress">Dirección / Referencia</label>
+          <input type="text" id="admPlaceAddress" class="form-control" placeholder="Calle, colonia o referencia">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="admPlaceCoordsInput">Link de Ubicación (WhatsApp / Maps) o Coordenadas *</label>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <input type="text" id="admPlaceCoordsInput" class="form-control" placeholder="Ej. 25.4267, -100.9954 o link de Maps" required style="flex:1;">
+            <button type="button" id="btnPickOnMap" class="btn btn-outline btn-sm">👆 Elegir en Mapa</button>
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="width:100%;padding:12px;margin-top:6px;">
+          💾 Guardar Negocio en el Mapa
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Printable Receipt / Warehouse Sheet Container -->
+  <div id="printReceiptArea"></div>
+
+  <!-- Toast -->
+  <div id="toastBox" class="toast-box"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script type="module" src="js/admin.js"></script>
+</body>
+</html>

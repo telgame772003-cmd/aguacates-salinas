@@ -126,6 +126,12 @@
           <div class="form-group">
             <label class="form-label" for="customerAddress">Dirección de Entrega y Referencias *</label>
             <input type="text" id="customerAddress" class="form-control" placeholder="Calle, número, colonia o referencia del local" required maxlength="180">
+            <div style="margin-top:6px;display:flex;flex-direction:column;gap:4px;">
+              <button type="button" id="btnAttachOrderGps" class="btn btn-outline btn-sm" style="font-size:0.76rem;padding:7px 10px;width:100%;white-space:normal;">
+                📍 Adjuntar mi ubicación GPS (opcional)
+              </button>
+              <span id="orderGpsStatus" style="font-size:0.74rem;color:var(--green-800);font-weight:700;text-align:center;"></span>
+            </div>
           </div>
 
           <div class="form-row-2">

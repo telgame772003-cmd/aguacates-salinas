@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Modo Chofer en Ruta | Comercializadora Salinas</title>
+  <link rel="icon" type="image/png" href="assets/favicon.png">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="driver-app-body">
+
+  <!-- Top Bar -->
+  <header class="driver-topbar">
+    <div style="display:flex;align-items:center;gap:8px;">
+      <img src="assets/favicon.png" alt="Salinas" style="width:30px;height:30px;border-radius:8px;background:#fff;padding:2px;">
+      <div>
+        <div style="font-size:0.68rem;color:#a8cca5;font-weight:800;text-transform:uppercase;line-height:1;">Ruta Salinas</div>
+        <strong id="topDriverName" style="font-size:0.95rem;">Modo Chofer</strong>
+      </div>
+    </div>
+
+    <div id="driverTopActions" style="display:none;align-items:center;gap:6px;">
+      <button type="button" id="btnToggleGps" class="gps-toggle-btn">
+        <span id="gpsDot">⚪</span> <span id="gpsLabel">Activar GPS</span>
+      </button>
+      <button type="button" id="btnDriverLogout" class="btn btn-outline btn-sm" style="padding:5px 10px;font-size:0.74rem;background:transparent;color:#fff;border-color:rgba(255,255,255,0.3);">
+        Salir
+      </button>
+    </div>
+  </header>
+
+  <!-- LOGIN VIEW -->
+  <section id="driverLoginView" class="login-wrap" style="min-height:82vh;">
+    <div class="login-card">
+      <img src="assets/logo-salinas.png" alt="Comercializadora Salinas" style="height:54px;object-fit:contain;margin-bottom:14px;">
+      <h2 class="serif-title" style="color:var(--green-950);font-size:1.4rem;margin-bottom:6px;">Acceso de Chofer</h2>
+      <p style="font-size:0.85rem;color:var(--slate-500);margin-bottom:18px;">
+        Selecciona tu nombre e ingresa tu PIN de 4 dígitos para ver tu carga, pedidos y corte.
+      </p>
+
+      <form id="driverLoginForm" style="text-align:left;">
+        <div class="form-group">
+          <label class="form-label" for="loginDriverSelect">Tu Nombre</label>
+          <select id="loginDriverSelect" class="form-control" required></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="loginDriverPin">PIN de Acceso (4 dígitos)</label>
+          <input type="password" inputmode="numeric" maxlength="8" id="loginDriverPin" class="form-control" placeholder="••••" required style="text-align:center;font-size:1.3rem;letter-spacing:6px;font-weight:800;">
+        </div>
+        <label class="remember-check">
+          <input type="checkbox" id="rememberDriverSession" checked>
+          <span>Mantener sesión iniciada en mi celular</span>
+        </label>
+        <button type="submit" id="btnDriverLogin" class="btn btn-primary" style="width:100%;padding:13px;font-size:1rem;">
+          Entrar a Mi Ruta
+        </button>
+      </form>
+    </div>
+  </section>
+
+  <!-- MAIN DRIVER APP -->
+  <main id="driverAppMain" class="driver-container" style="display:none;">
+
+    <!-- ================= VIEW 1: MI CARRO Y PEDIDOS ASIGNADOS ================= -->
+    <section id="drvPaneRoute" class="drv-pane">
+      <div class="trunk-banner">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+          <div>
+            <div style="font-size:0.74rem;font-weight:800;text-transform:uppercase;color:#c6e3c3;">Disponible en mi carro hoy</div>
+            <div style="font-size:1.5rem;font-weight:800;" id="trunkTotalAvailable">0 cajas</div>
+          </div>
+          <span id="trunkRipenessTag" class="ripeness-badge" style="background:rgba(255,255,255,0.2);color:#fff;">Sin carga aún</span>
+        </div>
+
+        <div class="trunk-cal-grid">
+          <div class="trunk-cal-box"><div class="code">M · Media</div><div class="num" id="trunkM">0</div></div>
+          <div class="trunk-cal-box"><div class="code">P · Primera</div><div class="num" id="trunkP">0</div></div>
+          <div class="trunk-cal-box"><div class="code">E · Extra</div><div class="num" id="trunkE">0</div></div>
+          <div class="trunk-cal-box"><div class="code">S · Super</div><div class="num" id="trunkS">0</div></div>
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <h3 style="font-size:1.1rem;color:var(--green-950);">📦 Pedidos Asignados por Oficina</h3>
+        <span id="assignedCountBadge" class="badge-count">0</span>
+      </div>
+
+      <div id="driverAssignedOrdersList"></div>
+    </section>
+
+    <!-- ================= VIEW 1B: PUNTOS DE COMPRA / CLIENTES EN RUTA ================= -->
+    <section id="drvPanePlaces" class="drv-pane" style="display:none;">
+      <div class="corte-summary-box" style="background:linear-gradient(180deg,#ffffff 0%,#f5faf3 100%);border-color:var(--green-600);">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
+          <h3 style="font-size:1.12rem;color:var(--green-950);">🏪 Puntos de Compra</h3>
+          <span id="placesCountBadge" class="ripeness-badge">0 puntos</span>
+        </div>
+        <p style="font-size:0.8rem;color:var(--slate-700);margin-bottom:12px;">
+          Si llegaste a un negocio nuevo, guárdalo aquí con tu GPS en vez de mandar ubicación por WhatsApp.
+        </p>
+        <button type="button" id="btnOpenNewPlaceModal" class="btn btn-primary" style="width:100%;padding:12px;font-size:0.95rem;">
+          📍 Guardar Nuevo Negocio Aquí (GPS)
+        </button>
+      </div>
+
+      <div class="form-group">
+        <input type="search" id="driverPlaceSearch" class="form-control" placeholder="🔍 Buscar tienda, carnicería, restaurante...">
+      </div>
+
+      <div id="driverPlacesList"></div>
+    </section>
+
+    <!-- ================= VIEW 2: REGISTRAR VENTA EN RUTA ================= -->
+    <section id="drvPaneSell" class="drv-pane" style="display:none;">
+      <div class="corte-summary-box">
+        <h3 style="font-size:1.18rem;color:var(--green-950);margin-bottom:4px;">➕ Registrar Venta en Calle</h3>
+        <p style="font-size:0.82rem;color:var(--slate-500);margin-bottom:14px;">
+          Toca las cajas entregadas y cómo te pagaron. Se descontará automático de tu carro.
+        </p>
+
+        <form id="streetSaleForm">
+          <input type="hidden" id="saleSelectedPlaceId">
+          <div class="form-group">
+            <label class="form-label" for="saleClientName">Nombre del Negocio / Cliente *</label>
+            <input type="text" id="saleClientName" list="recentClientsDatalist" class="form-control" placeholder="Ej. Abarrotes Rodríguez" required maxlength="100">
+            <datalist id="recentClientsDatalist"></datalist>
+            <div id="saleLinkedPlaceBadge" style="display:none;margin-top:5px;font-size:0.76rem;color:var(--green-800);font-weight:700;"></div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="saleClientPhone">Teléfono / WhatsApp <span id="phoneReqLabel" style="color:var(--slate-500);font-weight:500;">(opcional para nota digital)</span></label>
+            <input type="tel" id="saleClientPhone" class="form-control" placeholder="10 dígitos" maxlength="20">
+          </div>
+
+          <div style="font-size:0.78rem;font-weight:800;color:var(--green-900);margin:14px 0 8px;">CAJAS ENTREGADAS Y PRECIO ($/CAJA)</div>
+          <div id="streetSaleCalibersContainer"></div>
+
+          <div style="font-size:0.78rem;font-weight:800;color:var(--green-900);margin:14px 0 8px;">FORMA DE COBRO</div>
+          <div class="pay-method-pills" id="salePayMethodGroup">
+            <button type="button" class="pay-pill-btn selected" data-pay="Efectivo">💵 Efectivo</button>
+            <button type="button" class="pay-pill-btn" data-pay="Transferencia">🏦 Transf.</button>
+            <button type="button" class="pay-pill-btn" data-pay="Credito">📝 Crédito</button>
+          </div>
+
+          <div id="creditFieldsWrap" style="display:none;background:var(--gold-100);border:1px solid #e6c687;padding:12px;border-radius:12px;margin-bottom:12px;">
+            <div class="form-group" style="margin-bottom:8px;">
+              <label class="form-label" for="saleAdvanceInput" style="color:#6e470b;">Anticipo entregado hoy ($ MXN)</label>
+              <input type="number" min="0" inputmode="numeric" id="saleAdvanceInput" class="form-control" value="0">
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:0.88rem;font-weight:800;color:var(--red-600);">
+              <span>RESTA POR COBRAR (DEUDA):</span>
+              <span id="saleBalancePreview">$0</span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="saleNotes">Observaciones (opcional)</label>
+            <input type="text" id="saleNotes" class="form-control" placeholder="Ej. Pidió nota física / referencia...">
+          </div>
+
+          <div class="cart-totals-box" style="margin-top:12px;margin-bottom:14px;">
+            <div>
+              <div class="boxes-count" id="saleBoxesSummary">0 cajas</div>
+              <div style="font-size:0.74rem;color:#a8cca5;">Total de la nota</div>
+            </div>
+            <div class="grand-total" id="saleTotalSummary">$0</div>
+          </div>
+
+          <button type="submit" id="btnSubmitStreetSale" class="btn btn-primary btn-submit-order" disabled>
+            Selecciona al menos 1 caja
+          </button>
+        </form>
+      </div>
+    </section>
+
+    <!-- ================= VIEW 3: MI CORTE AUTOMÁTICO ================= -->
+    <section id="drvPaneCorte" class="drv-pane" style="display:none;">
+      <div class="corte-summary-box">
+        <h3 style="font-size:1.15rem;color:var(--green-950);margin-bottom:10px;">📦 Mi Corte de Cajas Hoy</h3>
+        <div style="font-size:0.86rem;display:flex;flex-direction:column;gap:6px;color:var(--slate-700);">
+          <div style="display:flex;justify-content:space-between;"><span>Salidas cargadas en almacén:</span><strong id="corteBoxesOut">0</strong></div>
+          <div style="display:flex;justify-content:space-between;"><span>(−) Cajas vendidas hoy:</span><strong id="corteBoxesSold">0</strong></div>
+          <div style="display:flex;justify-content:space-between;"><span>(−) Devoluciones ya registradas:</span><strong id="corteBoxesRet">0</strong></div>
+        </div>
+        <div class="corte-highlight">
+          <div>
+            <div style="font-size:0.74rem;color:#b7d7b4;font-weight:800;text-transform:uppercase;">Por devolver a Almacén</div>
+            <div id="corteBoxesPendingSub" style="font-size:0.76rem;color:#dfeedd;">M:0 • P:0 • E:0 • S:0</div>
+          </div>
+          <div style="font-size:1.45rem;font-weight:800;" id="corteBoxesPending">0 cajas</div>
+        </div>
+      </div>
+
+      <div class="corte-summary-box">
+        <h3 style="font-size:1.15rem;color:var(--green-950);margin-bottom:10px;">💵 Mi Corte de Dinero Hoy</h3>
+        <div style="font-size:0.86rem;display:flex;flex-direction:column;gap:6px;color:var(--slate-700);">
+          <div style="display:flex;justify-content:space-between;"><span>Venta total del día:</span><strong id="corteMoneyGross">$0</strong></div>
+          <div style="display:flex;justify-content:space-between;"><span>(−) Cobrado por Transferencia:</span><strong id="corteMoneyTransf">$0</strong></div>
+          <div style="display:flex;justify-content:space-between;"><span>(−) Saldo dejado a Crédito:</span><strong id="corteMoneyCredit" style="color:var(--red-600);">$0</strong></div>
+        </div>
+        <div class="corte-highlight" style="background:#194d22;">
+          <div>
+            <div style="font-size:0.74rem;color:#b7ecc0;font-weight:800;text-transform:uppercase;">Efectivo a entregar en Oficina</div>
+            <div style="font-size:0.74rem;color:#d6f5db;">Contado + anticipos en efectivo</div>
+          </div>
+          <div style="font-size:1.55rem;font-weight:800;" id="corteMoneyCash">$0</div>
+        </div>
+      </div>
+
+      <h3 style="font-size:1.05rem;color:var(--green-950);margin:16px 0 8px;">Notas Registradas Hoy</h3>
+      <div id="driverTodaySalesList"></div>
+    </section>
+
+  </main>
+
+  <!-- Bottom Thumb Bar -->
+  <nav id="driverBottomNav" class="driver-bottom-nav" style="display:none;">
+    <button type="button" class="drv-nav-btn active" data-pane="drvPaneRoute">
+      <span class="ico">🚗</span>
+      <span>Mi Ruta</span>
+    </button>
+    <button type="button" class="drv-nav-btn" data-pane="drvPanePlaces">
+      <span class="ico">🏪</span>
+      <span>Clientes</span>
+    </button>
+    <button type="button" class="drv-nav-btn" data-pane="drvPaneSell">
+      <span class="ico">➕</span>
+      <span>Vender</span>
+    </button>
+    <button type="button" class="drv-nav-btn" data-pane="drvPaneCorte">
+      <span class="ico">💰</span>
+      <span>Mi Corte</span>
+    </button>
+  </nav>
+
+  <!-- Modal: Nota Exitosa / Entrega de Pedido -->
+  <div id="saleSuccessModal" class="modal-backdrop" role="dialog" aria-modal="true">
+    <div class="modal-card" style="text-align:center;">
+      <button type="button" id="btnCloseSaleModal" class="modal-close">✕</button>
+      <div style="font-size:2.2rem;margin-bottom:6px;">✅</div>
+      <h3 class="serif-title" id="saleModalTitle" style="font-size:1.35rem;color:var(--green-950);margin-bottom:6px;">¡Venta Registrada!</h3>
+      <p id="saleModalDesc" style="font-size:0.88rem;color:var(--slate-700);margin-bottom:16px;"></p>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <a id="saleModalWhatsappBtn" href="#" target="_blank" rel="noopener" class="btn btn-whatsapp" style="width:100%;">
+          📲 Enviar Nota Digital por WhatsApp
+        </a>
+        <button type="button" id="btnDoneSaleModal" class="btn btn-outline" style="width:100%;">Listo, Continuar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Confirmar Entrega de Pedido Asignado -->
+  <div id="deliverOrderModal" class="modal-backdrop" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <button type="button" id="btnCloseDeliverModal" class="modal-close">✕</button>
+      <h3 class="serif-title" style="font-size:1.25rem;color:var(--green-950);margin-bottom:4px;padding-right:32px;">Confirmar Entrega y Cobro</h3>
+      <p id="deliverOrderSubtitle" style="font-size:0.85rem;color:var(--slate-700);margin-bottom:14px;"></p>
+
+      <form id="deliverOrderForm">
+        <input type="hidden" id="deliverOrderId">
+        <div class="form-group">
+          <label class="form-label">¿Cómo pagó el cliente?</label>
+          <select id="deliverPayMethod" class="form-control">
+            <option value="Efectivo">💵 Pagado en Efectivo</option>
+            <option value="Transferencia">🏦 Pagado por Transferencia</option>
+            <option value="Credito">📝 Quedó a Crédito / Anticipo</option>
+          </select>
+        </div>
+
+        <div id="deliverCreditWrap" style="display:none;" class="form-group">
+          <label class="form-label" for="deliverAdvanceInput">Anticipo en efectivo recibido ($ MXN)</label>
+          <input type="number" min="0" inputmode="numeric" id="deliverAdvanceInput" class="form-control" value="0">
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="width:100%;padding:12px;margin-top:8px;">
+          ✅ Confirmar Entrega
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Alta de Nuevo Punto de Compra (Con GPS del Chofer) -->
+  <div id="newPlaceModal" class="modal-backdrop" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <button type="button" id="btnCloseNewPlaceModal" class="modal-close">✕</button>
+      <h3 class="serif-title" style="font-size:1.25rem;color:var(--green-950);margin-bottom:4px;padding-right:32px;">📍 Guardar Nuevo Punto</h3>
+      <p id="newPlaceGpsStatus" style="font-size:0.82rem;color:var(--green-800);font-weight:700;margin-bottom:12px;">
+        Obteniendo tu ubicación GPS exacta...
+      </p>
+
+      <form id="newPlaceForm">
+        <div class="form-group">
+          <label class="form-label" for="placeCategoryInput">Giro del Negocio *</label>
+          <select id="placeCategoryInput" class="form-control">
+            <option value="tienda">🏪 Tienda / Abarrotes</option>
+            <option value="carniceria">🥩 Carnicería</option>
+            <option value="restaurante">🍽️ Restaurante / Taquería</option>
+            <option value="fruteria">🥑 Frutería / Verdulería</option>
+            <option value="otro">🏢 Otro Giro</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="placeNameInput">Nombre del Negocio *</label>
+          <input type="text" id="placeNameInput" class="form-control" placeholder="Ej. Carnicería San Juan" required maxlength="100">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="placePhoneInput">Teléfono / WhatsApp (opcional)</label>
+          <input type="tel" id="placePhoneInput" class="form-control" placeholder="10 dígitos" maxlength="20">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="placeAddressInput">Calle / Colonia / Referencia</label>
+          <input type="text" id="placeAddressInput" class="form-control" placeholder="Ej. Esquina frente a la plaza..." maxlength="150">
+        </div>
+
+        <button type="submit" id="btnSubmitNewPlace" class="btn btn-primary" style="width:100%;padding:12px;">
+          💾 Guardar Punto en Mapa
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Registrar Visita Sin Venta (Validada por GPS) -->
+  <div id="visitNoSaleModal" class="modal-backdrop" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <button type="button" id="btnCloseVisitModal" class="modal-close">✕</button>
+      <h3 class="serif-title" style="font-size:1.22rem;color:var(--green-950);margin-bottom:4px;padding-right:32px;">📍 Registrar Visita</h3>
+      <p id="visitModalSubtitle" style="font-size:0.84rem;color:var(--slate-700);margin-bottom:12px;"></p>
+
+      <form id="visitNoSaleForm">
+        <input type="hidden" id="visitPlaceId">
+        <div class="form-group">
+          <label class="form-label" for="visitReasonSelect">Motivo por el que hoy no compró</label>
+          <select id="visitReasonSelect" class="form-control">
+            <option value="Aún tiene aguacate">🥑 Aún tiene aguacate</option>
+            <option value="Local cerrado en este momento">🔒 Local cerrado en este momento</option>
+            <option value="Pidió pasar más tarde / mañana">🕒 Pidió pasar más tarde / mañana</option>
+            <option value="No estaba el encargado">👤 No estaba el encargado</option>
+          </select>
+        </div>
+
+        <button type="submit" id="btnSubmitVisit" class="btn btn-primary" style="width:100%;padding:12px;">
+          ✅ Confirmar que pasé aquí (GPS)
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <div id="toastBox" class="toast-box"></div>
+
+  <script type="module" src="js/driver.js"></script>
+</body>
+</html>

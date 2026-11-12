@@ -1,0 +1,126 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAdminKeyActive(keyHash) {
+      let keyDoc = getAfter(/databases/$(database)/documents/admin_keys/$(keyHash));
+      return keyDoc != null && keyDoc.data.active == true;
+    }
+
+    function isDriverKeyActive(keyHash) {
+      let keyDoc = getAfter(/databases/$(database)/documents/driver_keys/$(keyHash));
+      return keyDoc != null && keyDoc.data.active == true;
+    }
+
+    function hasValidAdminProof() {
+      let proofId = request.resource.data.proofId;
+      return proofId is string
+        && proofId.matches('^prf_.*')
+        && getAfter(/databases/$(database)/documents/admin_proofs/$(proofId)).data.keyHash is string
+        && isAdminKeyActive(getAfter(/databases/$(database)/documents/admin_proofs/$(proofId)).data.keyHash);
+    }
+
+    function hasValidDriverProof() {
+      let proofId = request.resource.data.proofId;
+      return proofId is string
+        && proofId.matches('^dprf_.*')
+        && getAfter(/databases/$(database)/documents/driver_proofs/$(proofId)).data.keyHash is string
+        && isDriverKeyActive(getAfter(/databases/$(database)/documents/driver_proofs/$(proofId)).data.keyHash);
+    }
+
+    // Llaves maestras Admin (SHA-256)
+    match /admin_keys/{keyHash} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if !exists(/databases/$(database)/documents/settings/security_init)
+        || hasValidAdminProof();
+      allow update: if hasValidAdminProof();
+      allow delete: if false;
+    }
+
+    match /admin_proofs/{proofId} {
+      allow read: if false;
+      allow create: if request.resource.data.keyHash is string
+        && isAdminKeyActive(request.resource.data.keyHash);
+      allow update, delete: if false;
+    }
+
+    // Llaves PIN Choferes (SHA-256 de chofer + PIN)
+    match /driver_keys/{keyHash} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if hasValidAdminProof();
+      allow delete: if false;
+    }
+
+    match /driver_proofs/{proofId} {
+      allow read: if false;
+      allow create: if request.resource.data.keyHash is string
+        && isDriverKeyActive(request.resource.data.keyHash);
+      allow update, delete: if false;
+    }
+
+    // Configuración pública del catálogo, precios y lista de choferes
+    match /settings/{docId} {
+      allow read: if true;
+      allow create: if docId == 'security_init'
+        && !exists(/databases/$(database)/documents/settings/security_init);
+      allow write: if docId != 'security_init' && hasValidAdminProof();
+    }
+
+    // Control Diario de Almacén
+    match /warehouse_days/{dateId} {
+      allow read: if true;
+      allow write: if hasValidAdminProof();
+    }
+
+    // Ubicación GPS en tiempo real de cada chofer
+    match /driver_locations/{driverId} {
+      allow read: if true;
+      allow write: if hasValidDriverProof() || hasValidAdminProof();
+    }
+
+    // Ventas registradas en ruta por los choferes (Contado, Transferencia o Crédito/Anticipo)
+    match /route_sales/{saleId} {
+      allow read: if true;
+      allow create, update: if hasValidDriverProof() || hasValidAdminProof();
+      allow delete: if false;
+    }
+
+    // Puntos de compra registrados (Tiendas, Carnicerías, Restaurantes, Fruterías, etc.)
+    match /places/{placeId} {
+      allow read: if true;
+      allow create, update: if hasValidDriverProof() || hasValidAdminProof();
+      allow delete: if false;
+    }
+
+    // Bitácora diaria de visitas en ruta (con o sin venta, validadas por GPS)
+    match /place_visits/{visitId} {
+      allow read: if true;
+      allow create, update: if hasValidDriverProof() || hasValidAdminProof();
+      allow delete: if false;
+    }
+
+    // Pedidos en línea
+    match /orders/{orderId} {
+      allow read: if true;
+
+      allow create: if request.resource.data.status == 'nuevo'
+        && request.resource.data.customerName is string
+        && request.resource.data.customerName.size() >= 2
+        && request.resource.data.customerName.size() <= 120
+        && request.resource.data.phone is string
+        && request.resource.data.phone.size() >= 8
+        && request.resource.data.phone.size() <= 25
+        && request.resource.data.totalBoxes is number
+        && request.resource.data.totalBoxes >= 1
+        && request.resource.data.totalBoxes <= 2000
+        && request.resource.data.totalAmount is number
+        && request.resource.data.totalAmount >= 0;
+
+      // Admin o Chofer autenticado pueden actualizar estatus de entrega
+      allow update: if hasValidAdminProof() || hasValidDriverProof();
+      allow delete: if false;
+    }
+  }
+}
