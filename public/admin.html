@@ -265,34 +265,46 @@
     <!-- ================= TAB 1B: RUTA, MAPA GPS Y CORTES ================= -->
     <section id="tabRoutes" class="admin-tab-pane" style="display:none;">
       <div id="adminMapCard" class="order-admin-card" style="margin-bottom:18px;">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+        <div id="adminMapHeader" style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
           <div>
-            <h3 class="serif-title" style="font-size:1.18rem;color:var(--green-950);">🗺️ Monitor en Vivo: Unidades, Puntos de Venta y Pedidos</h3>
-            <p style="font-size:0.8rem;color:var(--slate-500);">
-              Supervisión operativa para Dirección y Administración: unidades en movimiento, negocios visitados y <strong>alertas de pedidos en tiempo real</strong>.
+            <h3 id="adminMapTitle" class="serif-title" style="font-size:1.18rem;color:var(--green-950);">🗺️ Monitor en Vivo: Unidades, Puntos de Venta y Pedidos</h3>
+            <p id="adminMapSubtitle" style="font-size:0.8rem;color:var(--slate-500);">
+              Toca cualquier filtro para aislar pines en el mapa o abre en pantalla completa.
             </p>
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
             <span id="gpsOnlineBadge" class="ripeness-badge">0 carros en vivo</span>
-            <button type="button" id="btnAdminOpenPlaceModal" class="btn btn-primary btn-sm">➕ Punto / Tienda</button>
+            <button type="button" id="btnFitAllMap" class="btn btn-outline btn-sm" title="Encuadrar los puntos visibles en el mapa">🎯 Ver Todo</button>
+            <button type="button" id="btnAdminOpenPlaceModal" class="btn btn-primary btn-sm">+ Punto / Tienda</button>
             <button type="button" id="btnToggleMapFullscreen" class="btn btn-outline btn-sm">⛶ Pantalla Completa</button>
           </div>
         </div>
 
-        <div class="map-legend-bar">
-          <span class="map-legend-item">🔴 Alerta de Pedido Nuevo</span>
-          <span class="map-legend-item">🔵 Pedido En Ruta</span>
-          <span class="map-legend-item">🚗 Chofer + Recorrido</span>
-          <span class="map-legend-item">🟢 Compró hoy</span>
-          <span class="map-legend-item">🟡 Visitado sin venta</span>
-          <span class="map-legend-item">⚪ Sin visita hoy</span>
-        </div>
+        <div class="admin-map-stage">
+          <div id="mapHudOverlay" class="map-hud-overlay">
+            <div id="mapFsTopBar" class="map-fs-topbar">
+              <div id="fsDriverChips" class="fs-driver-chips"></div>
+              <div class="fs-top-actions">
+                <button type="button" id="btnFsFitAll" class="fs-action-btn" title="Encuadrar puntos visibles">🎯 Todo</button>
+                <button type="button" id="btnFsAddPlace" class="fs-action-btn fs-btn-green">+ Punto</button>
+                <button type="button" id="btnFsExit" class="fs-action-btn fs-btn-exit">✕ Salir</button>
+              </div>
+            </div>
 
-        <div id="gpsDriverChips" class="gps-driver-chips"></div>
-        <div id="mapPickHint" style="display:none;background:var(--gold-100);color:#6e470b;padding:8px 12px;border-radius:10px;font-size:0.82rem;font-weight:800;margin-bottom:8px;">
-          👆 Toca cualquier punto exacto en el mapa para ubicar el negocio...
+            <div id="mapFilterBar" class="map-filter-bar" role="toolbar" aria-label="Filtros del mapa"></div>
+
+            <div id="gpsDriverChips" class="gps-driver-chips"></div>
+
+            <div id="mapPickHint" class="map-pick-hint" style="display:none;">
+              👆 Toca cualquier punto exacto en el mapa para ubicar el negocio...
+            </div>
+          </div>
+
+          <div class="map-canvas-wrap">
+            <div id="adminLiveMap" data-zoom-tier="far"></div>
+            <button type="button" id="btnCornerMapFullscreen" class="map-corner-fs-btn" title="Abrir mapa en pantalla completa">⛶</button>
+          </div>
         </div>
-        <div id="adminLiveMap"></div>
 
         <div id="placesSupervisionSummary" style="margin-top:10px;font-size:0.82rem;color:var(--slate-700);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;background:var(--green-50);padding:8px 12px;border-radius:10px;">
           <span>Cargando puntos de compra...</span>

@@ -238,6 +238,7 @@ document.getElementById("driverLoginForm").addEventListener("submit", async (e) 
     }
 
     loginDriverPin.value = "";
+    localStorage.removeItem("salinas_gps_manual_pause");
     enterDriverApp();
     showToast(`¡Buen viaje, ${selectedName}!`);
   } catch (err) {
@@ -291,6 +292,10 @@ async function enterDriverApp() {
       }
     }
   } catch (_) {}
+
+  if (!gpsActive && localStorage.getItem("salinas_gps_manual_pause") !== "1") {
+    startGpsSharing();
+  }
 }
 
 // ================= BOTTOM NAVIGATION =================
@@ -327,8 +332,10 @@ document.addEventListener("visibilitychange", () => {
 
 btnToggleGps.addEventListener("click", () => {
   if (gpsActive) {
+    localStorage.setItem("salinas_gps_manual_pause", "1");
     stopGpsSharing(true);
   } else {
+    localStorage.removeItem("salinas_gps_manual_pause");
     startGpsSharing();
   }
 });
@@ -542,24 +549,45 @@ function startDriverListeners() {
   });
 }
 
+function normalizePlaceKey(str) {
+  return String(str || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function stripParensKey(str) {
+  return normalizePlaceKey(String(str || "").replace(/\(.*?\)/g, ""));
+}
+
+function namesMatchPlace(a, b) {
+  const na = normalizePlaceKey(a);
+  const nb = normalizePlaceKey(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  const sa = stripParensKey(a);
+  const sb = stripParensKey(b);
+  return Boolean(sa && sb && sa === sb);
+}
+
 function findMatchingPlace(name, phone) {
-  const normName = String(name || "").trim().toLowerCase();
   const normPhone = normalizePhone10(phone);
   for (const p of allPlaces) {
-    if (normName && String(p.name || "").trim().toLowerCase() === normName) return p;
+    if (namesMatchPlace(name, p.name)) return p;
     if (normPhone && normPhone.length === 10 && normalizePhone10(p.phone) === normPhone) return p;
   }
   return null;
 }
 
 function getPlaceStatusToday(place) {
-  const pNormName = String(place.name || "").trim().toLowerCase();
   const pNormPhone = normalizePhone10(place.phone);
 
   const saleMatch = allSalesToday.find(
     (s) =>
       s.placeId === place.id ||
-      (pNormName && String(s.customerName || "").trim().toLowerCase() === pNormName) ||
+      namesMatchPlace(place.name, s.customerName) ||
       (pNormPhone && pNormPhone.length === 10 && normalizePhone10(s.phone) === pNormPhone)
   );
   if (saleMatch) {

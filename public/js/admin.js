@@ -80,6 +80,7 @@ let mapLayerGroup = null;
 let mapFocusMarkers = new Map();
 let hasCenteredMapOnce = false;
 let mapPickCallback = null;
+let mapPinFilter = "all";
 
 let ordersUnsub = null;
 let settingsUnsub = null;
@@ -1162,19 +1163,32 @@ document.getElementById("btnPrintWarehouse").addEventListener("click", () => {
 });
 
 // ================= TAB 1B: RUTA, MAPA GPS, PUNTOS Y CORTES (FASE 2.5) =================
+function syncMapZoomTier() {
+  const mapEl = document.getElementById("adminLiveMap");
+  if (!mapEl || !leafletMap) return;
+  const z = leafletMap.getZoom();
+  const tier = z <= 12 ? "far" : z <= 14 ? "mid" : "near";
+  if (mapEl.dataset.zoomTier !== tier) {
+    mapEl.dataset.zoomTier = tier;
+  }
+}
+
 function ensureLeafletMap() {
   if (leafletMap || typeof window.L === "undefined") return;
   const mapEl = document.getElementById("adminLiveMap");
   if (!mapEl) return;
 
   // Default center: Saltillo / Región comercial
-  leafletMap = window.L.map("adminLiveMap").setView([25.4267, -100.9954], 12);
+  leafletMap = window.L.map("adminLiveMap", { zoomControl: false }).setView([25.4267, -100.9954], 12);
+  window.L.control.zoom({ position: "bottomright" }).addTo(leafletMap);
   window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: "&copy; OpenStreetMap"
   }).addTo(leafletMap);
 
   mapLayerGroup = window.L.layerGroup().addTo(leafletMap);
+  leafletMap.on("zoomend", syncMapZoomTier);
+  syncMapZoomTier();
 
   leafletMap.on("click", (ev) => {
     if (typeof mapPickCallback === "function") {
@@ -1187,17 +1201,139 @@ function ensureLeafletMap() {
   });
 }
 
-document.getElementById("btnToggleMapFullscreen")?.addEventListener("click", () => {
+let mapUsedNativeFullscreen = false;
+
+async function setMapFullscreen(wantFull) {
   const card = document.getElementById("adminMapCard");
-  const btn = document.getElementById("btnToggleMapFullscreen");
+  const btnHeader = document.getElementById("btnToggleMapFullscreen");
   if (!card) return;
-  const isFull = card.classList.toggle("is-fullscreen");
-  if (btn) btn.textContent = isFull ? "✕ Salir Pantalla Completa" : "⛶ Pantalla Completa";
+
+  card.classList.toggle("is-fullscreen", wantFull);
+  document.body.classList.toggle("map-fullscreen-open", wantFull);
+
+  if (btnHeader) btnHeader.textContent = wantFull ? "✕ Salir Pantalla Completa" : "⛶ Pantalla Completa";
+
+  if (wantFull) {
+    try {
+      if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+        await document.documentElement.requestFullscreen();
+        mapUsedNativeFullscreen = true;
+      }
+    } catch (_) {
+      mapUsedNativeFullscreen = false;
+    }
+  } else {
+    mapUsedNativeFullscreen = false;
+    if (document.fullscreenElement && document.exitFullscreen) {
+      try {
+        await document.exitFullscreen();
+      } catch (_) {}
+    }
+  }
+
   ensureLeafletMap();
-  setTimeout(() => {
-    if (leafletMap) leafletMap.invalidateSize();
-  }, 150);
+  const refreshSize = () => {
+    if (leafletMap) {
+      leafletMap.invalidateSize();
+      syncMapZoomTier();
+    }
+  };
+  refreshSize();
+  setTimeout(refreshSize, 90);
+  setTimeout(refreshSize, 260);
+}
+
+function toggleMapFullscreen() {
+  const card = document.getElementById("adminMapCard");
+  if (!card) return;
+  setMapFullscreen(!card.classList.contains("is-fullscreen"));
+}
+
+document.getElementById("btnToggleMapFullscreen")?.addEventListener("click", toggleMapFullscreen);
+document.getElementById("btnCornerMapFullscreen")?.addEventListener("click", toggleMapFullscreen);
+document.getElementById("btnFsExit")?.addEventListener("click", () => setMapFullscreen(false));
+document.getElementById("btnFsFitAll")?.addEventListener("click", () => fitAllMapMarkers());
+document.getElementById("btnFsAddPlace")?.addEventListener("click", () => {
+  if (adminPlaceModal) adminPlaceModal.classList.add("open");
 });
+
+document.addEventListener("fullscreenchange", () => {
+  const card = document.getElementById("adminMapCard");
+  if (!document.fullscreenElement && mapUsedNativeFullscreen && card?.classList.contains("is-fullscreen")) {
+    setMapFullscreen(false);
+  } else if (leafletMap) {
+    setTimeout(() => {
+      leafletMap.invalidateSize();
+      syncMapZoomTier();
+    }, 100);
+  }
+});
+
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape") {
+    const modalOpen = document.querySelector(".modal-backdrop.open");
+    const card = document.getElementById("adminMapCard");
+    if (!modalOpen && card?.classList.contains("is-fullscreen")) {
+      setMapFullscreen(false);
+    }
+  }
+});
+
+function placeMatchesMapFilter(place, status) {
+  if (mapPinFilter === "all") return true;
+  if (mapPinFilter === "orders") return false;
+  if (mapPinFilter === "sold") return status.state === "sold";
+  if (mapPinFilter === "visited") return status.state === "visited";
+  if (mapPinFilter === "pending") return status.state === "pending";
+  if (mapPinFilter.startsWith("cat:")) {
+    return (place.category || "tienda") === mapPinFilter.slice(4);
+  }
+  return true;
+}
+
+function fitAllMapMarkers() {
+  ensureLeafletMap();
+  if (!leafletMap) return;
+  const pts = [];
+  for (const p of allPlaces) {
+    if (typeof p.lat !== "number" || typeof p.lng !== "number") continue;
+    const st = getPlaceDailyStatus(p);
+    if (placeMatchesMapFilter(p, st)) {
+      pts.push([p.lat, p.lng]);
+    }
+  }
+  if (mapPinFilter === "all") {
+    for (const loc of driverLocations) {
+      const isOnline =
+        loc.active === true &&
+        loc.updatedAtIso &&
+        Date.now() - new Date(loc.updatedAtIso).getTime() < 20 * 60 * 1000;
+      if (isOnline && typeof loc.lat === "number" && typeof loc.lng === "number") {
+        pts.push([loc.lat, loc.lng]);
+      }
+    }
+  }
+  if (mapPinFilter === "all" || mapPinFilter === "orders") {
+    for (const ord of allOrders) {
+      if (ord.status === "nuevo" || ord.status === "confirmado" || ord.status === "en_ruta") {
+        const c = resolveOrderCoords(ord);
+        if (c) pts.push([c.lat, c.lng]);
+      }
+    }
+  }
+  if (pts.length === 0) {
+    for (const p of allPlaces) {
+      if (typeof p.lat === "number" && typeof p.lng === "number") pts.push([p.lat, p.lng]);
+    }
+  }
+  if (pts.length === 1) {
+    leafletMap.setView(pts[0], 14);
+  } else if (pts.length > 1) {
+    leafletMap.fitBounds(pts, { padding: [36, 36], maxZoom: 15 });
+  }
+}
+
+document.getElementById("btnFitAllMap")?.addEventListener("click", fitAllMapMarkers);
 
 function formatMinutesAgo(isoStr) {
   if (!isoStr) return "sin señal";
@@ -1209,19 +1345,40 @@ function formatMinutesAgo(isoStr) {
   return `hace ${hrs} h`;
 }
 
+function normalizePlaceKey(str) {
+  return String(str || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function stripParensKey(str) {
+  return normalizePlaceKey(String(str || "").replace(/\(.*?\)/g, ""));
+}
+
+function namesMatchPlace(a, b) {
+  const na = normalizePlaceKey(a);
+  const nb = normalizePlaceKey(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  const sa = stripParensKey(a);
+  const sb = stripParensKey(b);
+  return Boolean(sa && sb && sa === sb);
+}
+
 function resolveOrderCoords(ord) {
   if (typeof ord.lat === "number" && typeof ord.lng === "number") {
     return { lat: ord.lat, lng: ord.lng, source: "gps_pedido" };
   }
   const ordPhone10 = normalizePhone10(ord.phone);
-  const ordNameNorm = String(ord.customerName || "").trim().toLowerCase();
 
   for (const p of allPlaces) {
     if (typeof p.lat !== "number" || typeof p.lng !== "number") continue;
     const pPhone10 = normalizePhone10(p.phone);
-    const pNameNorm = String(p.name || "").trim().toLowerCase();
-    if ((ordPhone10 && pPhone10 && ordPhone10 === pPhone10) || (ordNameNorm && pNameNorm && ordNameNorm === pNameNorm)) {
-      return { lat: p.lat, lng: p.lng, source: "punto_guardado", placeName: p.name };
+    if ((ordPhone10 && pPhone10 && ordPhone10 === pPhone10) || namesMatchPlace(ord.customerName, p.name)) {
+      return { lat: p.lat, lng: p.lng, source: "punto_guardado", placeName: p.name, placeCategory: p.category || "tienda" };
     }
   }
   return null;
@@ -1229,13 +1386,11 @@ function resolveOrderCoords(ord) {
 
 function getPlaceDailyStatus(place) {
   const pPhone10 = normalizePhone10(place.phone);
-  const pNameNorm = String(place.name || "").trim().toLowerCase();
 
   const matchingSales = routeSalesList.filter((s) => {
     if (s.placeId && s.placeId === place.id) return true;
     const sPhone10 = normalizePhone10(s.phone);
-    const sNameNorm = String(s.customerName || "").trim().toLowerCase();
-    return (pPhone10 && sPhone10 && pPhone10 === sPhone10) || (pNameNorm && sNameNorm && pNameNorm === sNameNorm);
+    return (pPhone10 && sPhone10 && pPhone10 === sPhone10) || namesMatchPlace(place.name, s.customerName);
   });
 
   if (matchingSales.length > 0) {
@@ -1253,8 +1408,7 @@ function getPlaceDailyStatus(place) {
 
   const matchingVisits = routeVisitsList.filter((v) => {
     if (v.placeId && v.placeId === place.id) return true;
-    const vNameNorm = String(v.placeName || "").trim().toLowerCase();
-    return pNameNorm && vNameNorm && pNameNorm === vNameNorm;
+    return namesMatchPlace(place.name, v.placeName);
   });
 
   if (matchingVisits.length > 0) {
@@ -1271,8 +1425,27 @@ function getPlaceDailyStatus(place) {
   return { state: "pending" };
 }
 
+function getDriverInitials(rawName) {
+  const cleaned = String(rawName || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9\s]/g, " ")
+    .trim();
+  if (!cleaned) return "CH";
+  const skip = new Set(["de", "del", "la", "las", "el", "los", "y"]);
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  const tokens = words.filter((w) => !skip.has(w.toLowerCase()));
+  const src = tokens.length > 0 ? tokens : words;
+  if (src.length >= 2) {
+    return (src[0][0] + src[1][0]).toUpperCase();
+  }
+  return src[0].slice(0, 2).toUpperCase();
+}
+
 function renderGpsMapAndChips() {
   const chipsEl = document.getElementById("gpsDriverChips");
+  const fsChipsEl = document.getElementById("fsDriverChips");
+  const filterBarEl = document.getElementById("mapFilterBar");
   const badgeEl = document.getElementById("gpsOnlineBadge");
   const summaryEl = document.getElementById("placesSupervisionSummary");
   if (!chipsEl || !badgeEl) return;
@@ -1291,6 +1464,7 @@ function renderGpsMapAndChips() {
 
   if (validLocs.length === 0) {
     chipsEl.innerHTML = `<span style="font-size:0.82rem;color:var(--slate-500);">Aún ningún chofer ha activado su GPS hoy.</span>`;
+    if (fsChipsEl) fsChipsEl.innerHTML = `<span class="fs-drv-pill paused">⚪ 0 carros</span>`;
   } else {
     chipsEl.innerHTML = validLocs
       .map((loc) => {
@@ -1305,18 +1479,39 @@ function renderGpsMapAndChips() {
         `;
       })
       .join("");
+
+    if (fsChipsEl) {
+      fsChipsEl.innerHTML = validLocs
+        .map((loc) => {
+          const isOnline = onlineLocs.some((o) => o.id === loc.id);
+          const dot = isOnline ? "🟢" : "⚪";
+          const initials = getDriverInitials(loc.driverName || loc.id);
+          const ago = formatMinutesAgo(loc.updatedAtIso).replace(/^hace\s+/, "");
+          const boxesTxt = typeof loc.boxesInCar === "number" ? ` · ${loc.boxesInCar}c` : "";
+          return `
+            <button type="button" class="fs-drv-pill ${isOnline ? "" : "paused"}" data-focus-driver="${escapeHtml(loc.id)}" title="${escapeHtml(loc.driverName || loc.id)}">
+              <span>${dot} ${escapeHtml(initials)}</span>
+              <span style="opacity:0.85;font-weight:600;">${escapeHtml(ago)}${boxesTxt}</span>
+            </button>
+          `;
+        })
+        .join("");
+    }
   }
 
-  // Compute daily place supervision counts even if map is hidden
+  // Compute daily place supervision counts and category counts
   let soldCount = 0;
   let visitedCount = 0;
   let pendingCount = 0;
+  const catCounts = { tienda: 0, restaurante: 0, carniceria: 0, fruteria: 0 };
   const validPlaces = allPlaces.filter((p) => typeof p.lat === "number" && typeof p.lng === "number");
   const placeEvaluations = validPlaces.map((p) => {
     const st = getPlaceDailyStatus(p);
     if (st.state === "sold") soldCount++;
     else if (st.state === "visited") visitedCount++;
     else pendingCount++;
+    const catKey = p.category || "tienda";
+    if (catCounts[catKey] !== undefined) catCounts[catKey]++;
     return { place: p, status: st };
   });
 
@@ -1330,6 +1525,30 @@ function renderGpsMapAndChips() {
     const coords = resolveOrderCoords(ord);
     if (coords) pinnedOrders.push({ ord, coords });
     else unpinnedActiveCount++;
+  }
+
+  if (filterBarEl) {
+    const filters = [
+      { id: "all", label: "Todos", count: validPlaces.length },
+      { id: "orders", label: "🔴 Pedidos", count: pinnedOrders.length },
+      { id: "sold", label: "🟢 Compraron", count: soldCount },
+      { id: "visited", label: "🟡 Visitados", count: visitedCount },
+      { id: "pending", label: "⚪ Sin visita", count: pendingCount },
+      { id: "cat:tienda", label: "🏪 Tiendas", count: catCounts.tienda },
+      { id: "cat:restaurante", label: "🍽️ Rest.", count: catCounts.restaurante },
+      { id: "cat:carniceria", label: "🥩 Carnes", count: catCounts.carniceria },
+      { id: "cat:fruteria", label: "🥑 Frut.", count: catCounts.fruteria }
+    ];
+    filterBarEl.innerHTML = filters
+      .map(
+        (f) => `
+          <button type="button" class="map-filter-chip ${mapPinFilter === f.id ? "active" : ""}" data-map-filter="${f.id}">
+            <span>${f.label}</span>
+            <span class="cnt">${f.count}</span>
+          </button>
+        `
+      )
+      .join("");
   }
 
   if (summaryEl) {
@@ -1349,6 +1568,7 @@ function renderGpsMapAndChips() {
 
   // 1. Registered Places (Tiendas, Carnicerías, Restaurantes, Fruterías)
   for (const { place, status } of placeEvaluations) {
+    if (!placeMatchesMapFilter(place, status)) continue;
     boundsPoints.push([place.lat, place.lng]);
     const cat = PLACE_CATEGORIES[place.category] || PLACE_CATEGORIES.tienda;
     const stClass =
@@ -1362,10 +1582,10 @@ function renderGpsMapAndChips() {
 
     const icon = window.L.divIcon({
       className: "salinas-div-icon",
-      html: `<div class="pin-place-dot ${stClass}" title="${escapeHtml(place.name)}">${cat.emoji}</div>`,
-      iconSize: [26, 26],
-      iconAnchor: [13, 13],
-      popupAnchor: [0, -12]
+      html: `<div class="pin-place-dot ${stClass}" title="${escapeHtml(place.name)}"><span class="pin-emoji">${cat.emoji}</span></div>`,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
+      popupAnchor: [0, -10]
     });
 
     const popupHtml = `
@@ -1381,15 +1601,17 @@ function renderGpsMapAndChips() {
       </div>
     `;
 
-    const m = window.L.marker([place.lat, place.lng], { icon }).addTo(mapLayerGroup).bindPopup(popupHtml);
+    const zOff = status.state === "sold" ? 300 : status.state === "visited" ? 200 : 0;
+    const m = window.L.marker([place.lat, place.lng], { icon, zIndexOffset: zOff })
+      .addTo(mapLayerGroup)
+      .bindPopup(popupHtml);
     mapFocusMarkers.set(`place:${place.id}`, m);
   }
 
-  // 2. Driver Daily Trajectory Trails + Live Car Markers
+  // 2. Driver Daily Trajectory Trails + Live Car Markers (only when GPS is active/online)
   const trailColors = ["#15803d", "#0284c7", "#7c3aed", "#b45309"];
-  validLocs.forEach((loc, idx) => {
-    const isOnline = onlineLocs.some((o) => o.id === loc.id);
-    if (isOnline) boundsPoints.push([loc.lat, loc.lng]);
+  onlineLocs.forEach((loc, idx) => {
+    boundsPoints.push([loc.lat, loc.lng]);
 
     if (loc.trailDate === todayStr && Array.isArray(loc.trail) && loc.trail.length >= 2) {
       const latlngs = loc.trail
@@ -1399,18 +1621,19 @@ function renderGpsMapAndChips() {
         window.L.polyline(latlngs, {
           color: trailColors[idx % trailColors.length],
           weight: 4,
-          opacity: 0.72,
-          dashArray: isOnline ? null : "6, 6"
+          opacity: 0.72
         }).addTo(mapLayerGroup);
       }
     }
 
-    const boxesBadge = typeof loc.boxesInCar === "number" ? ` • ${loc.boxesInCar}c` : "";
+    const fullDriverLabel = loc.driverName || loc.id;
+    const initials = getDriverInitials(fullDriverLabel);
+    const boxesBadge = typeof loc.boxesInCar === "number" ? ` • ${loc.boxesInCar} cajas` : "";
     const carIcon = window.L.divIcon({
       className: "salinas-div-icon",
-      html: `<div class="pin-car-badge ${isOnline ? "" : "paused"}">🚗 ${escapeHtml(loc.driverName || loc.id)}${boxesBadge}</div>`,
-      iconSize: [110, 28],
-      iconAnchor: [40, 14],
+      html: `<div class="pin-car-badge" style="border-color:${trailColors[idx % trailColors.length]};" title="🚗 ${escapeHtml(fullDriverLabel)}${boxesBadge}">${escapeHtml(initials)}</div>`,
+      iconSize: [28, 28],
+      iconAnchor: [14, 14],
       popupAnchor: [0, -14]
     });
 
@@ -1422,7 +1645,7 @@ function renderGpsMapAndChips() {
       <div style="font-family:sans-serif;min-width:185px;">
         <strong style="font-size:0.96rem;color:#132615;">🚗 ${escapeHtml(loc.driverName || loc.id)}</strong>
         <div style="font-size:0.78rem;color:#4e5c50;margin-top:3px;">
-          Señal: <strong>${formatMinutesAgo(loc.updatedAtIso)}</strong> (${isOnline ? "En vivo" : "Pausado"})${speedTxt}
+          Señal: <strong>${formatMinutesAgo(loc.updatedAtIso)}</strong> (En vivo)${speedTxt}
         </div>
         ${
           typeof loc.boxesInCar === "number"
@@ -1444,6 +1667,12 @@ function renderGpsMapAndChips() {
   // 3. Active Order Alert Indicators (New & En-Ruta Online Orders)
   const drivers = storeSettings.drivers || [];
   for (const { ord, coords } of pinnedOrders) {
+    const showOrder =
+      mapPinFilter === "all" ||
+      mapPinFilter === "orders" ||
+      (mapPinFilter.startsWith("cat:") && coords.placeCategory === mapPinFilter.slice(4));
+    if (!showOrder) continue;
+
     boundsPoints.push([coords.lat, coords.lng]);
     const isNew = ord.status === "nuevo";
     const wrapClass = isNew ? "pin-order-alert-wrap" : "pin-order-alert-wrap is-route";
@@ -1452,9 +1681,9 @@ function renderGpsMapAndChips() {
     const orderAlertIcon = window.L.divIcon({
       className: "salinas-div-icon",
       html: `<div class="${wrapClass}"><span class="pulse-ring"></span><div class="pin-order-alert-core">${coreEmoji}</div></div>`,
-      iconSize: [34, 34],
-      iconAnchor: [17, 17],
-      popupAnchor: [0, -16]
+      iconSize: [28, 28],
+      iconAnchor: [14, 14],
+      popupAnchor: [0, -14]
     });
 
     const itemsSummary = (ord.items || []).map((i) => `${i.qty}×${escapeHtml(i.code)}`).join(", ");
@@ -1504,17 +1733,43 @@ function renderGpsMapAndChips() {
   }
 }
 
-document.getElementById("gpsDriverChips").addEventListener("click", (e) => {
-  const chip = e.target.closest("button[data-focus-driver]");
-  if (!chip) return;
-  const id = chip.dataset.focusDriver;
+function focusDriverOnMap(id) {
   const loc = driverLocations.find((d) => d.id === id);
-  if (!loc || typeof loc.lat !== "number") return;
+  if (!loc) return;
+  const isOnline =
+    loc.active === true &&
+    loc.updatedAtIso &&
+    Date.now() - new Date(loc.updatedAtIso).getTime() < 20 * 60 * 1000;
+  if (!isOnline || typeof loc.lat !== "number") {
+    showToast(`${loc.driverName || id} tiene el GPS apagado en este momento.`);
+    return;
+  }
   ensureLeafletMap();
   if (leafletMap) {
     leafletMap.flyTo([loc.lat, loc.lng], 15, { duration: 0.7 });
     const marker = mapFocusMarkers.get(`driver:${id}`);
     if (marker) marker.openPopup();
+  }
+}
+
+document.getElementById("gpsDriverChips")?.addEventListener("click", (e) => {
+  const chip = e.target.closest("button[data-focus-driver]");
+  if (chip) focusDriverOnMap(chip.dataset.focusDriver);
+});
+
+document.getElementById("fsDriverChips")?.addEventListener("click", (e) => {
+  const chip = e.target.closest("button[data-focus-driver]");
+  if (chip) focusDriverOnMap(chip.dataset.focusDriver);
+});
+
+document.getElementById("mapFilterBar")?.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-map-filter]");
+  if (!btn) return;
+  const chosen = btn.dataset.mapFilter;
+  mapPinFilter = mapPinFilter === chosen && chosen !== "all" ? "all" : chosen;
+  renderGpsMapAndChips();
+  if (mapPinFilter !== "all") {
+    fitAllMapMarkers();
   }
 });
 
@@ -1601,6 +1856,10 @@ document.getElementById("adminPlacesList")?.addEventListener("click", async (e) 
     const p = allPlaces.find((x) => x.id === pid);
     if (!p || typeof p.lat !== "number") return;
     ensureLeafletMap();
+    if (mapPinFilter !== "all") {
+      mapPinFilter = "all";
+      renderGpsMapAndChips();
+    }
     document.getElementById("adminMapCard")?.scrollIntoView({ behavior: "smooth", block: "start" });
     if (leafletMap) {
       leafletMap.flyTo([p.lat, p.lng], 16, { duration: 0.6 });
