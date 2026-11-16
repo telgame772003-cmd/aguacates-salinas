@@ -116,15 +116,17 @@ export async function startNativeBackgroundGps({ onLocation, onPermissionDenied 
       }
     );
 
-    // Latido estacionario cada 4 min para evitar que el chofer desaparezca de admin.html (umbral 20 min)
+    // Latido estacionario cada 2 min para evitar que el chofer desaparezca de admin.html (umbral 20 min)
     // mientras descarga cajas con el vehículo estacionado y la pantalla bloqueada.
     if (keepAliveIntervalId) clearInterval(keepAliveIntervalId);
     keepAliveIntervalId = setInterval(() => {
       if (activeWatcherId && lastNativeFix && typeof onLocation === "function") {
+        window.salinasLog?.("SalinasBgGPS", `Heartbeat 2m -> ${lastNativeFix.lat},${lastNativeFix.lng}`);
         onLocation({ ...lastNativeFix, speedKmh: 0, timestamp: Date.now() }, true);
       }
-    }, 4 * 60 * 1000);
+    }, 2 * 60 * 1000);
 
+    window.salinasLog?.("SalinasBgGPS", `Watcher nativo iniciado id=${activeWatcherId}`);
     return true;
   } catch (err) {
     console.error("[SalinasBgGPS] Error iniciando BackgroundGeolocation:", err);
@@ -234,8 +236,10 @@ export async function commitDriverLocationNativeRest({
       data: commitBody
     });
     if (!res || res.status < 200 || res.status >= 300) {
+      window.salinasLog?.("SalinasBgGPS-ERR", `CapacitorHttp status=${res?.status}`);
       throw new Error(`Native HTTP Firestore commit status ${res?.status}`);
     }
+    window.salinasLog?.("SalinasBgGPS-REST", `Commit nativo OK (${payloadData.lat},${payloadData.lng})`);
     return true;
   }
 
@@ -246,7 +250,9 @@ export async function commitDriverLocationNativeRest({
     keepalive: true
   });
   if (!fetchRes.ok) {
+    window.salinasLog?.("SalinasBgGPS-ERR", `Fetch keepalive status=${fetchRes.status}`);
     throw new Error(`Keepalive REST commit HTTP ${fetchRes.status}`);
   }
+  window.salinasLog?.("SalinasBgGPS-REST", `Commit keepalive OK (${payloadData.lat},${payloadData.lng})`);
   return true;
 }

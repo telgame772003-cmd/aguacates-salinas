@@ -21,13 +21,13 @@ import {
   getLocalDateStr,
   formatCurrency,
   cleanPhoneForWhatsApp
-} from "./firebase-config.js?v=nav3d_4";
+} from "./firebase-config.js?v=nav3d_6";
 import {
   isNativeCapacitorApp,
   startNativeBackgroundGps,
   stopNativeBackgroundGps,
   commitDriverLocationNativeRest
-} from "./native-bg-gps.js?v=nav3d_4";
+} from "./native-bg-gps.js?v=nav3d_6";
 import { STAFF_MANUALS } from "./manuals-data.js";
 
 const DRIVER_SESSION_KEY = "salinas_driver_session_v1";
@@ -94,6 +94,7 @@ let salesUnsub = null;
 let placesUnsub = null;
 let visitsUnsub = null;
 let gpsWatchId = null;
+let gpsWatchdogIntervalId = null;
 let gpsActive = false;
 let lastGpsSentAt = 0;
 let lastGpsCoords = null;
@@ -324,6 +325,8 @@ document.getElementById("btnDriverLogout").addEventListener("click", async () =>
 });
 
 async function enterDriverApp() {
+  window.__SalinasActiveDriverName = currentDriverName || "";
+  window.salinasLog?.("GPS-SESSION", `Sesión activa para ${currentDriverName} (native=${isNativeCapacitorApp()})`);
   driverLoginView.style.display = "none";
   driverAppMain.style.display = "block";
   driverBottomNav.style.display = "grid";
@@ -551,9 +554,11 @@ document.addEventListener("visibilitychange", () => {
 
 btnToggleGps.addEventListener("click", () => {
   if (gpsActive) {
+    window.salinasLog?.("GPS-MANUAL-PAUSE", "El chofer tocó el botón superior para PAUSAR GPS");
     localStorage.setItem("salinas_gps_manual_pause", "1");
     stopGpsSharing(true);
   } else {
+    window.salinasLog?.("GPS-MANUAL-RESUME", "El chofer tocó el botón superior para ACTIVAR GPS");
     localStorage.removeItem("salinas_gps_manual_pause");
     startGpsSharing();
   }
@@ -693,8 +698,33 @@ async function publishDriverLocationUpdate({
   }
 }
 
+function startGpsWatchdog() {
+  if (gpsWatchdogIntervalId) clearInterval(gpsWatchdogIntervalId);
+  gpsWatchdogIntervalId = setInterval(() => {
+    if (!gpsActive || !currentDriverKeyHash || !currentDriverName) return;
+    const elapsedMs = lastGpsSentAt ? Date.now() - lastGpsSentAt : 999999;
+    if (elapsedMs >= 150000) {
+      window.salinasLog?.("GPS-WATCHDOG", `Sin envío hace ${Math.round(elapsedMs / 1000)}s; ejecutando rescate`);
+      if (document.visibilityState === "visible" && "geolocation" in navigator) {
+        sendImmediateGpsPing("watchdog");
+      } else if (lastGpsCoords) {
+        publishDriverLocationUpdate({ ...lastGpsCoords, force: true });
+      }
+    }
+  }, 60000);
+}
+
+function stopGpsWatchdog() {
+  if (gpsWatchdogIntervalId) {
+    clearInterval(gpsWatchdogIntervalId);
+    gpsWatchdogIntervalId = null;
+  }
+}
+
 async function startGpsSharing() {
   if (gpsActive && (gpsWatchId !== null || isNativeCapacitorApp())) return;
+  window.salinasLog?.("GPS-START", `Iniciando GPS (native=${isNativeCapacitorApp()})`);
+  startGpsWatchdog();
 
   // Modo Nativo 24/7 (Android ForegroundService + iOS Background Location con pantalla bloqueada)
   if (isNativeCapacitorApp()) {
@@ -717,6 +747,7 @@ async function startGpsSharing() {
         });
       },
       onPermissionDenied: (openSettingsFn) => {
+        window.salinasLog?.("GPS-PERM-DENIED", "Permiso de ubicación Always denegado por sistema/usuario");
         showToast("Activa la ubicación 'Permitir siempre' para no desaparecer del mapa al bloquear pantalla.");
         stopGpsSharing(false);
         if (typeof openSettingsFn === "function") {
@@ -733,10 +764,12 @@ async function startGpsSharing() {
       showToast("🟢 GPS 24/7 activo (funciona aun con pantalla bloqueada).");
       return;
     }
+    window.salinasLog?.("GPS-FALLBACK", "Plugin nativo no inició; usando navigator.geolocation");
     // Si por alguna razón el plugin nativo no inició, caer limpiamente a geolocalización estándar
   }
 
   if (!("geolocation" in navigator)) {
+    window.salinasLog?.("GPS-ERR", "Navegador sin soporte de geolocalización");
     showToast("Tu navegador no soporta GPS.");
     return;
   }
@@ -769,6 +802,7 @@ async function startGpsSharing() {
       });
     },
     (err) => {
+      window.salinasLog?.("GPS-WEB-ERR", `code=${err?.code} msg=${err?.message || err}`);
       console.warn("Aviso GPS:", err);
       if (err && err.code === 1) {
         showToast("Permite el acceso a tu ubicación en el navegador para activar GPS.");
@@ -780,6 +814,8 @@ async function startGpsSharing() {
 }
 
 async function stopGpsSharing(notifyServer = true) {
+  stopGpsWatchdog();
+  window.salinasLog?.("GPS-STOP", `Deteniendo GPS (notifyServer=${notifyServer})`);
   await stopNativeBackgroundGps();
   if (gpsWatchId !== null) {
     navigator.geolocation.clearWatch(gpsWatchId);
