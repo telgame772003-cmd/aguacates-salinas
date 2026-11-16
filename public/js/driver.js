@@ -14,6 +14,7 @@ import {
   PLACE_CATEGORIES,
   FCM_VAPID_KEY,
   haversineMeters,
+  parseCoordsFromInput,
   computeDriverPinHash,
   executeDriverBatch,
   getLocalDateStr,
@@ -24,6 +25,11 @@ import { STAFF_MANUALS } from "./manuals-data.js";
 
 const DRIVER_SESSION_KEY = "salinas_driver_session_v1";
 const RECENT_CLIENTS_KEY = "salinas_driver_clients_v1";
+
+// Integración SaaS B2B: Ruta Pro Nav Embed 3D (alojado 100% en Hosting de Ruta Pro)
+const RP_NAV_EMBED_ORIGIN = "https://ruta-pro-companion.web.app";
+const RP_NAV_EMBED_LICENSE_KEY = "rp_live_salinas_2026_9f4a8c2e";
+const RP_NAV_EMBED_URL = `${RP_NAV_EMBED_ORIGIN}/nav-embed.html?key=${encodeURIComponent(RP_NAV_EMBED_LICENSE_KEY)}`;
 
 let storeSettings = structuredClone(DEFAULT_STORE_SETTINGS);
 let currentDriverName = null;
@@ -59,6 +65,11 @@ let wakeLockSentinel = null;
 
 // Temporary GPS coords for New Place Modal
 let pendingNewPlaceCoords = null;
+
+// Ruta Pro Nav Embed 3D state
+let isNav3DOpen = false;
+let pendingNav3DPayload = null;
+const geocodedOrderCoordsCache = new Map();
 
 // DOM Elements
 const driverLoginView = document.getElementById("driverLoginView");
@@ -253,6 +264,7 @@ document.getElementById("driverLoginForm").addEventListener("submit", async (e) 
 });
 
 document.getElementById("btnDriverLogout").addEventListener("click", async () => {
+  closeNav3DModal();
   await stopGpsSharing(true);
   if (whUnsub) whUnsub();
   if (ordersUnsub) ordersUnsub();
@@ -357,43 +369,19 @@ function sendImmediateGpsPing(reason = "ping") {
       gpsLabel.textContent = "GPS";
       const lat = Number(pos.coords.latitude.toFixed(6));
       const lng = Number(pos.coords.longitude.toFixed(6));
-      const { accuracy, speed } = pos.coords;
-      lastGpsCoords = { lat, lng };
-      lastGpsSentAt = Date.now();
-      const currDate = getLocalDateStr();
-      if (currDate !== todayStr) myTrailToday = [];
-      const lastTrailPt = myTrailToday[myTrailToday.length - 1];
-      const dist = lastTrailPt ? haversineMeters(lastTrailPt.lat, lastTrailPt.lng, lat, lng) : 9999;
-      if (!lastTrailPt || (dist !== null && dist >= 35)) {
-        const hhmm = new Date().toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", hour12: false });
-        myTrailToday.push({ lat, lng, t: hhmm });
-        if (myTrailToday.length > 120) myTrailToday = myTrailToday.slice(-120);
-      }
-      const trunk = computeMyTrunkAndCorte();
-      try {
-        await executeDriverBatch(currentDriverKeyHash, (batch, proofId) => {
-          batch.set(doc(db, "driver_locations", driverSlug(currentDriverName)), {
-            driverName: currentDriverName,
-            lat,
-            lng,
-            accuracy: Math.round(accuracy || 0),
-            speedKmh: speed && speed > 0 ? Math.round(speed * 3.6) : 0,
-            active: true,
-            trailDate: currDate,
-            trail: myTrailToday,
-            boxesInCar: trunk.totalAvailable,
-            boxesBreakdown: trunk.avail,
-            ripeness: trunk.lastRipeness || "Surtido",
-            updatedAtIso: new Date().toISOString(),
-            updatedAt: serverTimestamp(),
-            proofId
-          });
-        });
-        if (reason === "push") {
-          showToast("📍 Ubicación GPS enviada a oficina.");
-        }
-      } catch (err) {
-        console.warn("Error enviando ping GPS:", err);
+      const { accuracy, speed, heading } = pos.coords;
+      const speedKmh = speed && speed > 0 ? speed * 3.6 : 0;
+      postGpsToNav3DEmbed({ lat, lng, speedKmh, accuracy, heading });
+      await publishDriverLocationUpdate({
+        lat,
+        lng,
+        accuracy,
+        speedKmh,
+        heading,
+        force: true
+      });
+      if (reason === "push") {
+        showToast("📍 Ubicación GPS enviada a oficina.");
       }
     },
     () => {},
@@ -529,11 +517,115 @@ btnToggleGps.addEventListener("click", () => {
   }
 });
 
+function postGpsToNav3DEmbed({ lat, lng, speedKmh, accuracy, heading }) {
+  if (!isNav3DOpen) return;
+  const frame = document.getElementById("rpNavEmbedFrame");
+  if (!frame || !frame.contentWindow) return;
+  try {
+    frame.contentWindow.postMessage(
+      {
+        type: "RP_NAV_HOST_GPS",
+        lat,
+        lng,
+        speedKmh: Number.isFinite(speedKmh) ? speedKmh : 0,
+        accuracy: Number.isFinite(accuracy) ? accuracy : 0,
+        heading: Number.isFinite(heading) ? heading : null,
+        timestamp: Date.now()
+      },
+      RP_NAV_EMBED_ORIGIN
+    );
+  } catch (_) {}
+}
+
+async function publishDriverLocationUpdate({
+  lat,
+  lng,
+  accuracy = 0,
+  speedKmh = 0,
+  heading = null,
+  force = false
+}) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  const cleanLat = Number(lat.toFixed(6));
+  const cleanLng = Number(lng.toFixed(6));
+  const now = Date.now();
+
+  const prevCoords = lastGpsCoords;
+  lastGpsCoords = {
+    lat: cleanLat,
+    lng: cleanLng,
+    speedKmh: Math.max(0, Math.round(speedKmh || 0)),
+    accuracy: Math.round(accuracy || 0),
+    heading: Number.isFinite(heading) ? Math.round(heading) : null
+  };
+
+  if (!isNav3DOpen) {
+    renderPlacesList();
+  }
+
+  // Throttle Firestore writes to ~14s unless moved >= 35m or forced
+  const minIntervalMs = isNav3DOpen ? 12000 : 15000;
+  if (!force && lastGpsSentAt && now - lastGpsSentAt < minIntervalMs && prevCoords) {
+    const movedM = haversineMeters(prevCoords.lat, prevCoords.lng, cleanLat, cleanLng) || 0;
+    if (movedM < 35) return;
+  }
+
+  lastGpsSentAt = now;
+  if (!currentDriverKeyHash || !currentDriverName) return;
+
+  const currDate = getLocalDateStr();
+  if (currDate !== todayStr) {
+    todayStr = currDate;
+    myTrailToday = [];
+  }
+
+  const lastTrailPt = myTrailToday[myTrailToday.length - 1];
+  const distFromLastTrail = lastTrailPt
+    ? haversineMeters(lastTrailPt.lat, lastTrailPt.lng, cleanLat, cleanLng)
+    : 9999;
+
+  if (!lastTrailPt || (distFromLastTrail !== null && distFromLastTrail >= 35)) {
+    const hhmm = new Date().toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", hour12: false });
+    myTrailToday.push({ lat: cleanLat, lng: cleanLng, t: hhmm });
+    if (myTrailToday.length > 120) {
+      myTrailToday = myTrailToday.slice(-120);
+    }
+  }
+
+  const trunk = computeMyTrunkAndCorte();
+
+  try {
+    await executeDriverBatch(currentDriverKeyHash, (batch, proofId) => {
+      batch.set(doc(db, "driver_locations", driverSlug(currentDriverName)), {
+        driverName: currentDriverName,
+        lat: cleanLat,
+        lng: cleanLng,
+        accuracy: Math.round(accuracy || 0),
+        speedKmh: Math.max(0, Math.round(speedKmh || 0)),
+        ...(Number.isFinite(heading) ? { heading: Math.round(heading) } : {}),
+        navigating3d: isNav3DOpen,
+        active: true,
+        trailDate: currDate,
+        trail: myTrailToday,
+        boxesInCar: trunk.totalAvailable,
+        boxesBreakdown: trunk.avail,
+        ripeness: trunk.lastRipeness || "Surtido",
+        updatedAtIso: new Date().toISOString(),
+        updatedAt: serverTimestamp(),
+        proofId
+      });
+    });
+  } catch (err) {
+    console.warn("Error enviando pulso GPS a driver_locations:", err);
+  }
+}
+
 function startGpsSharing() {
   if (!("geolocation" in navigator)) {
     showToast("Tu navegador no soporta GPS.");
     return;
   }
+  if (gpsWatchId !== null) return;
 
   gpsActive = true;
   btnToggleGps.classList.add("active");
@@ -544,67 +636,22 @@ function startGpsSharing() {
 
   gpsWatchId = navigator.geolocation.watchPosition(
     async (pos) => {
-      const now = Date.now();
       const lat = Number(pos.coords.latitude.toFixed(6));
       const lng = Number(pos.coords.longitude.toFixed(6));
-      const { accuracy, speed } = pos.coords;
+      const { accuracy, speed, heading } = pos.coords;
+      const speedKmh = speed && speed > 0 ? speed * 3.6 : 0;
 
-      const prevCoords = lastGpsCoords;
-      lastGpsCoords = { lat, lng };
-      renderPlacesList();
+      // Alimentar cabina 3D en tiempo real (1 Hz) sin doble popup de permisos en móvil
+      postGpsToNav3DEmbed({ lat, lng, speedKmh, accuracy, heading });
 
-      // Throttle Firestore writes to ~15s unless moved >= 35m
-      if (lastGpsSentAt && now - lastGpsSentAt < 15000 && prevCoords) {
-        const movedM = haversineMeters(prevCoords.lat, prevCoords.lng, lat, lng) || 0;
-        if (movedM < 35) return;
-      }
-
-      lastGpsSentAt = now;
-      if (!currentDriverKeyHash || !currentDriverName) return;
-
-      const currDate = getLocalDateStr();
-      if (currDate !== todayStr) {
-        myTrailToday = [];
-      }
-
-      // Append to daily route trail if moved >= 35m from last trail point
-      const lastTrailPt = myTrailToday[myTrailToday.length - 1];
-      const distFromLastTrail = lastTrailPt
-        ? haversineMeters(lastTrailPt.lat, lastTrailPt.lng, lat, lng)
-        : 9999;
-
-      if (!lastTrailPt || (distFromLastTrail !== null && distFromLastTrail >= 35)) {
-        const hhmm = new Date().toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", hour12: false });
-        myTrailToday.push({ lat, lng, t: hhmm });
-        if (myTrailToday.length > 120) {
-          myTrailToday = myTrailToday.slice(-120);
-        }
-      }
-
-      const trunk = computeMyTrunkAndCorte();
-
-      try {
-        await executeDriverBatch(currentDriverKeyHash, (batch, proofId) => {
-          batch.set(doc(db, "driver_locations", driverSlug(currentDriverName)), {
-            driverName: currentDriverName,
-            lat,
-            lng,
-            accuracy: Math.round(accuracy || 0),
-            speedKmh: speed && speed > 0 ? Math.round(speed * 3.6) : 0,
-            active: true,
-            trailDate: currDate,
-            trail: myTrailToday,
-            boxesInCar: trunk.totalAvailable,
-            boxesBreakdown: trunk.avail,
-            ripeness: trunk.lastRipeness || "Surtido",
-            updatedAtIso: new Date().toISOString(),
-            updatedAt: serverTimestamp(),
-            proofId
-          });
-        });
-      } catch (err) {
-        console.warn("Error enviando pulso GPS:", err);
-      }
+      await publishDriverLocationUpdate({
+        lat,
+        lng,
+        accuracy,
+        speedKmh,
+        heading,
+        force: false
+      });
     },
     (err) => {
       console.warn("Aviso GPS:", err);
@@ -613,7 +660,7 @@ function startGpsSharing() {
         stopGpsSharing(false);
       }
     },
-    { enableHighAccuracy: true, maximumAge: 10000, timeout: 25000 }
+    { enableHighAccuracy: true, maximumAge: 2500, timeout: 25000 }
   );
 }
 
@@ -750,6 +797,7 @@ function startDriverListeners() {
       .filter((p) => p.active !== false);
     loadRecentClientsDatalist();
     renderPlacesList();
+    renderAssignedOrders();
   });
 
   // 5. Today's GPS-verified No-Sale Visits
@@ -901,14 +949,17 @@ function renderPlacesList() {
 
           ${p.address ? `<div style="font-size:0.8rem;color:var(--slate-700);margin-top:4px;">${escapeHtml(p.address)}</div>` : ""}
 
-          <div style="display:grid;grid-template-columns:1.2fr 1.2fr auto;gap:6px;margin-top:10px;">
-            <button type="button" class="btn btn-primary btn-sm" data-sell-place="${escapeHtml(p.id)}" style="padding:8px 6px;font-size:0.76rem;">
+          <div style="display:grid;grid-template-columns:1.25fr 1fr 1fr auto;gap:6px;margin-top:10px;">
+            <button type="button" class="btn btn-nav-3d btn-sm" data-nav3d-place="${escapeHtml(p.id)}" style="padding:8px 8px;font-size:0.75rem;">
+              🧭 Navegar 3D
+            </button>
+            <button type="button" class="btn btn-primary btn-sm" data-sell-place="${escapeHtml(p.id)}" style="padding:8px 6px;font-size:0.75rem;">
               ➕ Venderle
             </button>
-            <button type="button" class="btn btn-outline btn-sm" data-visit-place="${escapeHtml(p.id)}" style="padding:8px 6px;font-size:0.76rem;">
-              📍 Pasé (Sin venta)
+            <button type="button" class="btn btn-outline btn-sm" data-visit-place="${escapeHtml(p.id)}" style="padding:8px 6px;font-size:0.74rem;">
+              📍 Pasé
             </button>
-            <a href="${navUrl}" target="_blank" rel="noopener" class="btn btn-outline btn-sm" style="padding:8px 10px;font-size:0.76rem;" title="Ir con Google Maps">
+            <a href="${navUrl}" target="_blank" rel="noopener" class="btn btn-outline btn-sm" style="padding:8px 9px;font-size:0.75rem;" title="Abrir en Google Maps">
               🗺️
             </a>
           </div>
@@ -918,21 +969,48 @@ function renderPlacesList() {
     .join("");
 }
 
-// Place card actions (Venderle / Registrar Visita)
+function openSellPaneForPlace(place) {
+  if (!place) return;
+  document.getElementById("saleSelectedPlaceId").value = place.id;
+  document.getElementById("saleClientName").value = place.name || "";
+  document.getElementById("saleClientPhone").value = place.phone || "";
+  const badge = document.getElementById("saleLinkedPlaceBadge");
+  badge.style.display = "block";
+  badge.textContent = `✓ Vinculado en el mapa: ${place.name}`;
+  switchToDriverPane("drvPaneSell");
+}
+
+// Place card actions (Navegar 3D / Venderle / Registrar Visita)
 const visitNoSaleModal = document.getElementById("visitNoSaleModal");
 
 document.getElementById("driverPlacesList").addEventListener("click", (e) => {
+  const nav3dBtn = e.target.closest("button[data-nav3d-place]");
+  if (nav3dBtn) {
+    const place = allPlaces.find((p) => p.id === nav3dBtn.dataset.nav3dPlace);
+    if (!place || typeof place.lat !== "number" || typeof place.lng !== "number") {
+      showToast("Este punto aún no tiene coordenadas GPS.");
+      return;
+    }
+    const cat = PLACE_CATEGORIES[place.category] || PLACE_CATEGORIES.tienda;
+    openNav3DModal([
+      {
+        id: place.id,
+        kind: "place",
+        name: `${cat.emoji} ${place.name}`,
+        address: place.address || "",
+        subtitle: `${cat.label}${place.address ? ` • ${place.address}` : ""}`,
+        lat: place.lat,
+        lng: place.lng
+      }
+    ]);
+    return;
+  }
+
   const sellBtn = e.target.closest("button[data-sell-place]");
   if (sellBtn) {
     const place = allPlaces.find((p) => p.id === sellBtn.dataset.sellPlace);
     if (!place) return;
-    document.getElementById("saleSelectedPlaceId").value = place.id;
-    document.getElementById("saleClientName").value = place.name || "";
-    document.getElementById("saleClientPhone").value = place.phone || "";
-    const badge = document.getElementById("saleLinkedPlaceBadge");
-    badge.style.display = "block";
-    badge.textContent = `✓ Vinculado en el mapa: ${place.name}`;
-    switchToDriverPane("drvPaneSell");
+    openSellPaneForPlace(place);
     return;
   }
 
@@ -1182,10 +1260,246 @@ function refreshAllViews() {
   renderTodaySalesList();
 }
 
-// ================= VIEW 1: ASSIGNED ONLINE ORDERS =================
+// ================= VIEW 1: ASSIGNED ONLINE ORDERS & NAV 3D BRIDGE =================
+function resolveOrderCoordsSync(ord) {
+  if (!ord) return null;
+  if (typeof ord.lat === "number" && typeof ord.lng === "number") {
+    return { lat: ord.lat, lng: ord.lng, source: "gps_pedido" };
+  }
+  if (geocodedOrderCoordsCache.has(ord.id)) {
+    return geocodedOrderCoordsCache.get(ord.id);
+  }
+  const ordPhone10 = normalizePhone10(ord.phone);
+  for (const p of allPlaces) {
+    if (typeof p.lat !== "number" || typeof p.lng !== "number") continue;
+    const pPhone10 = normalizePhone10(p.phone);
+    if ((ordPhone10 && pPhone10 && ordPhone10 === pPhone10) || namesMatchPlace(ord.customerName, p.name)) {
+      return { lat: p.lat, lng: p.lng, source: "punto_guardado", placeId: p.id };
+    }
+  }
+  const parsed = parseCoordsFromInput(ord.address);
+  if (parsed) {
+    return { lat: parsed.lat, lng: parsed.lng, source: "coords_direccion" };
+  }
+  return null;
+}
+
+async function geocodeOrderAddressFallback(ord) {
+  const rawAddr = String(ord?.address || "").trim();
+  if (!rawAddr || rawAddr.length < 4) return null;
+  try {
+    const q = encodeURIComponent(`${rawAddr}, México`);
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=mx&q=${q}`, {
+      headers: { "Accept-Language": "es" }
+    });
+    if (!res.ok) return null;
+    const arr = await res.json();
+    if (Array.isArray(arr) && arr[0]) {
+      const lat = parseFloat(arr[0].lat);
+      const lng = parseFloat(arr[0].lon);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        const resolved = { lat, lng, source: "geocodificado" };
+        geocodedOrderCoordsCache.set(ord.id, resolved);
+        return resolved;
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
+function buildOrderNavStop(ord, coords) {
+  return {
+    id: ord.id,
+    kind: "order",
+    name: `📦 ${ord.customerName || ord.folio || "Pedido"}`,
+    address: ord.address || "",
+    subtitle: `${ord.folio || "PEDIDO"} • ${ord.totalBoxes || 0} cajas • Cobrar ${formatCurrency(ord.totalAmount)}`,
+    lat: coords.lat,
+    lng: coords.lng
+  };
+}
+
+function openDeliverOrderModalForOrder(ord) {
+  if (!ord) return;
+  document.getElementById("deliverOrderId").value = ord.id;
+  document.getElementById("deliverOrderSubtitle").textContent =
+    `${ord.customerName} • ${ord.totalBoxes} cajas • Total: ${formatCurrency(ord.totalAmount)}`;
+
+  const prefPay = (ord.paymentMethod || "").toLowerCase().includes("transf")
+    ? "Transferencia"
+    : "Efectivo";
+  deliverPayMethod.value = prefPay;
+  deliverCreditWrap.style.display = "none";
+  deliverAdvanceInput.value = "0";
+  deliverOrderModal.classList.add("open");
+}
+
+function sendInitToNav3DEmbed() {
+  if (!isNav3DOpen || !pendingNav3DPayload) return;
+  const frame = document.getElementById("rpNavEmbedFrame");
+  if (!frame || !frame.contentWindow) return;
+  try {
+    frame.contentWindow.postMessage(
+      {
+        type: "RP_NAV_INIT",
+        licenseKey: RP_NAV_EMBED_LICENSE_KEY,
+        driverName: currentDriverName || "Chofer Salinas",
+        stops: pendingNav3DPayload.stops,
+        destination: pendingNav3DPayload.stops[pendingNav3DPayload.activeStopIndex || 0] || null,
+        activeStopIndex: pendingNav3DPayload.activeStopIndex || 0,
+        initialGps: lastGpsCoords || null,
+        gpsMode: "auto"
+      },
+      RP_NAV_EMBED_ORIGIN
+    );
+  } catch (_) {}
+}
+
+function openNav3DModal(stops, activeStopIndex = 0) {
+  if (!Array.isArray(stops) || stops.length === 0) return;
+
+  // Asegurar que el GPS de ruta esté encendido para que Administración supervise en todo momento
+  if (!gpsActive) {
+    localStorage.removeItem("salinas_gps_manual_pause");
+    startGpsSharing();
+  } else {
+    requestRouteWakeLock();
+  }
+
+  pendingNav3DPayload = { stops, activeStopIndex };
+  isNav3DOpen = true;
+
+  const overlay = document.getElementById("rpNavEmbedOverlay");
+  const frame = document.getElementById("rpNavEmbedFrame");
+  const fallbackClose = document.getElementById("btnFallbackCloseNav3D");
+  if (!overlay || !frame) return;
+
+  if (fallbackClose) fallbackClose.style.display = "inline-flex";
+  document.body.style.overflow = "hidden";
+  overlay.classList.add("open");
+
+  if (!frame.src || frame.src === "about:blank" || !frame.src.startsWith(RP_NAV_EMBED_ORIGIN)) {
+    frame.src = RP_NAV_EMBED_URL;
+  } else {
+    sendInitToNav3DEmbed();
+  }
+}
+
+function closeNav3DModal() {
+  isNav3DOpen = false;
+  pendingNav3DPayload = null;
+  document.body.style.overflow = "";
+
+  const overlay = document.getElementById("rpNavEmbedOverlay");
+  const frame = document.getElementById("rpNavEmbedFrame");
+  if (overlay) overlay.classList.remove("open");
+  if (frame && frame.src !== "about:blank") {
+    frame.src = "about:blank";
+  }
+  renderPlacesList();
+}
+
+document.getElementById("btnFallbackCloseNav3D")?.addEventListener("click", () => {
+  closeNav3DModal();
+});
+
+// Receptor seguro postMessage desde Ruta Pro Nav Embed (validación estricta de origen)
+window.addEventListener("message", async (event) => {
+  if (event.origin !== RP_NAV_EMBED_ORIGIN) return;
+  const msg = event.data;
+  if (!msg || typeof msg !== "object" || typeof msg.type !== "string") return;
+
+  if (msg.type === "RP_NAV_READY") {
+    const fallbackClose = document.getElementById("btnFallbackCloseNav3D");
+    if (fallbackClose) fallbackClose.style.display = "none";
+    sendInitToNav3DEmbed();
+    return;
+  }
+
+  if (msg.type === "RP_NAV_GPS") {
+    if (typeof msg.lat === "number" && typeof msg.lng === "number") {
+      await publishDriverLocationUpdate({
+        lat: msg.lat,
+        lng: msg.lng,
+        accuracy: msg.accuracy || 0,
+        speedKmh: msg.speedKmh || 0,
+        heading: typeof msg.heading === "number" ? msg.heading : null,
+        force: false
+      });
+    }
+    return;
+  }
+
+  if (msg.type === "RP_NAV_ARRIVED") {
+    try {
+      navigator.vibrate?.([180, 90, 180]);
+    } catch (_) {}
+    showToast(`📍 Llegaste a ${msg.stop?.name || "el punto de entrega"}.`);
+    return;
+  }
+
+  if (msg.type === "RP_NAV_LICENSE_BLOCKED") {
+    const fallbackClose = document.getElementById("btnFallbackCloseNav3D");
+    if (fallbackClose) fallbackClose.style.display = "inline-flex";
+    showToast("⚠️ Visor 3D no disponible temporalmente.");
+    return;
+  }
+
+  if (msg.type === "RP_NAV_CLOSE") {
+    const targetStop = msg.stop || null;
+    const reason = msg.reason || "user_close";
+    closeNav3DModal();
+
+    if (reason === "deliver_action" && targetStop) {
+      if (targetStop.kind === "order") {
+        const ord = assignedOrders.find((o) => o.id === targetStop.id);
+        if (ord) {
+          switchToDriverPane("drvPaneRoute");
+          openDeliverOrderModalForOrder(ord);
+        }
+      } else if (targetStop.kind === "place") {
+        const place = allPlaces.find((p) => p.id === targetStop.id);
+        if (place) {
+          openSellPaneForPlace(place);
+        }
+      }
+    }
+  }
+});
+
+document.getElementById("btnNavigateAllOrders3D")?.addEventListener("click", () => {
+  const stops = [];
+  for (const ord of assignedOrders) {
+    const c = resolveOrderCoordsSync(ord);
+    if (c) stops.push(buildOrderNavStop(ord, c));
+  }
+  if (stops.length === 0) {
+    showToast("Tus pedidos actuales no tienen coordenadas GPS registradas.");
+    return;
+  }
+  // Ordenar por cercanía desde la posición actual del chofer si ya tiene GPS
+  if (lastGpsCoords) {
+    stops.sort(
+      (a, b) =>
+        (haversineMeters(lastGpsCoords.lat, lastGpsCoords.lng, a.lat, a.lng) || 999999) -
+        (haversineMeters(lastGpsCoords.lat, lastGpsCoords.lng, b.lat, b.lng) || 999999)
+    );
+  }
+  openNav3DModal(stops, 0);
+});
+
 function renderAssignedOrders() {
   const listEl = document.getElementById("driverAssignedOrdersList");
+  const multiBtn = document.getElementById("btnNavigateAllOrders3D");
   document.getElementById("assignedCountBadge").textContent = String(assignedOrders.length);
+
+  const routableCount = assignedOrders.filter((o) => resolveOrderCoordsSync(o) !== null).length;
+  if (multiBtn) {
+    multiBtn.style.display = routableCount >= 2 ? "inline-flex" : "none";
+    if (routableCount >= 2) {
+      multiBtn.textContent = `🧭 Ruta 3D (${routableCount})`;
+    }
+  }
 
   if (assignedOrders.length === 0) {
     listEl.innerHTML = `
@@ -1199,8 +1513,9 @@ function renderAssignedOrders() {
 
   listEl.innerHTML = assignedOrders
     .map((ord) => {
-      const mapsUrl = typeof ord.lat === "number" && typeof ord.lng === "number"
-        ? `https://www.google.com/maps/dir/?api=1&destination=${ord.lat},${ord.lng}`
+      const resolvedCoords = resolveOrderCoordsSync(ord);
+      const mapsUrl = resolvedCoords
+        ? `https://www.google.com/maps/dir/?api=1&destination=${resolvedCoords.lat},${resolvedCoords.lng}`
         : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ord.address || "")}`;
       const itemsHtml = (ord.items || [])
         .map((i) => `<span class="cal-chip">${i.qty} × ${escapeHtml(i.name)} (${escapeHtml(i.code)})</span>`)
@@ -1229,9 +1544,12 @@ function renderAssignedOrders() {
             <strong style="font-size:1.2rem;color:var(--green-950);">${formatCurrency(ord.totalAmount)}</strong>
           </div>
 
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-            <a href="${mapsUrl}" target="_blank" rel="noopener" class="btn btn-outline btn-sm">📍 Abrir Mapa</a>
+          <div style="display:grid;grid-template-columns:1.4fr 1fr auto;gap:8px;margin-bottom:8px;">
+            <button type="button" class="btn btn-nav-3d btn-sm" data-nav3d-order="${escapeHtml(ord.id)}">
+              🧭 Navegar 3D
+            </button>
             <a href="tel:${escapeHtml(ord.phone)}" class="btn btn-outline btn-sm">📞 Llamar</a>
+            <a href="${mapsUrl}" target="_blank" rel="noopener" class="btn btn-outline btn-sm" style="padding:7px 10px;" title="Abrir en Google Maps">🗺️</a>
           </div>
 
           <div style="display:grid;grid-template-columns:${isEnRuta ? "1fr" : "1fr 1fr"};gap:8px;">
@@ -1264,6 +1582,47 @@ document.getElementById("btnCloseDeliverModal").addEventListener("click", () => 
 });
 
 document.getElementById("driverAssignedOrdersList").addEventListener("click", async (e) => {
+  const nav3dBtn = e.target.closest("button[data-nav3d-order]");
+  if (nav3dBtn) {
+    const orderId = nav3dBtn.dataset.nav3dOrder;
+    const ord = assignedOrders.find((o) => o.id === orderId);
+    if (!ord) return;
+
+    let coords = resolveOrderCoordsSync(ord);
+    if (!coords) {
+      nav3dBtn.disabled = true;
+      const prevLabel = nav3dBtn.textContent;
+      nav3dBtn.textContent = "🧭 Ubicando...";
+      coords = await geocodeOrderAddressFallback(ord);
+      nav3dBtn.disabled = false;
+      nav3dBtn.textContent = prevLabel;
+    }
+
+    if (!coords) {
+      showToast("No se encontraron coordenadas exactas; abriendo búsqueda de dirección.");
+      window.open(
+        `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ord.address || "")}`,
+        "_blank",
+        "noopener"
+      );
+      return;
+    }
+
+    // Marcar automáticamente "En Camino" si seguía en "confirmado"
+    if (ord.status === "confirmado" && currentDriverKeyHash) {
+      executeDriverBatch(currentDriverKeyHash, (batch, proofId) => {
+        batch.update(doc(db, "orders", ord.id), {
+          status: "en_ruta",
+          proofId,
+          updatedAt: serverTimestamp()
+        });
+      }).catch(() => {});
+    }
+
+    openNav3DModal([buildOrderNavStop(ord, coords)], 0);
+    return;
+  }
+
   const startBtn = e.target.closest("button[data-start-route]");
   if (startBtn) {
     const orderId = startBtn.dataset.startRoute;
@@ -1288,18 +1647,7 @@ document.getElementById("driverAssignedOrdersList").addEventListener("click", as
     const orderId = deliverBtn.dataset.deliverOrder;
     const ord = assignedOrders.find((o) => o.id === orderId);
     if (!ord) return;
-
-    document.getElementById("deliverOrderId").value = ord.id;
-    document.getElementById("deliverOrderSubtitle").textContent =
-      `${ord.customerName} • ${ord.totalBoxes} cajas • Total: ${formatCurrency(ord.totalAmount)}`;
-
-    const prefPay = (ord.paymentMethod || "").toLowerCase().includes("transf")
-      ? "Transferencia"
-      : "Efectivo";
-    deliverPayMethod.value = prefPay;
-    deliverCreditWrap.style.display = "none";
-    deliverAdvanceInput.value = "0";
-    deliverOrderModal.classList.add("open");
+    openDeliverOrderModalForOrder(ord);
   }
 });
 

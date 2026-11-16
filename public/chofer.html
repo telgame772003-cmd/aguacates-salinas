@@ -91,9 +91,14 @@
         </div>
       </div>
 
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <h3 style="font-size:1.1rem;color:var(--green-950);">📦 Pedidos Asignados por Oficina</h3>
-        <span id="assignedCountBadge" class="badge-count">0</span>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <h3 style="font-size:1.1rem;color:var(--green-950);">📦 Pedidos Asignados por Oficina</h3>
+          <span id="assignedCountBadge" class="badge-count">0</span>
+        </div>
+        <button type="button" id="btnNavigateAllOrders3D" class="btn btn-sm btn-nav-3d" style="display:none;padding:6px 11px;font-size:0.76rem;">
+          🧭 Ruta 3D Completa
+        </button>
       </div>
 
       <div id="driverAssignedOrdersList"></div>
@@ -369,6 +374,18 @@
       </p>
       <div id="driverHelpStepsContainer"></div>
     </div>
+  </div>
+
+  <!-- Modal Pantalla Completa: Cabina de Navegación 3D (Ruta Pro Nav Embed) -->
+  <div id="rpNavEmbedOverlay" class="rp-nav-embed-overlay" role="dialog" aria-modal="true" aria-label="Navegación 3D en Ruta">
+    <button type="button" id="btnFallbackCloseNav3D" class="rp-nav-fallback-close">✕ Cerrar Mapa</button>
+    <iframe
+      id="rpNavEmbedFrame"
+      class="rp-nav-embed-frame"
+      src="about:blank"
+      title="Ruta Pro Navegación 3D"
+      allow="geolocation; wake-lock; autoplay"
+    ></iframe>
   </div>
 
   <div id="toastBox" class="toast-box"></div>
