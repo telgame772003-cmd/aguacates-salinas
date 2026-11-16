@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Salinas Reparto</string>
+    <string name="title_activity_main">Salinas Reparto</string>
+    <string name="package_name">com.salinas.reparto</string>
+    <string name="custom_url_scheme">com.salinas.reparto</string>
+    <string name="capacitor_background_geolocation_notification_channel_name">Ruta Salinas GPS Activo</string>
+    <string name="capacitor_background_geolocation_notification_color">#16a34a</string>
+</resources>

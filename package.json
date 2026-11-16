@@ -1,0 +1,22 @@
+{
+  "name": "salinas-reparto",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Aplicación móvil nativa de Reparto y Navegación 3D para Comercializadora Aguacates Salinas",
+  "scripts": {
+    "build:native": "node build-native-www.js",
+    "sync:android": "npm run build:native && npx cap sync android",
+    "sync:ios": "npm run build:native && npx cap sync ios && node ios-postsync.js",
+    "apk:debug": "npm run sync:android && node build-android-apk.js"
+  },
+  "dependencies": {
+    "@capacitor-community/background-geolocation": "^1.2.26",
+    "@capacitor/android": "^8.4.2",
+    "@capacitor/core": "^8.4.2",
+    "@capacitor/geolocation": "^8.2.0",
+    "@capacitor/ios": "^8.4.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.4.2"
+  }
+}

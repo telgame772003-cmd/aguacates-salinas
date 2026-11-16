@@ -1,5 +1,6 @@
 node_modules/
 functions/node_modules/
+www-native/
 .firebase/
 firebase-debug.log
 firebase-debug.*.log
@@ -20,4 +21,5 @@ ios/App/Pods/
 android/.gradle/
 android/app/build/
 android/build/
+android/**/build/
 android/local.properties

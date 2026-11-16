@@ -1,0 +1,26 @@
+{
+  "appId": "com.salinas.reparto",
+  "appName": "Salinas Reparto",
+  "webDir": "www-native",
+  "backgroundColor": "#132615",
+  "android": {
+    "useLegacyBridge": true
+  },
+  "server": {
+    "url": "https://aguacates-salinas.web.app/chofer.html",
+    "cleartext": false,
+    "errorPath": "offline.html",
+    "allowNavigation": [
+      "aguacates-salinas.web.app",
+      "aguacates-salinas.firebaseapp.com",
+      "ruta-pro-companion.web.app",
+      "*.web.app",
+      "*.firebaseapp.com"
+    ]
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": false
+    }
+  }
+}

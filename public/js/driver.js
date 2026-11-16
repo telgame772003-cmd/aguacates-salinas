@@ -1,6 +1,7 @@
 import {
   app,
   db,
+  firebaseConfig,
   doc,
   getDoc,
   collection,
@@ -20,7 +21,13 @@ import {
   getLocalDateStr,
   formatCurrency,
   cleanPhoneForWhatsApp
-} from "./firebase-config.js?v=nav3d_2";
+} from "./firebase-config.js?v=nav3d_3";
+import {
+  isNativeCapacitorApp,
+  startNativeBackgroundGps,
+  stopNativeBackgroundGps,
+  commitDriverLocationNativeRest
+} from "./native-bg-gps.js?v=nav3d_3";
 import { STAFF_MANUALS } from "./manuals-data.js";
 
 const DRIVER_SESSION_KEY = "salinas_driver_session_v1";
@@ -415,6 +422,10 @@ function setPushBtnState(state) {
 
 async function initDriverPushNotifications(interactive = false) {
   if (!currentDriverKeyHash || !currentDriverName) return;
+  if (isNativeCapacitorApp()) {
+    setPushBtnState("granted");
+    return;
+  }
   if (!("Notification" in window) || !("serviceWorker" in navigator)) {
     setPushBtnState("default");
     if (interactive) {
@@ -594,34 +605,107 @@ async function publishDriverLocationUpdate({
   }
 
   const trunk = computeMyTrunkAndCorte();
+  const docId = driverSlug(currentDriverName);
+  const baseLocationRecord = {
+    driverName: currentDriverName,
+    lat: cleanLat,
+    lng: cleanLng,
+    accuracy: Math.round(accuracy || 0),
+    speedKmh: Math.max(0, Math.round(speedKmh || 0)),
+    ...(Number.isFinite(heading) ? { heading: Math.round(heading) } : {}),
+    navigating3d: isNav3DOpen,
+    active: true,
+    trailDate: currDate,
+    trail: myTrailToday,
+    boxesInCar: trunk.totalAvailable,
+    boxesBreakdown: trunk.avail,
+    ripeness: trunk.lastRipeness || "Surtido",
+    updatedAtIso: new Date().toISOString()
+  };
+
+  const useNativeOrBackgroundRest =
+    isNativeCapacitorApp() || document.visibilityState === "hidden";
+
+  if (useNativeOrBackgroundRest) {
+    try {
+      await commitDriverLocationNativeRest({
+        apiKey: firebaseConfig.apiKey,
+        projectId: firebaseConfig.projectId,
+        driverKeyHash: currentDriverKeyHash,
+        driverDocId: docId,
+        payloadData: baseLocationRecord
+      });
+      return;
+    } catch (restErr) {
+      console.warn("Fallback a SDK batch tras aviso HTTP nativo:", restErr);
+    }
+  }
 
   try {
     await executeDriverBatch(currentDriverKeyHash, (batch, proofId) => {
-      batch.set(doc(db, "driver_locations", driverSlug(currentDriverName)), {
-        driverName: currentDriverName,
-        lat: cleanLat,
-        lng: cleanLng,
-        accuracy: Math.round(accuracy || 0),
-        speedKmh: Math.max(0, Math.round(speedKmh || 0)),
-        ...(Number.isFinite(heading) ? { heading: Math.round(heading) } : {}),
-        navigating3d: isNav3DOpen,
-        active: true,
-        trailDate: currDate,
-        trail: myTrailToday,
-        boxesInCar: trunk.totalAvailable,
-        boxesBreakdown: trunk.avail,
-        ripeness: trunk.lastRipeness || "Surtido",
-        updatedAtIso: new Date().toISOString(),
+      batch.set(doc(db, "driver_locations", docId), {
+        ...baseLocationRecord,
         updatedAt: serverTimestamp(),
         proofId
       });
     });
   } catch (err) {
-    console.warn("Error enviando pulso GPS a driver_locations:", err);
+    console.warn("Aviso SDK GPS, reintentando por REST keepalive:", err);
+    try {
+      await commitDriverLocationNativeRest({
+        apiKey: firebaseConfig.apiKey,
+        projectId: firebaseConfig.projectId,
+        driverKeyHash: currentDriverKeyHash,
+        driverDocId: docId,
+        payloadData: baseLocationRecord
+      });
+    } catch (_) {}
   }
 }
 
-function startGpsSharing() {
+async function startGpsSharing() {
+  if (gpsActive && (gpsWatchId !== null || isNativeCapacitorApp())) return;
+
+  // Modo Nativo 24/7 (Android ForegroundService + iOS Background Location con pantalla bloqueada)
+  if (isNativeCapacitorApp()) {
+    gpsActive = true;
+    btnToggleGps.classList.add("active");
+    gpsDot.textContent = "🟢";
+    gpsLabel.textContent = "GPS 24/7";
+    requestRouteWakeLock();
+
+    const started = await startNativeBackgroundGps({
+      onLocation: async (fix, isKeepAlive) => {
+        postGpsToNav3DEmbed(fix);
+        await publishDriverLocationUpdate({
+          lat: fix.lat,
+          lng: fix.lng,
+          accuracy: fix.accuracy,
+          speedKmh: fix.speedKmh,
+          heading: fix.heading,
+          force: Boolean(isKeepAlive)
+        });
+      },
+      onPermissionDenied: (openSettingsFn) => {
+        showToast("Activa la ubicación 'Permitir siempre' para no desaparecer del mapa al bloquear pantalla.");
+        stopGpsSharing(false);
+        if (typeof openSettingsFn === "function") {
+          setTimeout(() => {
+            if (window.confirm("Para que Despacho vea tu carro con la pantalla apagada, selecciona Ubicación → 'Permitir todo el tiempo' / 'Siempre'. ¿Abrir Ajustes?")) {
+              openSettingsFn();
+            }
+          }, 250);
+        }
+      }
+    });
+
+    if (started) {
+      showToast("🟢 GPS 24/7 activo (funciona aun con pantalla bloqueada).");
+      return;
+    }
+    // Si por alguna razón el plugin nativo no inició, caer limpiamente a geolocalización estándar
+  }
+
   if (!("geolocation" in navigator)) {
     showToast("Tu navegador no soporta GPS.");
     return;
@@ -666,6 +750,7 @@ function startGpsSharing() {
 }
 
 async function stopGpsSharing(notifyServer = true) {
+  await stopNativeBackgroundGps();
   if (gpsWatchId !== null) {
     navigator.geolocation.clearWatch(gpsWatchId);
     gpsWatchId = null;
