@@ -2,35 +2,35 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Modo Chofer en Ruta | Comercializadora Salinas</title>
   <link rel="icon" type="image/png" href="assets/favicon.png">
-  <link rel="stylesheet" href="css/styles.css?v=nav3d_4">
+  <link rel="stylesheet" href="css/styles.css?v=nav3d_5">
 </head>
 <body class="driver-app-body">
 
   <!-- Top Bar -->
   <header class="driver-topbar">
     <div class="driver-topbar-row1">
-      <div style="display:flex;align-items:center;gap:7px;min-width:0;">
-        <img src="assets/favicon.png" alt="Salinas" style="width:28px;height:28px;border-radius:8px;background:#fff;padding:2px;flex-shrink:0;">
-        <div style="min-width:0;">
-          <div style="font-size:0.6rem;color:#a8cca5;font-weight:800;text-transform:uppercase;letter-spacing:0.4px;line-height:1.05;">Ruta Salinas</div>
-          <strong id="topDriverName" style="display:block;font-size:0.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px;">Modo Chofer</strong>
+      <div class="driver-topbar-identity">
+        <img src="assets/favicon.png" alt="Salinas" class="driver-topbar-logo">
+        <div class="driver-topbar-titlewrap">
+          <div class="driver-topbar-brand">Ruta Salinas</div>
+          <strong id="topDriverName" class="driver-topbar-name">Modo Chofer</strong>
         </div>
       </div>
 
-      <div id="driverTopUtility" style="display:none;align-items:center;gap:5px;flex-shrink:0;">
-        <button type="button" id="btnTopOpenNav3D" class="gps-toggle-btn" style="padding:5px 9px;font-size:0.74rem;gap:4px;white-space:nowrap;background:linear-gradient(135deg,#065f46,#0f172a);border-color:#34d399;color:#fff;" title="Abrir Cabina de Navegación 3D">
+      <div id="driverTopUtility" class="driver-topbar-actions" style="display:none;">
+        <button type="button" id="btnTopOpenNav3D" class="gps-toggle-btn driver-top-nav3d-btn" title="Abrir Cabina de Navegación 3D">
           🧭 <span>3D</span>
         </button>
-        <button type="button" id="btnToggleGps" class="gps-toggle-btn" style="padding:5px 9px;font-size:0.74rem;gap:4px;white-space:nowrap;" title="Activar o pausar GPS">
+        <button type="button" id="btnToggleGps" class="gps-toggle-btn driver-top-gps-btn" title="Activar o pausar GPS">
           <span id="gpsDot">⚪</span> <span id="gpsLabel">GPS</span>
         </button>
-        <button type="button" id="btnOpenDriverHelp" class="btn btn-outline btn-sm" style="padding:5px 8px;font-size:0.74rem;background:rgba(255,255,255,0.08);color:#fff;border-color:rgba(255,255,255,0.28);white-space:nowrap;" title="Ver Guía Rápida">
-          ❓ Guía
+        <button type="button" id="btnOpenDriverHelp" class="btn btn-outline btn-sm driver-top-util-btn" title="Ver Guía Rápida">
+          ❓ <span class="hide-xs-label">Guía</span>
         </button>
-        <button type="button" id="btnDriverLogout" class="btn btn-outline btn-sm" style="padding:5px 8px;font-size:0.74rem;background:rgba(255,255,255,0.08);color:#fff;border-color:rgba(255,255,255,0.28);white-space:nowrap;">
+        <button type="button" id="btnDriverLogout" class="btn btn-outline btn-sm driver-top-util-btn">
           Salir
         </button>
       </div>

@@ -1391,20 +1391,21 @@ textarea.form-control {
 /* ================= DRIVER MOBILE APP (/chofer.html) ================= */
 .driver-app-body {
   background: #eff4ee;
-  padding-bottom: 86px;
+  padding-bottom: calc(86px + env(safe-area-inset-bottom, 0px));
 }
 
 .driver-topbar {
   position: sticky;
   top: 0;
   z-index: 50;
-  background: var(--green-950);
+  background: linear-gradient(180deg, #0d2010 0%, var(--green-950) 100%);
   color: var(--white);
-  padding: 10px 12px;
+  padding: calc(10px + env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) 11px max(12px, env(safe-area-inset-left, 0px));
   display: flex;
   flex-direction: column;
   gap: 8px;
-  box-shadow: var(--shadow-sm);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 6px 20px rgba(10, 26, 12, 0.22);
 }
 
 .driver-topbar-row1 {
@@ -1412,6 +1413,91 @@ textarea.form-control {
   justify-content: space-between;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+}
+
+.driver-topbar-identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.driver-topbar-logo {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: #ffffff;
+  padding: 2px;
+  flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+.driver-topbar-titlewrap {
+  min-width: 0;
+  flex: 1;
+}
+
+.driver-topbar-brand {
+  font-size: 0.58rem;
+  color: #a8cca5;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  line-height: 1.05;
+}
+
+.driver-topbar-name {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 800;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.driver-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.driver-top-nav3d-btn,
+.driver-top-gps-btn,
+.driver-top-util-btn {
+  padding: 6px 9px !important;
+  font-size: 0.72rem !important;
+  line-height: 1.1 !important;
+  gap: 4px;
+  white-space: nowrap;
+  border-radius: 999px !important;
+}
+
+.driver-top-nav3d-btn {
+  background: linear-gradient(135deg, #065f46, #0f172a) !important;
+  border-color: #34d399 !important;
+  color: #ffffff !important;
+}
+
+.driver-top-util-btn {
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.25) !important;
+}
+
+@media (max-width: 400px) {
+  .hide-xs-label {
+    display: none;
+  }
+  .driver-top-nav3d-btn,
+  .driver-top-gps-btn,
+  .driver-top-util-btn {
+    padding: 5px 8px !important;
+    font-size: 0.7rem !important;
+  }
 }
 
 .driver-topbar-row2 {
@@ -1564,7 +1650,8 @@ textarea.form-control {
   border-top: 1px solid var(--slate-300);
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  height: 68px;
+  height: calc(66px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.08);
 }
 
