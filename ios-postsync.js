@@ -73,4 +73,15 @@ if (fs.existsSync(SPM_PACKAGE)) {
   }
 }
 
+// 4. Asegurar DEVELOPMENT_TEAM en project.pbxproj
+const PBXPROJ = path.join(__dirname, "ios", "App", "App.xcodeproj", "project.pbxproj");
+if (fs.existsSync(PBXPROJ)) {
+  let pbx = fs.readFileSync(PBXPROJ, "utf8");
+  if (!pbx.includes("DEVELOPMENT_TEAM = 9AYUAQ4FNN;")) {
+    pbx = pbx.replace(/CODE_SIGN_STYLE = Automatic;/g, "CODE_SIGN_STYLE = Automatic;\n\t\t\t\tDEVELOPMENT_TEAM = 9AYUAQ4FNN;");
+    fs.writeFileSync(PBXPROJ, pbx, "utf8");
+    console.log("[ios-postsync] DEVELOPMENT_TEAM = 9AYUAQ4FNN inyectado en project.pbxproj.");
+  }
+}
+
 console.log("[ios-postsync] Proyecto iOS (com.salinas.reparto) listo para Xcode / TestFlight.");

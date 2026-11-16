@@ -6,6 +6,9 @@ workflows:
     integrations:
       app_store_connect: Codemagic CI
     environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.salinas.reparto
       vars:
         XCODE_PROJECT: "ios/App/App.xcodeproj"
         XCODE_SCHEME: "App"
@@ -23,13 +26,8 @@ workflows:
           BUILD_NUM=${PROJECT_BUILD_NUMBER:-1}
           echo "Asignando CURRENT_PROJECT_VERSION = ${BUILD_NUM}"
           sed -i '' "s/CURRENT_PROJECT_VERSION = [0-9]*;/CURRENT_PROJECT_VERSION = ${BUILD_NUM};/g" ios/App/App.xcodeproj/project.pbxproj
-      - name: Descargar firma digital de Apple en vivo (App Store Connect)
+      - name: Configurar firma digital de Apple (Code Signing)
         script: |
-          keychain initialize
-          app-store-connect fetch-signing-files "$BUNDLE_ID" \
-            --type IOS_APP_STORE \
-            --create
-          keychain add-certificates
           xcode-project use-profiles --project "$XCODE_PROJECT"
       - name: Compilar archivo IPA para TestFlight
         script: |
