@@ -21,13 +21,13 @@ import {
   getLocalDateStr,
   formatCurrency,
   cleanPhoneForWhatsApp
-} from "./firebase-config.js?v=nav3d_3";
+} from "./firebase-config.js?v=nav3d_4";
 import {
   isNativeCapacitorApp,
   startNativeBackgroundGps,
   stopNativeBackgroundGps,
   commitDriverLocationNativeRest
-} from "./native-bg-gps.js?v=nav3d_3";
+} from "./native-bg-gps.js?v=nav3d_4";
 import { STAFF_MANUALS } from "./manuals-data.js";
 
 const DRIVER_SESSION_KEY = "salinas_driver_session_v1";
@@ -36,7 +36,37 @@ const RECENT_CLIENTS_KEY = "salinas_driver_clients_v1";
 // Integración SaaS B2B: Ruta Pro Nav Embed 3D (alojado 100% en Hosting de Ruta Pro)
 const RP_NAV_EMBED_ORIGIN = "https://ruta-pro-companion.web.app";
 const RP_NAV_EMBED_LICENSE_KEY = "rp_live_salinas_2026_9f4a8c2e";
-const RP_NAV_EMBED_URL = `${RP_NAV_EMBED_ORIGIN}/nav-embed.html?key=${encodeURIComponent(RP_NAV_EMBED_LICENSE_KEY)}`;
+const RP_NAV_EMBED_URL = `${RP_NAV_EMBED_ORIGIN}/nav-embed.html?key=${encodeURIComponent(RP_NAV_EMBED_LICENSE_KEY)}&v=1.1.0`;
+
+// Perfil White-Label exclusivo de Comercializadora Aguacates Salinas (no afecta a Ruta Pro ni a otros clientes)
+const SALINAS_NAV3D_UI_CONFIG = {
+  branding: {
+    badgeText: "Ruta Salinas 3D",
+    showBrandBadge: true,
+    accentColor: "#10b981",
+    accentDarkColor: "#047857",
+    routeLineColor: "#10b981",
+    puckColor: "#10b981"
+  },
+  labels: {
+    primaryAction: "✅ Entregar / Cobrar",
+    arrivalAction: "✅ Cobrar Aquí",
+    arrivalTitle: "📍 ¡Ya llegaste con el cliente!",
+    arrivalSubtitle: "Listo para entregar aguacate",
+    closeBtn: "✕ Salir",
+    defaultPinEmoji: "🥑",
+    speedUnit: "km/h"
+  },
+  cockpit: {
+    showSpeedOnPuck: true,
+    showBottomSpeedometer: true,
+    showPrimaryActionBtn: true,
+    showVoiceBtn: true,
+    showThemeBtn: true,
+    showCameraModeBtn: true,
+    arrivalRadiusMeters: 45
+  }
+};
 
 let storeSettings = structuredClone(DEFAULT_STORE_SETTINGS);
 let currentDriverName = null;
@@ -1086,7 +1116,10 @@ document.getElementById("driverPlacesList").addEventListener("click", (e) => {
         address: place.address || "",
         subtitle: `${cat.label}${place.address ? ` • ${place.address}` : ""}`,
         lat: place.lat,
-        lng: place.lng
+        lng: place.lng,
+        pinEmoji: "🥑",
+        actionLabel: "➕ Vender / Cobrar",
+        arrivalActionLabel: "➕ Vender Aquí"
       }
     ]);
     return;
@@ -1401,7 +1434,10 @@ function buildOrderNavStop(ord, coords) {
     address: ord.address || "",
     subtitle: `${ord.folio || "PEDIDO"} • ${ord.totalBoxes || 0} cajas • Cobrar ${formatCurrency(ord.totalAmount)}`,
     lat: coords.lat,
-    lng: coords.lng
+    lng: coords.lng,
+    pinEmoji: "📦",
+    actionLabel: "✅ Entregar / Cobrar",
+    arrivalActionLabel: "✅ Entregar Pedido"
   };
 }
 
@@ -1430,6 +1466,7 @@ function sendInitToNav3DEmbed() {
         type: "RP_NAV_INIT",
         licenseKey: RP_NAV_EMBED_LICENSE_KEY,
         driverName: currentDriverName || "Chofer Salinas",
+        uiConfig: SALINAS_NAV3D_UI_CONFIG,
         stops: pendingNav3DPayload.stops,
         destination: pendingNav3DPayload.stops[pendingNav3DPayload.activeStopIndex || 0] || null,
         activeStopIndex: pendingNav3DPayload.activeStopIndex || 0,
@@ -1577,11 +1614,18 @@ function buildNearestPlacesStops(maxStops = 15) {
       kind: "place",
       name: `${cat.emoji} ${p.name}`,
       address: p.address || "",
-      subtitle: `${cat.label}${p.address ? ` • ${p.address}` : ""}`,
+      subtitle: `${cat.label}${placeSubtitleSuffix(p)}`,
       lat: p.lat,
-      lng: p.lng
+      lng: p.lng,
+      pinEmoji: "🥑",
+      actionLabel: "➕ Vender / Cobrar",
+      arrivalActionLabel: "➕ Vender Aquí"
     };
   });
+}
+
+function placeSubtitleSuffix(p) {
+  return p && p.address ? ` • ${p.address}` : "";
 }
 
 function launchSmartNav3D() {
