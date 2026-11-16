@@ -26,6 +26,9 @@ export const firebaseConfig = {
   appId: "1:129226187583:web:ebfea64c53670df642298a"
 };
 
+export const FCM_VAPID_KEY =
+  "BAg6T0bFLmMxQp7oIto7bkbmhW6kCJ2KrY2DxLEN3_40-HYebwimUo2SXSqeOL9RCdL9bV_ygRBGp26FHwtt1Ag";
+
 export const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 
@@ -143,6 +146,53 @@ export async function executeDriverBatch(driverKeyHash, buildBatchFn) {
   buildBatchFn(batch, proofId);
   await batch.commit();
 }
+
+export async function computeWarehousePinHash(staffName, pin) {
+  const normalized = `${String(staffName || "").trim().toLowerCase()}::${String(pin || "").trim()}`;
+  return sha256Hex(normalized);
+}
+
+export async function executeWarehouseBatch(warehouseKeyHash, buildBatchFn) {
+  const batch = writeBatch(db);
+  const proofId = generateProofId("wprf");
+  batch.set(doc(db, "warehouse_proofs", proofId), {
+    keyHash: warehouseKeyHash,
+    createdAt: serverTimestamp()
+  });
+  buildBatchFn(batch, proofId);
+  await batch.commit();
+}
+
+export async function executeSuperadminBatch(superadminKeyHash, buildBatchFn) {
+  const batch = writeBatch(db);
+  const proofId = generateProofId("sprf");
+  batch.set(doc(db, "superadmin_proofs", proofId), {
+    keyHash: superadminKeyHash,
+    createdAt: serverTimestamp()
+  });
+  buildBatchFn(batch, proofId);
+  await batch.commit();
+}
+
+export const COLD_ROOMS = ["Cuarto 1", "Cuarto 2", "Cuarto 3", "Cuarto 4", "Emplayado / Quiebre", "Piso", "Área Selección"];
+
+export function normalizeColdRoom(room) {
+  const s = String(room || "").trim();
+  if (!s) return "";
+  return s.replace(/^C[aá]mara\s+/i, "Cuarto ");
+}
+
+export const LOT_GRADES = {
+  PRO: { code: "PRO", name: "Proceso (Sin seleccionar)", short: "Proceso" },
+  S: { code: "S", name: "Súper", short: "Súper" },
+  E: { code: "E", name: "Extra", short: "Extra" },
+  P: { code: "P", name: "Primera", short: "Primera" },
+  M: { code: "M", name: "Mediano / Segunda", short: "Mediano" },
+  C: { code: "C", name: "Comercial / Cuarta", short: "Comercial" }
+};
+
+export const LOT_QUALITIES = ["Limpio", "Semilimpio", "Proceso"];
+export const LOT_RIPENESS = ["Verde", "Pintón", "Maduro"];
 
 export function getLocalDateStr(dateObj = new Date()) {
   const y = dateObj.getFullYear();

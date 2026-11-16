@@ -11,23 +11,31 @@
 
   <!-- Top Bar -->
   <header class="driver-topbar">
-    <div style="display:flex;align-items:center;gap:8px;">
-      <img src="assets/favicon.png" alt="Salinas" style="width:30px;height:30px;border-radius:8px;background:#fff;padding:2px;">
-      <div>
-        <div style="font-size:0.68rem;color:#a8cca5;font-weight:800;text-transform:uppercase;line-height:1;">Ruta Salinas</div>
-        <strong id="topDriverName" style="font-size:0.95rem;">Modo Chofer</strong>
+    <div class="driver-topbar-row1">
+      <div style="display:flex;align-items:center;gap:7px;min-width:0;">
+        <img src="assets/favicon.png" alt="Salinas" style="width:28px;height:28px;border-radius:8px;background:#fff;padding:2px;flex-shrink:0;">
+        <div style="min-width:0;">
+          <div style="font-size:0.6rem;color:#a8cca5;font-weight:800;text-transform:uppercase;letter-spacing:0.4px;line-height:1.05;">Ruta Salinas</div>
+          <strong id="topDriverName" style="display:block;font-size:0.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px;">Modo Chofer</strong>
+        </div>
+      </div>
+
+      <div id="driverTopUtility" style="display:none;align-items:center;gap:5px;flex-shrink:0;">
+        <button type="button" id="btnToggleGps" class="gps-toggle-btn" style="padding:5px 9px;font-size:0.74rem;gap:4px;white-space:nowrap;" title="Activar o pausar GPS">
+          <span id="gpsDot">⚪</span> <span id="gpsLabel">GPS</span>
+        </button>
+        <button type="button" id="btnOpenDriverHelp" class="btn btn-outline btn-sm" style="padding:5px 8px;font-size:0.74rem;background:rgba(255,255,255,0.08);color:#fff;border-color:rgba(255,255,255,0.28);white-space:nowrap;" title="Ver Guía Rápida">
+          ❓ Guía
+        </button>
+        <button type="button" id="btnDriverLogout" class="btn btn-outline btn-sm" style="padding:5px 8px;font-size:0.74rem;background:rgba(255,255,255,0.08);color:#fff;border-color:rgba(255,255,255,0.28);white-space:nowrap;">
+          Salir
+        </button>
       </div>
     </div>
 
-    <div id="driverTopActions" style="display:none;align-items:center;gap:6px;">
-      <button type="button" id="btnToggleGps" class="gps-toggle-btn">
-        <span id="gpsDot">⚪</span> <span id="gpsLabel">Activar GPS</span>
-      </button>
-      <button type="button" id="btnOpenDriverHelp" class="btn btn-outline btn-sm" style="padding:5px 9px;font-size:0.74rem;background:transparent;color:#fff;border-color:rgba(255,255,255,0.3);" title="Ver Guía Rápida">
-        ❓ Guía
-      </button>
-      <button type="button" id="btnDriverLogout" class="btn btn-outline btn-sm" style="padding:5px 9px;font-size:0.74rem;background:transparent;color:#fff;border-color:rgba(255,255,255,0.3);">
-        Salir
+    <div id="driverTopActions" class="driver-topbar-row2" style="display:none;">
+      <button type="button" id="btnEnableDriverPush" class="gps-toggle-btn" style="flex:1;justify-content:center;white-space:nowrap;background:#fef3c7;color:#92400e;border-color:#f59e0b;" title="Activar avisos de ubicación">
+        🔔 Avisos
       </button>
     </div>
   </header>

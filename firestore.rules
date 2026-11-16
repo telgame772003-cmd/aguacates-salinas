@@ -12,6 +12,16 @@ service cloud.firestore {
       return keyDoc != null && keyDoc.data.active == true;
     }
 
+    function isWarehouseKeyActive(keyHash) {
+      let keyDoc = getAfter(/databases/$(database)/documents/warehouse_keys/$(keyHash));
+      return keyDoc != null && keyDoc.data.active == true;
+    }
+
+    function isSuperadminKeyActive(keyHash) {
+      let keyDoc = getAfter(/databases/$(database)/documents/superadmin_keys/$(keyHash));
+      return keyDoc != null && keyDoc.data.active == true;
+    }
+
     function hasValidAdminProof() {
       let proofId = request.resource.data.proofId;
       return proofId is string
@@ -26,6 +36,22 @@ service cloud.firestore {
         && proofId.matches('^dprf_.*')
         && getAfter(/databases/$(database)/documents/driver_proofs/$(proofId)).data.keyHash is string
         && isDriverKeyActive(getAfter(/databases/$(database)/documents/driver_proofs/$(proofId)).data.keyHash);
+    }
+
+    function hasValidWarehouseProof() {
+      let proofId = request.resource.data.proofId;
+      return proofId is string
+        && proofId.matches('^wprf_.*')
+        && getAfter(/databases/$(database)/documents/warehouse_proofs/$(proofId)).data.keyHash is string
+        && isWarehouseKeyActive(getAfter(/databases/$(database)/documents/warehouse_proofs/$(proofId)).data.keyHash);
+    }
+
+    function hasValidSuperadminProof() {
+      let proofId = request.resource.data.proofId;
+      return proofId is string
+        && proofId.matches('^sprf_.*')
+        && getAfter(/databases/$(database)/documents/superadmin_proofs/$(proofId)).data.keyHash is string
+        && isSuperadminKeyActive(getAfter(/databases/$(database)/documents/superadmin_proofs/$(proofId)).data.keyHash);
     }
 
     // Llaves maestras Admin (SHA-256)
@@ -60,18 +86,79 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Llaves PIN Almacenistas (SHA-256)
+    match /warehouse_keys/{keyHash} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if hasValidAdminProof() || hasValidSuperadminProof();
+      allow delete: if false;
+    }
+
+    match /warehouse_proofs/{proofId} {
+      allow read: if false;
+      allow create: if request.resource.data.keyHash is string
+        && isWarehouseKeyActive(request.resource.data.keyHash);
+      allow update, delete: if false;
+    }
+
+    // Llave maestra Superadmin (SHA-256)
+    match /superadmin_keys/{keyHash} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if !exists(/databases/$(database)/documents/settings/superadmin_init)
+        || hasValidSuperadminProof();
+      allow update: if hasValidSuperadminProof();
+      allow delete: if false;
+    }
+
+    match /superadmin_proofs/{proofId} {
+      allow read: if false;
+      allow create: if request.resource.data.keyHash is string
+        && isSuperadminKeyActive(request.resource.data.keyHash);
+      allow update, delete: if false;
+    }
+
     // Configuración pública del catálogo, precios y lista de choferes
     match /settings/{docId} {
       allow read: if true;
-      allow create: if docId == 'security_init'
-        && !exists(/databases/$(database)/documents/settings/security_init);
-      allow write: if docId != 'security_init' && hasValidAdminProof();
+      allow create: if (docId == 'security_init'
+        && !exists(/databases/$(database)/documents/settings/security_init))
+        || (docId == 'superadmin_init'
+        && !exists(/databases/$(database)/documents/settings/superadmin_init));
+      allow write: if docId != 'security_init' && docId != 'superadmin_init'
+        && (hasValidAdminProof() || hasValidSuperadminProof());
     }
 
     // Control Diario de Almacén
     match /warehouse_days/{dateId} {
       allow read: if true;
-      allow write: if hasValidAdminProof();
+      allow write: if hasValidAdminProof() || hasValidWarehouseProof() || hasValidSuperadminProof();
+    }
+
+    // Termos y Tarimas / Lotes QR (Cuartos Fríos y Conversión de Proceso)
+    match /thermos/{thermoId} {
+      allow read: if true;
+      allow create, update: if hasValidAdminProof() || hasValidWarehouseProof() || hasValidSuperadminProof();
+      allow delete: if false;
+    }
+
+    match /pallet_lots/{lotId} {
+      allow read: if true;
+      allow create, update: if hasValidAdminProof() || hasValidWarehouseProof() || hasValidDriverProof() || hasValidSuperadminProof();
+      allow delete: if false;
+    }
+
+    // Finanzas Superadmin (Precios de compra por termo y Gastos operativos)
+    match /thermo_costs/{thermoId} {
+      allow read: if true;
+      allow create, update: if hasValidSuperadminProof();
+      allow delete: if false;
+    }
+
+    match /expenses/{expenseId} {
+      allow read: if true;
+      allow create, update: if hasValidSuperadminProof();
+      allow delete: if false;
     }
 
     // Ubicación GPS en tiempo real de cada chofer
@@ -80,24 +167,31 @@ service cloud.firestore {
       allow write: if hasValidDriverProof() || hasValidAdminProof();
     }
 
+    // Tokens Web Push (FCM) de choferes: solo escritura del chofer, lectura bloqueada al público
+    match /driver_push_tokens/{driverId} {
+      allow read: if false;
+      allow create, update: if hasValidDriverProof();
+      allow delete: if false;
+    }
+
     // Ventas registradas en ruta por los choferes (Contado, Transferencia o Crédito/Anticipo)
     match /route_sales/{saleId} {
       allow read: if true;
-      allow create, update: if hasValidDriverProof() || hasValidAdminProof();
+      allow create, update: if hasValidDriverProof() || hasValidAdminProof() || hasValidWarehouseProof();
       allow delete: if false;
     }
 
     // Puntos de compra registrados (Tiendas, Carnicerías, Restaurantes, Fruterías, etc.)
     match /places/{placeId} {
       allow read: if true;
-      allow create, update: if hasValidDriverProof() || hasValidAdminProof();
+      allow create, update: if hasValidDriverProof() || hasValidAdminProof() || hasValidWarehouseProof();
       allow delete: if false;
     }
 
     // Bitácora diaria de visitas en ruta (con o sin venta, validadas por GPS)
     match /place_visits/{visitId} {
       allow read: if true;
-      allow create, update: if hasValidDriverProof() || hasValidAdminProof();
+      allow create, update: if hasValidDriverProof() || hasValidAdminProof() || hasValidWarehouseProof();
       allow delete: if false;
     }
 

@@ -27,6 +27,7 @@
         <button type="button" id="btnDownloadBackup" class="btn btn-outline btn-sm" style="display:none;" title="Descargar respaldo completo">
           💾 <span class="hide-mobile">Respaldar</span>
         </button>
+        <a href="almacen.html" target="_blank" class="btn btn-outline btn-sm" title="Abrir App Móvil de Almacén QR">❄️ <span class="hide-mobile">App Almacén</span></a>
         <a href="chofer.html" target="_blank" class="btn btn-outline btn-sm" title="Abrir App Móvil de Chofer">🚗 <span class="hide-mobile">App Chofer</span></a>
         <a href="index.html" target="_blank" class="btn btn-outline btn-sm">Tienda ↗</a>
         <button type="button" id="btnLogout" class="btn btn-outline btn-sm" style="display:none;">Salir</button>
@@ -108,11 +109,13 @@
     <!-- Navigation Tabs -->
     <div class="admin-tabs">
       <button type="button" class="tab-btn active" data-tab="tabWarehouse">📋 Control de Almacén</button>
+      <button type="button" class="tab-btn" data-tab="tabLots">❄️ Termos y Lotes QR</button>
       <button type="button" class="tab-btn" data-tab="tabRoutes">🗺️ Ruta, GPS y Cortes</button>
       <button type="button" class="tab-btn" data-tab="tabOrders">📦 Pedidos en Línea</button>
       <button type="button" class="tab-btn" data-tab="tabCatalog">🏷️ Precios y Difusión</button>
-      <button type="button" class="tab-btn" data-tab="tabDrivers">🚗 Choferes y PIN</button>
+      <button type="button" class="tab-btn" data-tab="tabDrivers">🚗 Equipo y PINs</button>
       <button type="button" class="tab-btn" data-tab="tabManual">📖 Manual del Equipo</button>
+      <button type="button" class="tab-btn" data-tab="tabSuperadmin" style="background:#1e1b4b;color:#fff;">🔐 Superadmin</button>
     </div>
 
     <!-- ================= TAB 1: CONTROL DE ALMACÉN ================= -->
@@ -456,6 +459,66 @@
             </div>
             <button type="button" id="btnAddDriver" class="btn btn-primary" style="height:42px;">+ Agregar</button>
           </div>
+
+          <div style="margin-top:18px;padding-top:14px;border-top:1px dashed #cbd5e1;">
+            <h4 style="font-size:0.96rem;color:var(--green-950);margin-bottom:4px;">🔔 Recordatorio Automático de GPS (Push)</h4>
+            <p style="font-size:0.8rem;color:var(--slate-500);margin-bottom:10px;">
+              Si un chofer activo lleva varios minutos sin señal GPS, le llega un aviso al celular; al tocarlo envía su ubicación automáticamente.
+            </p>
+            <form id="gpsPingConfigForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;align-items:end;background:#f8fafc;padding:12px;border-radius:10px;border:1px solid #e2e8f0;">
+              <div>
+                <label class="form-label" style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:6px;">
+                  <input type="checkbox" id="gpsPingEnabled">
+                  <span>Activar automático</span>
+                </label>
+                <select id="gpsPingIntervalMin" class="form-control">
+                  <option value="15">Cada 15 min sin señal</option>
+                  <option value="20">Cada 20 min sin señal</option>
+                  <option value="30">Cada 30 min sin señal</option>
+                  <option value="45">Cada 45 min sin señal</option>
+                </select>
+              </div>
+              <div>
+                <label class="form-label" for="gpsPingStartHour">Desde hora</label>
+                <select id="gpsPingStartHour" class="form-control">
+                  <option value="7">07:00 AM</option>
+                  <option value="8" selected>08:00 AM</option>
+                  <option value="9">09:00 AM</option>
+                  <option value="10">10:00 AM</option>
+                </select>
+              </div>
+              <div>
+                <label class="form-label" for="gpsPingEndHour">Hasta hora</label>
+                <select id="gpsPingEndHour" class="form-control">
+                  <option value="17">05:00 PM</option>
+                  <option value="18">06:00 PM</option>
+                  <option value="19" selected>07:00 PM</option>
+                  <option value="20">08:00 PM</option>
+                  <option value="21">09:00 PM</option>
+                </select>
+              </div>
+              <button type="submit" class="btn btn-primary" style="height:42px;">Guardar Push</button>
+            </form>
+          </div>
+        </div>
+
+        <div class="order-admin-card">
+          <h3 class="serif-title" style="font-size:1.22rem;color:var(--green-950);margin-bottom:6px;">❄️ Almacenistas y PIN de Bodega</h3>
+          <p style="font-size:0.84rem;color:var(--slate-500);margin-bottom:12px;">
+            Acceso exclusivo a <code>/almacen.html</code> (cámara QR, cuartos fríos y selección de Proceso, sin ver dinero).
+          </p>
+          <div id="whStaffListEditor" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;"></div>
+          <div class="driver-add-row">
+            <div>
+              <label class="form-label" for="newWhStaffName">Almacenista *</label>
+              <input type="text" id="newWhStaffName" class="form-control" placeholder="Ej. Almacenista 1">
+            </div>
+            <div>
+              <label class="form-label" for="newWhStaffPin">PIN Inicial *</label>
+              <input type="text" inputmode="numeric" maxlength="8" id="newWhStaffPin" class="form-control" placeholder="Ej. 4444">
+            </div>
+            <button type="button" id="btnAddWhStaff" class="btn btn-primary" style="height:42px;">+ Agregar</button>
+          </div>
         </div>
 
         <div class="order-admin-card">
@@ -492,6 +555,156 @@
 
       <div id="manualRoleTabsBar" class="manual-role-pills"></div>
       <div id="adminManualContainer"></div>
+    </section>
+
+    <!-- ================= TAB: TERMOS, CUARTOS FRÍOS Y LOTES QR ================= -->
+    <section id="tabLots" class="admin-tab-pane" style="display:none;">
+      <div class="order-admin-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
+          <div>
+            <h3 class="serif-title" style="font-size:1.25rem;color:var(--green-950);margin-bottom:2px;">❄️ Termos, Tarimas QR y Cuartos Fríos</h3>
+            <p style="font-size:0.84rem;color:var(--slate-500);">Genera los marbetes QR por tarima (10 kg), controla la conversión de <strong>Proceso</strong> (Limpio/Semilimpio) y vigila los días en cámara.</p>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <a href="almacen.html" target="_blank" class="btn btn-outline btn-sm">📷 Abrir Escáner Almacén</a>
+            <button type="button" id="btnPrintThermoQrs" class="btn btn-primary btn-sm">🖨️ Imprimir Marbetes QR</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="lotsSummaryCards" class="admin-kpi-grid" style="margin-bottom:14px;"></div>
+
+      <div class="order-admin-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+          <strong style="color:var(--green-950);">📦 Inventario por Tarima / Sub-lote</strong>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <select id="filterLotsThermo" class="form-control" style="width:auto;padding:6px 10px;"></select>
+            <select id="filterLotsRoom" class="form-control" style="width:auto;padding:6px 10px;">
+              <option value="all">Todos los Cuartos</option>
+              <option value="Cuarto 1">Cuarto 1</option>
+              <option value="Cuarto 2">Cuarto 2</option>
+              <option value="Cuarto 3">Cuarto 3</option>
+              <option value="Cuarto 4">Cuarto 4</option>
+              <option value="Emplayado / Quiebre">Emplayado / Quiebre</option>
+              <option value="Piso">Piso (Listo Venta)</option>
+              <option value="Área Selección">Área Selección</option>
+            </select>
+            <select id="filterLotsKind" class="form-control" style="width:auto;padding:6px 10px;">
+              <option value="active">Activos (&gt;0 cajas)</option>
+              <option value="PRO">Solo Proceso</option>
+              <option value="clasificado">Solo Clasificado</option>
+              <option value="all">Todos (incl. agotados)</option>
+            </select>
+          </div>
+        </div>
+        <div id="lotsTableContainer" style="overflow-x:auto;"></div>
+      </div>
+    </section>
+
+    <!-- ================= TAB: SUPERADMIN (COSTOS DE COMPRA, GASTOS Y UTILIDAD) ================= -->
+    <section id="tabSuperadmin" class="admin-tab-pane" style="display:none;">
+      <div id="superadminLockCard" class="order-admin-card" style="max-width:440px;margin:20px auto;text-align:center;">
+        <div style="font-size:2rem;margin-bottom:6px;">🔐</div>
+        <h3 class="serif-title" style="font-size:1.3rem;color:var(--green-950);margin-bottom:6px;" id="saLockTitle">Acceso Superadmin</h3>
+        <p id="saLockDesc" style="font-size:0.85rem;color:var(--slate-500);margin-bottom:14px;">
+          Ingresa la clave maestra de Superadmin para ver precios de compra por termo, gastos operativos y utilidad neta.
+        </p>
+        <form id="superadminAuthForm">
+          <div class="form-group">
+            <input type="password" id="superadminPinInput" class="form-control" placeholder="Clave o PIN Superadmin (mín. 4 caracteres)" minlength="4" required style="text-align:center;font-weight:800;">
+          </div>
+          <button type="submit" id="btnSuperadminUnlock" class="btn btn-primary" style="width:100%;padding:11px;">
+            Desbloquear Superadmin
+          </button>
+        </form>
+      </div>
+
+      <div id="superadminContent" style="display:none;">
+        <div class="order-admin-card" style="background:linear-gradient(135deg,#1e1b4b 0%,#312e81 100%);color:#fff;border:none;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+          <div>
+            <span style="font-size:0.74rem;font-weight:800;opacity:0.85;">🔐 PERFIL SUPERADMIN ACTIVO</span>
+            <h3 class="serif-title" style="font-size:1.3rem;color:#fff;margin:2px 0 0;">Control Financiero: Ingresos vs. Compras y Gastos</h3>
+          </div>
+          <button type="button" id="btnLockSuperadmin" class="btn btn-sm" style="background:rgba(255,255,255,0.16);color:#fff;">🔒 Bloquear</button>
+        </div>
+
+        <div id="saFinancialKpis" class="admin-kpi-grid" style="margin-bottom:14px;"></div>
+
+        <div class="two-col-panel">
+          <!-- Costos de Compra por Termo -->
+          <div class="order-admin-card">
+            <h4 class="serif-title" style="font-size:1.12rem;color:var(--green-950);margin-bottom:8px;">🥑 Costos de Compra por Termo</h4>
+            <form id="saThermoCostForm">
+              <div class="form-group">
+                <label class="form-label" for="saCostThermoSelect">Termo</label>
+                <select id="saCostThermoSelect" class="form-control" required></select>
+              </div>
+              <div class="form-row-2">
+                <div class="form-group">
+                  <label class="form-label">Costo Primera / Extra ($/kg)</label>
+                  <input type="number" step="0.1" min="0" id="saCostPriKg" class="form-control" value="0">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Kg Primera / Extra</label>
+                  <input type="number" min="0" id="saKgPri" class="form-control" value="9000">
+                </div>
+              </div>
+              <div class="form-row-2">
+                <div class="form-group">
+                  <label class="form-label">Costo Proceso ($/kg)</label>
+                  <input type="number" step="0.1" min="0" id="saCostProKg" class="form-control" value="0">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Kg Proceso</label>
+                  <input type="number" min="0" id="saKgPro" class="form-control" value="16000">
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Flete + Maniobras del Termo ($)</label>
+                <input type="number" min="0" id="saCostFreight" class="form-control" value="0">
+              </div>
+              <button type="submit" class="btn btn-primary" style="width:100%;">💾 Guardar Costo del Termo</button>
+            </form>
+            <div id="saThermoCostsList" style="margin-top:12px;"></div>
+          </div>
+
+          <!-- Gastos Operativos -->
+          <div class="order-admin-card">
+            <h4 class="serif-title" style="font-size:1.12rem;color:var(--green-950);margin-bottom:8px;">💸 Registrar Gasto Operativo</h4>
+            <form id="saExpenseForm">
+              <div class="form-row-2">
+                <div class="form-group">
+                  <label class="form-label">Fecha</label>
+                  <input type="date" id="saExpDate" class="form-control" required>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Categoría</label>
+                  <select id="saExpCategory" class="form-control">
+                    <option value="Flete">🚛 Flete / Transporte</option>
+                    <option value="Cuarto Frío">❄️ Renta / Luz Cuarto Frío</option>
+                    <option value="Nómina">👷 Nómina / Selección</option>
+                    <option value="Combustible">⛽ Gasolina / Diésel</option>
+                    <option value="Insumos">🏷️ Etiquetas / Cajas / Insumos</option>
+                    <option value="Otros">📌 Otros Gastos</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-row-2">
+                <div class="form-group">
+                  <label class="form-label">Monto ($ MXN)</label>
+                  <input type="number" min="1" id="saExpAmount" class="form-control" required>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Concepto / Nota</label>
+                  <input type="text" id="saExpNote" class="form-control" placeholder="Ej. Diésel F-150" required>
+                </div>
+              </div>
+              <button type="submit" class="btn btn-primary" style="width:100%;">+ Registrar Gasto</button>
+            </form>
+            <div id="saExpensesList" style="margin-top:12px;max-height:280px;overflow-y:auto;"></div>
+          </div>
+        </div>
+      </div>
     </section>
 
   </main>
@@ -599,6 +812,22 @@
     </div>
   </div>
 
+  <!-- Modal: Confirmación Elegante de Acción -->
+  <div id="confirmActionModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="confirmModalTitle">
+    <div class="modal-card" style="max-width:410px;text-align:center;padding:24px 22px 20px;">
+      <button type="button" id="btnCloseConfirmModal" class="modal-close" aria-label="Cerrar">✕</button>
+      <div style="width:52px;height:52px;border-radius:50%;background:#fef2f2;border:1px solid #fecaca;display:flex;align-items:center;justify-content:center;font-size:1.5rem;margin:0 auto 12px;">
+        ⚠️
+      </div>
+      <h3 class="serif-title" id="confirmModalTitle" style="font-size:1.25rem;color:#0f172a;margin-bottom:6px;">¿Confirmar acción?</h3>
+      <p id="confirmModalMessage" style="font-size:0.88rem;color:#475569;line-height:1.45;margin-bottom:18px;"></p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <button type="button" id="btnConfirmCancel" class="btn btn-outline" style="padding:11px;font-weight:700;">Cancelar</button>
+        <button type="button" id="btnConfirmOk" class="btn" style="padding:11px;font-weight:800;background:#dc2626;color:#fff;border:none;">Sí, quitar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Printable Receipt / Warehouse Sheet Container -->
   <div id="printReceiptArea"></div>
 
@@ -606,6 +835,7 @@
   <div id="toastBox" class="toast-box"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script type="module" src="js/admin.js"></script>
 </body>
 </html>

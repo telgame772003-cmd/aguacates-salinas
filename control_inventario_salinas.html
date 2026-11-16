@@ -254,14 +254,15 @@
     }
 
     /* Column widths (Total = 263.4mm) */
-    col.col-num    { width: 7.4mm; }
-    col.col-hora   { width: 15mm; }
-    col.col-chofer { width: 43mm; }
-    col.col-cal    { width: 13.5mm; } /* x8 = 108mm */
-    col.col-firma1 { width: 31mm; }
-    col.col-totv   { width: 22mm; }
-    col.col-firma2 { width: 37mm; }
-    /* Sum: 7.4 + 15 + 43 + 54 + 31 + 54 + 22 + 37 = 263.4mm */
+    col.col-num    { width: 7mm; }
+    col.col-hora   { width: 13.5mm; }
+    col.col-chofer { width: 37.9mm; }
+    col.col-cal    { width: 11mm; } /* x8 = 88mm */
+    col.col-peso   { width: 16mm; } /* x2 = 32mm */
+    col.col-firma1 { width: 29mm; }
+    col.col-totv   { width: 21mm; }
+    col.col-firma2 { width: 35mm; }
+    /* Sum: 7 + 13.5 + 37.9 + 60 + 29 + 60 + 21 + 35 = 263.4mm */
 
     table.inventory-grid thead th {
       background: #264428;
@@ -609,18 +610,20 @@
           <col class="col-num">
           <col class="col-hora">
           <col class="col-chofer">
-          <!-- Salida M P E S -->
+          <!-- Salida M P E S + Peso -->
           <col class="col-cal">
           <col class="col-cal">
           <col class="col-cal">
           <col class="col-cal">
+          <col class="col-peso">
           <!-- Firma Salida -->
           <col class="col-firma1">
-          <!-- Devolucion M P E S -->
+          <!-- Devolucion M P E S + Peso -->
           <col class="col-cal">
           <col class="col-cal">
           <col class="col-cal">
           <col class="col-cal">
+          <col class="col-peso">
           <!-- Total Vendido -->
           <col class="col-totv">
           <!-- Firma Regreso -->
@@ -631,9 +634,9 @@
             <th rowspan="2">#</th>
             <th rowspan="2">HORA</th>
             <th rowspan="2" class="sep-right">CHOFER / VENDEDOR</th>
-            <th colspan="4">SALIDA DE ALMACÉN (CAJAS)</th>
+            <th colspan="5">SALIDA DE ALMACÉN (CAJAS / PESO)</th>
             <th rowspan="2" class="sep-left sep-right">FIRMA CHOFER<br><span style="font-size:6pt;font-weight:600;">(SALIDA)</span></th>
-            <th colspan="4" class="dev-header">DEVOLUCIÓN (CAJAS)</th>
+            <th colspan="5" class="dev-header">DEVOLUCIÓN (CAJAS / PESO)</th>
             <th rowspan="2" class="sep-left sep-right">TOTAL<br><span style="font-size:6pt;font-weight:600;">(VENDIDO)</span></th>
             <th rowspan="2">FIRMA CHOFER<br><span style="font-size:6pt;font-weight:600;">(REGRESO / CIERRE)</span></th>
           </tr>
@@ -641,34 +644,36 @@
             <th>M</th>
             <th>P</th>
             <th>E</th>
-            <th class="sep-right">S</th>
+            <th>S</th>
+            <th class="sep-right">PESO</th>
             <th>M</th>
             <th>P</th>
             <th>E</th>
-            <th class="sep-right">S</th>
+            <th>S</th>
+            <th class="sep-right">PESO</th>
           </tr>
         </thead>
         <tbody>
-          <tr><td class="row-idx">1</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
-          <tr><td class="row-idx">2</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
-          <tr><td class="row-idx">3</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
-          <tr><td class="row-idx">4</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
-          <tr><td class="row-idx">5</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
-          <tr><td class="row-idx">6</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
-          <tr><td class="row-idx">7</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
-          <tr><td class="row-idx">8</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
-          <tr><td class="row-idx">9</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
-          <tr><td class="row-idx">10</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
-          <tr><td class="row-idx">11</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
-          <tr><td class="row-idx">12</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
-          <tr><td class="row-idx">13</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
-          <tr><td class="row-idx">14</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
-          <tr><td class="row-idx">15</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
-          <tr><td class="row-idx">16</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
-          <tr><td class="row-idx">17</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
-          <tr><td class="row-idx">18</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
-          <tr><td class="row-idx">19</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
-          <tr><td class="row-idx">20</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
+          <tr><td class="row-idx">1</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
+          <tr><td class="row-idx">2</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
+          <tr><td class="row-idx">3</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
+          <tr><td class="row-idx">4</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
+          <tr><td class="row-idx">5</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
+          <tr><td class="row-idx">6</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
+          <tr><td class="row-idx">7</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
+          <tr><td class="row-idx">8</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
+          <tr><td class="row-idx">9</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
+          <tr><td class="row-idx">10</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
+          <tr><td class="row-idx">11</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
+          <tr><td class="row-idx">12</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
+          <tr><td class="row-idx">13</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
+          <tr><td class="row-idx">14</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
+          <tr><td class="row-idx">15</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
+          <tr><td class="row-idx">16</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
+          <tr><td class="row-idx">17</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
+          <tr><td class="row-idx">18</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
+          <tr><td class="row-idx">19</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
+          <tr><td class="row-idx">20</td><td></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="sep-right"></td><td></td><td></td><td></td><td></td><td class="sep-right"></td><td class="tot-cell sep-right"></td><td></td></tr>
         </tbody>
         <tfoot>
           <tr>
@@ -676,8 +681,10 @@
             <td class="write-sum"></td>
             <td class="write-sum"></td>
             <td class="write-sum"></td>
+            <td class="write-sum"></td>
             <td class="write-sum sep-right"></td>
             <td class="blocked-cell sep-right"></td>
+            <td class="write-sum"></td>
             <td class="write-sum"></td>
             <td class="write-sum"></td>
             <td class="write-sum"></td>

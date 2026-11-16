@@ -1,4 +1,5 @@
 import {
+  app,
   db,
   doc,
   getDoc,
@@ -11,6 +12,7 @@ import {
   serverTimestamp,
   DEFAULT_STORE_SETTINGS,
   PLACE_CATEGORIES,
+  FCM_VAPID_KEY,
   haversineMeters,
   computeDriverPinHash,
   executeDriverBatch,
@@ -266,6 +268,8 @@ document.getElementById("btnDriverLogout").addEventListener("click", async () =>
   driverAppMain.style.display = "none";
   driverBottomNav.style.display = "none";
   driverTopActions.style.display = "none";
+  const utilEl = document.getElementById("driverTopUtility");
+  if (utilEl) utilEl.style.display = "none";
   topDriverName.textContent = "Modo Chofer";
   driverLoginView.style.display = "flex";
 });
@@ -274,7 +278,9 @@ async function enterDriverApp() {
   driverLoginView.style.display = "none";
   driverAppMain.style.display = "block";
   driverBottomNav.style.display = "grid";
-  driverTopActions.style.display = "flex";
+  driverTopActions.style.display = "none";
+  const utilEl = document.getElementById("driverTopUtility");
+  if (utilEl) utilEl.style.display = "flex";
   topDriverName.textContent = `🚗 ${currentDriverName}`;
 
   loadRecentClientsDatalist();
@@ -290,11 +296,22 @@ async function enterDriverApp() {
       if (ld.trailDate === getLocalDateStr() && Array.isArray(ld.trail)) {
         myTrailToday = ld.trail;
       }
+      if (
+        ld.active === true &&
+        ld.updatedAtIso &&
+        Date.now() - new Date(ld.updatedAtIso).getTime() < 30 * 60 * 1000
+      ) {
+        localStorage.removeItem("salinas_gps_manual_pause");
+      }
     }
   } catch (_) {}
 
   if (!gpsActive && localStorage.getItem("salinas_gps_manual_pause") !== "1") {
     startGpsSharing();
+  }
+  initDriverPushNotifications(false);
+  if (new URLSearchParams(window.location.search).get("ping") === "gps") {
+    sendImmediateGpsPing("push");
   }
 }
 
@@ -324,9 +341,181 @@ async function releaseRouteWakeLock() {
   } catch (_) {}
 }
 
+function sendImmediateGpsPing(reason = "ping") {
+  if (!("geolocation" in navigator) || !currentDriverKeyHash || !currentDriverName) return;
+  if (reason === "push") {
+    localStorage.removeItem("salinas_gps_manual_pause");
+  }
+  if (!gpsActive && (reason === "push" || localStorage.getItem("salinas_gps_manual_pause") !== "1")) {
+    startGpsSharing();
+  }
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      gpsActive = true;
+      btnToggleGps.classList.add("active");
+      gpsDot.textContent = "🟢";
+      gpsLabel.textContent = "GPS";
+      const lat = Number(pos.coords.latitude.toFixed(6));
+      const lng = Number(pos.coords.longitude.toFixed(6));
+      const { accuracy, speed } = pos.coords;
+      lastGpsCoords = { lat, lng };
+      lastGpsSentAt = Date.now();
+      const currDate = getLocalDateStr();
+      if (currDate !== todayStr) myTrailToday = [];
+      const lastTrailPt = myTrailToday[myTrailToday.length - 1];
+      const dist = lastTrailPt ? haversineMeters(lastTrailPt.lat, lastTrailPt.lng, lat, lng) : 9999;
+      if (!lastTrailPt || (dist !== null && dist >= 35)) {
+        const hhmm = new Date().toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", hour12: false });
+        myTrailToday.push({ lat, lng, t: hhmm });
+        if (myTrailToday.length > 120) myTrailToday = myTrailToday.slice(-120);
+      }
+      const trunk = computeMyTrunkAndCorte();
+      try {
+        await executeDriverBatch(currentDriverKeyHash, (batch, proofId) => {
+          batch.set(doc(db, "driver_locations", driverSlug(currentDriverName)), {
+            driverName: currentDriverName,
+            lat,
+            lng,
+            accuracy: Math.round(accuracy || 0),
+            speedKmh: speed && speed > 0 ? Math.round(speed * 3.6) : 0,
+            active: true,
+            trailDate: currDate,
+            trail: myTrailToday,
+            boxesInCar: trunk.totalAvailable,
+            boxesBreakdown: trunk.avail,
+            ripeness: trunk.lastRipeness || "Surtido",
+            updatedAtIso: new Date().toISOString(),
+            updatedAt: serverTimestamp(),
+            proofId
+          });
+        });
+        if (reason === "push") {
+          showToast("📍 Ubicación GPS enviada a oficina.");
+        }
+      } catch (err) {
+        console.warn("Error enviando ping GPS:", err);
+      }
+    },
+    () => {},
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 12000 }
+  );
+}
+
+function setPushBtnState(state) {
+  const pushBtn = document.getElementById("btnEnableDriverPush");
+  if (!pushBtn) return;
+  if (state === "granted") {
+    pushBtn.style.display = "none";
+    if (driverTopActions) driverTopActions.style.display = "none";
+    return;
+  }
+  if (driverTopActions) driverTopActions.style.display = "flex";
+  pushBtn.style.display = "inline-flex";
+  if (state === "denied") {
+    pushBtn.textContent = "🔕 Bloqueado";
+    pushBtn.style.background = "#fee2e2";
+    pushBtn.style.color = "#991b1b";
+    pushBtn.style.borderColor = "#fca5a5";
+  } else {
+    pushBtn.textContent = "🔔 Avisos";
+    pushBtn.style.background = "#fef3c7";
+    pushBtn.style.color = "#92400e";
+    pushBtn.style.borderColor = "#f59e0b";
+  }
+}
+
+async function initDriverPushNotifications(interactive = false) {
+  if (!currentDriverKeyHash || !currentDriverName) return;
+  if (!("Notification" in window) || !("serviceWorker" in navigator)) {
+    setPushBtnState("default");
+    if (interactive) {
+      showToast("En iPhone: abre en Safari → Compartir → Agregar a inicio y abre desde ese ícono.");
+    }
+    return;
+  }
+
+  if (Notification.permission === "denied") {
+    setPushBtnState("denied");
+    if (interactive) {
+      showToast("Notificaciones bloqueadas: toca el candado/ajustes junto a la URL → Permisos → Notificaciones → Permitir.");
+    }
+    return;
+  }
+
+  if (Notification.permission === "default") {
+    setPushBtnState("default");
+    if (!interactive) return;
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") {
+      setPushBtnState(perm === "denied" ? "denied" : "default");
+      showToast("Permiso de avisos no otorgado.");
+      return;
+    }
+  }
+
+  try {
+    const swReg = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
+    const { getMessaging, getToken, onMessage, isSupported } = await import(
+      "https://www.gstatic.com/firebasejs/11.1.0/firebase-messaging.js"
+    );
+    const supported = await isSupported();
+    if (!supported) {
+      setPushBtnState("default");
+      if (interactive) showToast("Este navegador no soporta Push Web.");
+      return;
+    }
+
+    const messaging = getMessaging(app);
+    onMessage(messaging, (payload) => {
+      if (payload?.data?.type === "gps_ping") {
+        try { navigator.vibrate?.([150, 80, 150]); } catch (_) {}
+        sendImmediateGpsPing("push");
+      }
+    });
+    const token = await getToken(messaging, {
+      vapidKey: FCM_VAPID_KEY,
+      serviceWorkerRegistration: swReg
+    });
+    if (!token) return;
+
+    await executeDriverBatch(currentDriverKeyHash, (batch, proofId) => {
+      batch.set(
+        doc(db, "driver_push_tokens", driverSlug(currentDriverName)),
+        {
+          driverName: currentDriverName,
+          token,
+          updatedAtIso: new Date().toISOString(),
+          updatedAt: serverTimestamp(),
+          proofId
+        },
+        { merge: true }
+      );
+    });
+    setPushBtnState("granted");
+    if (interactive) showToast("🔔 Avisos de ubicación activos.");
+  } catch (err) {
+    console.warn("Aviso FCM chofer:", err);
+    setPushBtnState("default");
+    if (interactive) showToast("No se pudieron activar los avisos en este dispositivo.");
+  }
+}
+
+document.getElementById("btnEnableDriverPush")?.addEventListener("click", () => {
+  initDriverPushNotifications(true);
+});
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data?.type === "SALINAS_GPS_PING") {
+      sendImmediateGpsPing("push");
+    }
+  });
+}
+
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && gpsActive) {
     requestRouteWakeLock();
+    sendImmediateGpsPing("visible");
   }
 });
 
@@ -349,7 +538,7 @@ function startGpsSharing() {
   gpsActive = true;
   btnToggleGps.classList.add("active");
   gpsDot.textContent = "🟢";
-  gpsLabel.textContent = "GPS En Vivo";
+  gpsLabel.textContent = "GPS";
   requestRouteWakeLock();
   showToast("GPS activo: Administración supervisa tu recorrido en tiempo real.");
 
@@ -419,10 +608,12 @@ function startGpsSharing() {
     },
     (err) => {
       console.warn("Aviso GPS:", err);
-      showToast("Permite el acceso a tu ubicación en el navegador para activar GPS.");
-      stopGpsSharing(false);
+      if (err && err.code === 1) {
+        showToast("Permite el acceso a tu ubicación en el navegador para activar GPS.");
+        stopGpsSharing(false);
+      }
     },
-    { enableHighAccuracy: true, maximumAge: 8000, timeout: 20000 }
+    { enableHighAccuracy: true, maximumAge: 10000, timeout: 25000 }
   );
 }
 
@@ -437,7 +628,7 @@ async function stopGpsSharing(notifyServer = true) {
   lastGpsSentAt = 0;
   btnToggleGps.classList.remove("active");
   gpsDot.textContent = "⚪";
-  gpsLabel.textContent = "Activar GPS";
+  gpsLabel.textContent = "GPS";
 
   if (wasActive && notifyServer && currentDriverKeyHash && currentDriverName) {
     try {
@@ -509,17 +700,37 @@ function startDriverListeners() {
   });
 
   // 2. Assigned online orders
+  let knownAssignedIds = new Set();
+  let initialAssignedLoaded = false;
   const ordQ = query(collection(db, "orders"), orderBy("createdAtIso", "desc"), limit(120));
-  ordersUnsub = onSnapshot(ordQ, (snap) => {
-    assignedOrders = snap.docs
-      .map((d) => ({ id: d.id, ...d.data() }))
-      .filter(
-        (o) =>
-          String(o.assignedDriver || "").toLowerCase() === String(currentDriverName || "").toLowerCase() &&
-          (o.status === "confirmado" || o.status === "en_ruta")
-      );
-    renderAssignedOrders();
-  });
+  ordersUnsub = onSnapshot(
+    ordQ,
+    (snap) => {
+      const incoming = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter(
+          (o) =>
+            String(o.assignedDriver || "").toLowerCase() === String(currentDriverName || "").toLowerCase() &&
+            (o.status === "confirmado" || o.status === "en_ruta")
+        );
+      if (initialAssignedLoaded) {
+        const brandNew = incoming.filter((o) => !knownAssignedIds.has(o.id));
+        if (brandNew.length > 0) {
+          showToast(`📦 ¡Nuevo pedido asignado: ${brandNew[0].customerName || brandNew[0].folio}!`);
+          try {
+            navigator.vibrate?.([160, 80, 160]);
+          } catch (_) {}
+        }
+      }
+      knownAssignedIds = new Set(incoming.map((o) => o.id));
+      initialAssignedLoaded = true;
+      assignedOrders = incoming;
+      renderAssignedOrders();
+    },
+    (err) => {
+      console.warn("Error escuchando pedidos asignados:", err);
+    }
+  );
 
   // 3. Today's route sales (all drivers for store visit status + my own for Mi Corte)
   const salesQ = query(collection(db, "route_sales"), where("date", "==", todayStr));
@@ -548,6 +759,20 @@ function startDriverListeners() {
     renderPlacesList();
   });
 }
+
+let lastHiddenAt = 0;
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    lastHiddenAt = Date.now();
+    return;
+  }
+  if (currentDriverName && lastHiddenAt && Date.now() - lastHiddenAt > 15000) {
+    startDriverListeners();
+  }
+});
+window.addEventListener("online", () => {
+  if (currentDriverName) startDriverListeners();
+});
 
 function normalizePlaceKey(str) {
   return String(str || "")

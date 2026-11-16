@@ -1400,12 +1400,25 @@ textarea.form-control {
   z-index: 50;
   background: var(--green-950);
   color: var(--white);
-  padding: 10px 14px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: var(--shadow-sm);
+}
+
+.driver-topbar-row1 {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
-  box-shadow: var(--shadow-sm);
+}
+
+.driver-topbar-row2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
 }
 
 .gps-toggle-btn {

@@ -69,6 +69,17 @@ export const STAFF_MANUALS = {
           "• El botón superior <strong>💾 Respaldar</strong> permite descargar en cualquier momento una copia íntegra de la base de datos operativa.",
         example:
           "Se recomienda generar y almacenar un respaldo semanal al cierre del día sábado como medida de control institucional."
+      },
+      {
+        num: "6",
+        icon: "❄️",
+        heading: "Control de Termos QR, Cuartos Fríos y Perfil Superadmin",
+        bodyHtml:
+          "• En la pestaña <strong>❄️ Termos y Lotes QR</strong> cree cada termo entrante (ej. <code>T01</code>) e imprima los <strong>marbetes QR por tarima</strong> para colocarlos en mica plástica.<br>" +
+          "• Vigile el semáforo de antigüedad en <strong>Cuarto 1 a Cuarto 4</strong> (🟢 0–3 días, 🟡 4–6 días, 🔴 7+ días) y la merma acumulada al seleccionar tarimas de <em>Proceso</em>.<br>" +
+          "• En la pestaña protegida <strong>🔐 Superadmin</strong> (con clave maestra independiente) capture los <strong>precios de compra por termo</strong> y <strong>gastos operativos</strong> para consultar en tiempo real el <strong>Balance Neto y Margen %</strong>.",
+        example:
+          "Solo quien cuente con la clave Superadmin puede visualizar costos de compra de fruta, gastos y utilidad neta."
       }
     ],
     whatsappText:
@@ -79,7 +90,8 @@ export const STAFF_MANUALS = {
       `2️⃣ *Alertas de pedidos nuevos:* Active *🔔 Sonido* en la barra superior. Cada pedido entrante emite alerta sonora y muestra un *🔴 Indicador Rojo* en el mapa para asignación directa a la unidad más cercana.\n\n` +
       `3️⃣ *Control de precios:* En *🏷️ Precios y Difusión* se establece el Precio Público y el *Mínimo Ruta ($)* autorizado para proteger el margen comercial.\n\n` +
       `4️⃣ *Conciliación de cortes:* En *Pre-Corte Automático* se cruzan automáticamente los registros de Almacén contra las Ventas en Ruta (inventario a devolver y efectivo exacto a liquidar).\n\n` +
-      `5️⃣ *Seguridad y respaldos:* Gestión de personal y PINs en *🚗 Choferes y PIN*, y descarga de base de datos en *💾 Respaldar*.`
+      `5️⃣ *Termos QR y Superadmin:* En *❄️ Termos y Lotes QR* genere los QRs por tarima; en *🔐 Superadmin* controle precios de compra, gastos y utilidad neta.\n\n` +
+      `6️⃣ *Seguridad y respaldos:* Gestión de personal y PINs en *🚗 Equipo y PINs*, y descarga de base de datos en *💾 Respaldar*.`
   },
 
   oficina: {
@@ -168,82 +180,74 @@ export const STAFF_MANUALS = {
   almacen: {
     id: "almacen",
     shortTab: "📦 Área de Almacén",
-    badge: "NIVEL 3 • CONTROL DE INVENTARIO, SALIDAS Y DEVOLUCIONES",
+    badge: "NIVEL 3 • CUARTOS FRÍOS QR, PROCESO Y DESPACHO",
     title: "Manual Operativo — Área de Almacén",
-    people: "Encargado(a) de Almacén y Control de Piso",
+    people: "Encargado(a) de Almacén y Cuartos Fríos",
     summary:
-      "Procedimiento estandarizado para el control diario de existencias en piso, salidas de cámara fría, despacho de unidades por vuelta y recepción de devoluciones sin cálculos manuales.",
+      "Procedimiento para el control de tarimas con QR desde celular/tablet (/almacen.html), ubicación en Cuartos 1–4, conversión de Proceso a cajas clasificadas (Limpio/Semilimpio), despacho a choferes y devoluciones.",
     accessNote:
-      "Al ingresar al Panel (/admin.html) se muestra directamente la pestaña de trabajo correspondiente: 📋 Control de Almacén.",
+      "Ingreso exclusivo para Almacén en https://aguacates-salinas.web.app/almacen.html con su usuario y PIN personal de bodega (sin visibilidad de cortes de dinero ni precios de compra).",
     steps: [
       {
         num: "1",
-        icon: "🌅",
-        heading: "Paso 1 (Apertura de bodega): Registro de inventario inicial y cámara fría",
+        icon: "📷",
+        heading: "Recepción de termo y escaneo QR en Cuartos Fríos (/almacen.html)",
         bodyHtml:
-          "1. Verifique en la parte superior que esté seleccionada la <strong>Fecha actual</strong>.<br>" +
-          "2. Presione el botón <strong>↺ Cargar Cierre Anterior</strong> para importar automáticamente las existencias finales del día previo en piso (o capture manualmente las cantidades en <strong>M, P, E y S</strong>).<br>" +
-          "3. <strong>Salidas de cámara fría / entradas del día:</strong> Cuando se retire mercancía del refrigerador hacia el piso de venta, capture las cajas correspondientes en los campos <strong>+ M, + P, + E, + S</strong>.<br>" +
-          "4. Presione el botón <strong>Guardar Inventario Base</strong>.<br>" +
-          "<em>(Nota: Si en el transcurso del día se retiran cajas adicionales de cámara fría, incremente la cantidad en dichos campos y pulse nuevamente Guardar).</em>",
+          "1. Al llegar un termo nuevo, coloque cada marbete QR impreso en su tarima dentro de su mica plástica.<br>" +
+          "2. En <code>/almacen.html</code> presione <strong>📷 Abrir Cámara</strong> y apunte al código QR de la tarima (o elíjala del listado).<br>" +
+          "3. En la pestaña <strong>📥 Ubicar / Recibir</strong> seleccione el cuarto frío (<strong>Cuarto 1 a 4</strong> o <strong>Área Selección</strong>), confirme las cajas de <strong>10 kg</strong>, tipo, calidad (<strong>Limpio, Semilimpio o Proceso</strong>) y maduración (<strong>Verde, Pintón o Maduro</strong>), y pulse <strong>✅ Guardar Ubicación</strong>.",
         example:
-          "Si iniciaron con 10 cajas de Primera en piso y se retiraron 20 cajas adicionales de cámara fría, el sistema calculará automáticamente una disponibilidad total de 30 cajas en piso."
+          "En 15 minutos quedan ubicadas las 25 tarimas del termo con su fecha de entrada para respetar primeras entradas, primeras salidas (FIFO)."
       },
       {
         num: "2",
-        icon: "🚚",
-        heading: "Paso 2 (Despacho de unidades): Registro de cada salida a ruta",
+        icon: "🔄",
+        heading: "Conversión de tarimas de «Proceso» a cajas clasificadas",
         bodyHtml:
-          "Cada vez que una unidad cargue mercancía para salir a ruta:<br>" +
-          "1. Ubique la sección <strong>2. Registrar Salida de Carro (Nueva Vuelta)</strong>.<br>" +
-          "2. En <strong>Chofer / Vendedor</strong> seleccione al operador correspondiente.<br>" +
-          "3. En <strong>Maduración que lleva</strong> seleccione el estado de la fruta despachada (<em>Maduro, Sazón, Quebrado, Verde, Maduro y Sazón, etc.</em>).<br>" +
-          "4. Capture el número de cajas cargadas por calibre: <strong>M (Media), P (Primera), E (Extra) y S (Super)</strong>.<br>" +
-          "5. Presione <strong>+ Dar Salida de Carro</strong>.<br>" +
-          "<em>Si el mismo operador realiza una segunda o tercera vuelta durante la jornada, registre una nueva salida siguiendo exactamente los mismos pasos.</em>",
+          "Cuando se seleccione y reempaque una tarima de <strong>Proceso</strong> por tamaño y maduración:<br>" +
+          "1. Escanee el QR de la tarima de Proceso y toque <strong>🔄 Convertir Proceso</strong>.<br>" +
+          "2. Capture cuántas cajas de 10 kg salieron de cada calibre (<strong>Súper, Extra, Primera, Mediano, Comercial</strong>) más las cajas de <strong>Merma</strong>.<br>" +
+          "3. Verifique que la barra indique <strong>Cuadra exacto ✅</strong>, elija si la fruta quedó <strong>Limpio</strong> o <strong>Semilimpio</strong>, su maduración y cuarto destino, y pulse <strong>🔄 Confirmar Conversión</strong>.",
         example:
-          "Al confirmar la salida, queda registrada automáticamente la hora exacta del despacho y se actualiza tanto la existencia en piso como el inventario disponible en el teléfono del vendedor."
+          "De 104 cajas en una tarima de Proceso pueden salir 25 Primera, 45 Extra, 20 Mediano y 14 de Merma (104/104). El sistema cierra la tarima de Proceso y crea los sub-lotes listos para vender conservando la fecha original del termo."
       },
       {
         num: "3",
-        icon: "↩️",
-        heading: "Paso 3 (Regreso de ruta): Recepción y captura de devoluciones",
+        icon: "🚛",
+        heading: "Carga matutina a unidades de reparto",
         bodyHtml:
-          "Cuando el operador regrese a bodega con mercancía no vendida:<br>" +
-          "1. Diríjase a la sección <strong>3. Bitácora de Vueltas y Devoluciones</strong>.<br>" +
-          "2. Localice el registro de la vuelta correspondiente y presione el botón <strong>Editar / Devolución</strong>.<br>" +
-          "3. En el apartado <strong>DEVOLUCIÓN QUE REGRESA SIN VENDER</strong> capture las cajas recibidas físicamente en buen estado para cada calibre (<strong>M, P, E y S</strong>).<br>" +
-          "4. Presione <strong>Guardar Cambios</strong>.",
+          "Al cargar mercancía a las camionetas:<br>" +
+          "1. Escanee el QR de la tarima o sub-lote del cual se toman las cajas.<br>" +
+          "2. Seleccione la pestaña <strong>🚛 Cargar a Chofer</strong>, elija al vendedor/unidad, capture la cantidad de cajas de 10 kg y confirme.<br>" +
+          "3. Si también utilizan el registro diario de piso en <code>/admin.html</code> (<strong>📋 Control de Almacén</strong>), capture ahí la salida de vuelta y las devoluciones al regreso.",
         example:
-          "El sistema calcula de manera automática el neto vendido de esa vuelta y reincorpora las cajas devueltas a la existencia actual en piso."
+          "Cada carga queda descontada en tiempo real de la cámara fría y ligada al vendedor que se la llevó."
       },
       {
         num: "4",
-        icon: "✅",
-        heading: "Verificación de cierre físico de almacén",
+        icon: "❄️",
+        heading: "Control de Cuartos Fríos y Merma adicional",
         bodyHtml:
-          "En la parte superior de la pantalla se muestra permanentemente el indicador principal <strong>TOTAL EN PISO</strong> junto con el desglose por calibre:<br>" +
-          "• Dichas cifras representan las cajas físicas que deben encontrarse en el área de piso en todo momento.<br>" +
-          "• Al concluir la jornada, verifique que el conteo físico coincida con los indicadores del sistema. En caso de requerir respaldo impreso, presione <strong>🖨️ Imprimir Corte</strong>.",
+          "En la pestaña inferior <strong>❄️ Cuartos Fríos</strong> puede filtrar por <strong>Cuarto 1–4</strong> o <strong>⏳ Solo Proceso</strong>:<br>" +
+          "• El semáforo muestra la antigüedad de cada tarima (🟢 0–3 días, 🟡 4–6 días, 🔴 7+ días).<br>" +
+          "• Si cambia una tarima de cuarto, avanza su maduración o se descarta fruta dañada, toque la tarima y use <strong>⚠️ Cuarto / Merma</strong> para mantener el inventario al 100%.",
         example:
-          "Nomenclatura oficial de calibres: M = Media | P = Primera | E = Extra | S = Super."
+          "Nomenclatura: S = Súper | E = Extra | P = Primera | M = Mediano | C = Comercial | PRO = Proceso."
       }
     ],
     whatsappText:
       `📦 *MANUAL OPERATIVO: ÁREA DE ALMACÉN — COMERCIALIZADORA SALINAS*\n\n` +
-      `Operación diaria en el módulo *📋 Control de Almacén* en 3 pasos:\n\n` +
-      `1️⃣ *APERTURA DE BODEGA (Inventario Inicial):*\n` +
-      `• Presione *↺ Cargar Cierre Anterior* para importar la existencia final del día previo.\n` +
-      `• Capture en los campos *+M, +P, +E, +S* las cajas retiradas de cámara fría hacia el piso.\n` +
-      `• Pulse *Guardar Inventario Base*.\n\n` +
-      `2️⃣ *DESPACHO DE UNIDADES (Salida a Ruta):*\n` +
-      `• En *2. Registrar Salida de Carro*, seleccione *Chofer / Vendedor* y la *Maduración* despachada.\n` +
-      `• Indique las cajas cargadas por calibre (*M, P, E y S*) y presione *+ Dar Salida de Carro*.\n` +
-      `*(Repita este registro por cada vuelta adicional durante el día).* \n\n` +
-      `3️⃣ *RECEPCIÓN DE DEVOLUCIONES (Regreso de Ruta):*\n` +
-      `• En la bitácora inferior localice la vuelta correspondiente y pulse *Editar / Devolución*.\n` +
-      `• Capture las cajas recibidas físicamente en *Devolución (M, P, E, S)* y presione *Guardar Cambios*.\n\n` +
-      `✅ El recuadro superior *TOTAL EN PISO* calcula automáticamente la existencia exacta que debe permanecer físicamente en bodega.`
+      `👉 *Acceso celular/tablet:* https://aguacates-salinas.web.app/almacen.html *(con tu PIN de Almacén)*\n\n` +
+      `1️⃣ *RECIBIR TARIMAS (Cuartos Fríos):*\n` +
+      `• Presione *📷 Abrir Cámara* y escanee el marbete QR de la tarima.\n` +
+      `• Elija *Cuarto 1–4*, cajas (10 kg), calidad (*Limpio / Semilimpio / Proceso*) y madurez (*Verde / Pintón / Maduro*).\n\n` +
+      `2️⃣ *CONVERTIR PROCESO (Desdoble de Lote):*\n` +
+      `• Escanee la tarima de Proceso -> *🔄 Convertir Proceso*.\n` +
+      `• Capture cuántas cajas salieron de *Súper, Extra, Primera, Mediano, Comercial* + *Merma*.\n` +
+      `• Elija *Limpio / Semilimpio*, madurez y cuarto destino -> *Confirmar Conversión*.\n\n` +
+      `3️⃣ *CARGAR A CHOFERES:*\n` +
+      `• Escanee el lote -> *🚛 Cargar a Chofer* -> elija vendedor y cajas.\n\n` +
+      `4️⃣ *REVISAR CUARTOS:* En *❄️ Cuartos Fríos* revise existencias y semáforo de días (🟢 0-3d | 🟡 4-6d | 🔴 7+d).`
   },
 
   ventas: {
@@ -260,13 +264,16 @@ export const STAFF_MANUALS = {
       {
         num: "1",
         icon: "🛰️",
-        heading: "Inicio de recorrido: Activación de ubicación GPS",
+        heading: "Inicio de recorrido: Activación de ubicación GPS y Avisos Push",
         bodyHtml:
           "Al iniciar su ruta, presione en la barra superior el botón <strong>⚪ Activar GPS</strong> hasta visualizar el estado <strong>🟢 GPS Activo</strong>.<br>" +
           "• Mantenga la aplicación abierta durante sus traslados (el sistema conserva activa la pantalla automáticamente).<br>" +
-          "• Esto permite a Administración visualizar su ubicación en tiempo real y asignarle los pedidos más cercanos a su zona para evitar traslados innecesarios.",
+          "• <strong>Activar Avisos Push (para reportar GPS con 1 toque si la app pasa a segundo plano):</strong><br>" +
+          "&nbsp;&nbsp;• <strong>Android (Chrome):</strong> Inicie sesión, toque el botón amarillo <strong>🔔 Avisos</strong> arriba y elija <strong>Permitir</strong> (recomendado: menú ⋮ → <em>Instalar app</em>).<br>" +
+          "&nbsp;&nbsp;• <strong>iPhone (iOS 16.4+):</strong> Abra la liga en <strong>Safari</strong> → toque <strong>Compartir</strong> (cuadro con flecha) → <strong>Agregar a inicio</strong> → abra la app desde el ícono nuevo, inicie sesión, toque <strong>🔔 Avisos</strong> y elija <strong>Permitir</strong>.<br>" +
+          "• Si oficina solicita su ubicación, solo toque la notificación que llega a su celular para enviarla automáticamente.",
         example:
-          "Al concluir la jornada laboral en bodega, presione nuevamente el botón para finalizar la transmisión de ubicación."
+          "Al concluir la jornada laboral en bodega, presione nuevamente el botón de GPS para finalizar la transmisión de ubicación."
       },
       {
         num: "2",
@@ -325,7 +332,11 @@ export const STAFF_MANUALS = {
       `🚗 *MANUAL OPERATIVO: VENTAS Y REPARTO EN RUTA — COMERCIALIZADORA SALINAS*\n\n` +
       `👉 *Acceso móvil:* https://aguacates-salinas.web.app/chofer.html\n` +
       `*(Seleccione su usuario e ingrese su PIN personal de 4 dígitos)*\n\n` +
-      `1️⃣ *Inicio de ruta:* Presione en la parte superior *⚪ Activar GPS* (*🟢 GPS Activo*) para habilitar el monitoreo y la asignación de entregas cercanas.\n\n` +
+      `1️⃣ *Inicio de ruta y Avisos GPS:*\n` +
+      `• Presione *⚪ Activar GPS* (*🟢 GPS Activo*) para habilitar el monitoreo.\n` +
+      `• *Android (Chrome):* Toque *🔔 Avisos* arriba -> *Permitir* (recomendado: menú ⋮ -> *Instalar app*).\n` +
+      `• *iPhone (Safari):* Botón *Compartir* -> *Agregar a inicio* -> abra desde el ícono nuevo -> toque *🔔 Avisos* -> *Permitir*.\n` +
+      `• Si recibe una notificación de ubicación, solo tóquela para enviar su GPS en automático.\n\n` +
       `2️⃣ *🚗 Mi Ruta:* Consulte su inventario disponible a bordo y gestione los pedidos asignados por Administración (*📍 Abrir Mapa* -> *🚗 Voy en Camino* -> *✅ Entregar y Cobrar*).\n\n` +
       `3️⃣ *🏪 Clientes:*\n` +
       `• *Establecimiento nuevo:* Regístrelo frente al local pulsando *📍 Guardar Nuevo Negocio Aquí (GPS)*.\n` +

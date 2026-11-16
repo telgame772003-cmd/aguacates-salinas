@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Almacén y Cuartos Fríos QR | Comercializadora Salinas</title>
+  <link rel="icon" type="image/png" href="assets/favicon.png">
+  <link rel="stylesheet" href="css/styles.css">
+  <style>
+    .alm-body { background: #f4f7f4; min-height: 100dvh; padding-bottom: 84px; }
+    .alm-body .brand-badge { display: inline-flex !important; align-items: center; max-width: 145px; overflow: hidden; text-overflow: ellipsis; }
+    .alm-kpi-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+    .alm-kpi-tile {
+      background: #fff; border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 10px 8px; text-align: center;
+      cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.02);
+    }
+    .alm-kpi-tile:active { background: #f0fdf4; border-color: #16a34a; }
+    .alm-kpi-tile .k-lbl { font-size: 0.7rem; font-weight: 800; color: #64748b; text-transform: uppercase; display: block; }
+    .alm-kpi-tile .k-val { font-size: 1.15rem; font-weight: 900; color: #14532d; display: block; margin-top: 2px; }
+    #manualLotSelect { font-size: 0.86rem; padding-right: 28px; text-overflow: ellipsis; }
+    .alm-card { background: #fff; border-radius: 14px; padding: 14px; border: 1.5px solid #e2e8f0; margin-bottom: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }
+    .alm-chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .alm-choice-btn {
+      padding: 8px 12px; border-radius: 10px; border: 1.5px solid #cbd5e1;
+      background: #fff; color: #1e293b; font-size: 0.84rem; font-weight: 700; cursor: pointer;
+    }
+    .alm-choice-btn.active { background: #14532d; color: #fff; border-color: #14532d; }
+    .alm-action-tabs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 12px 0; }
+    .alm-action-tab {
+      padding: 10px 8px; border-radius: 10px; border: 1.5px solid #cbd5e1;
+      background: #f8fafc; font-weight: 800; font-size: 0.82rem; color: #1e293b; cursor: pointer; text-align: center;
+    }
+    .alm-action-tab.active { background: #166534; color: #fff; border-color: #166534; }
+    .alm-conv-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 8px; }
+    .alm-conv-box { background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 10px; padding: 8px 10px; }
+    .alm-conv-box label { display: block; font-size: 0.76rem; font-weight: 800; color: #334155; margin-bottom: 4px; }
+    .alm-conv-box input { width: 100%; padding: 7px 8px; border: 1.5px solid #cbd5e1; border-radius: 8px; font-size: 1rem; font-weight: 800; text-align: center; }
+    .alm-balance-bar { padding: 10px 12px; border-radius: 10px; font-weight: 800; font-size: 0.88rem; margin: 10px 0; text-align: center; }
+    .alm-balance-bar.ok { background: #dcfce7; color: #166534; border: 1.5px solid #86efac; }
+    .alm-balance-bar.partial { background: #fef9c3; color: #854d0e; border: 1.5px solid #fde047; }
+    .alm-balance-bar.over { background: #fee2e2; color: #991b1b; border: 1.5px solid #fca5a5; }
+    .alm-lot-row {
+      display: flex; justify-content: space-between; align-items: center; gap: 10px;
+      padding: 11px 12px; border: 1.5px solid #e2e8f0; border-radius: 12px; background: #fff; margin-bottom: 8px; cursor: pointer;
+    }
+    .alm-lot-row:active { background: #f0fdf4; }
+    .alm-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.72rem; font-weight: 800; }
+    .alm-badge.pro { background: #fef3c7; color: #92400e; }
+    .alm-badge.cls { background: #dcfce7; color: #166534; }
+    .alm-sem-green { color: #15803d; font-weight: 800; }
+    .alm-sem-yellow { color: #b45309; font-weight: 800; }
+    .alm-sem-red { color: #dc2626; font-weight: 800; }
+    #qrReaderBox { width: 100%; border-radius: 12px; overflow: hidden; background: #0f172a; }
+  </style>
+</head>
+<body class="alm-body">
+
+  <header class="navbar">
+    <div class="container navbar-inner">
+      <a href="#inicio" id="btnWhHomeLogo" class="brand-link" title="Inicio de Almacén">
+        <img src="assets/logo-salinas.png" alt="Comercializadora Salinas">
+        <span class="brand-badge" id="topWarehouseName">❄️ Almacén</span>
+      </a>
+      <div class="nav-actions" id="whTopActions" style="display:none;">
+        <button type="button" id="btnWhHome" class="btn btn-outline btn-sm">🏠 Inicio</button>
+        <button type="button" id="btnWhLogout" class="btn btn-outline btn-sm">Salir</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- LOGIN ALMACÉN -->
+  <section id="whLoginView" class="login-wrap">
+    <div class="login-card">
+      <img src="assets/avocados-icon.png" alt="Almacén" style="width:72px;height:72px;object-fit:contain;margin-bottom:8px;">
+      <h2 class="serif-title" style="color:var(--green-950);font-size:1.45rem;margin-bottom:4px;">Control de Almacén QR</h2>
+      <p style="font-size:0.86rem;color:var(--slate-500);margin-bottom:18px;">
+        Cuartos fríos, escaneo de tarimas y conversión de proceso (cajas de 10 kg).
+      </p>
+
+      <form id="whLoginForm">
+        <div class="form-group" style="text-align:left;">
+          <label class="form-label" for="loginWhSelect">Almacenista</label>
+          <select id="loginWhSelect" class="form-control" required></select>
+        </div>
+        <div class="form-group" style="text-align:left;">
+          <label class="form-label" for="loginWhPin">PIN de Almacén</label>
+          <input type="password" id="loginWhPin" class="form-control" inputmode="numeric" pattern="[0-9]*" placeholder="••••" required>
+        </div>
+        <label class="remember-check" style="justify-content:flex-start;">
+          <input type="checkbox" id="rememberWhSession" checked>
+          <span>Mantener sesión abierta en este dispositivo</span>
+        </label>
+        <button type="submit" id="btnWhLogin" class="btn btn-primary" style="width:100%;padding:12px;">
+          Entrar al Almacén
+        </button>
+      </form>
+      <div style="margin-top:14px;">
+        <a href="index.html" style="font-size:0.84rem;font-weight:700;color:var(--green-800);text-decoration:none;">← Volver a la página de inicio</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- MAIN ALMACÉN APP -->
+  <main id="whAppMain" class="container" style="display:none;padding-top:12px;">
+
+    <!-- PANE 1: ESCANEAR QR -->
+    <section id="paneScan" class="wh-pane">
+      <div id="whQuickKpiStrip" class="alm-kpi-strip"></div>
+      <div class="alm-card">
+        <h3 style="font-size:1.05rem;color:var(--green-950);margin-bottom:8px;">📷 Escanear Tarima / Lote QR</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" id="btnStartQrScan" class="btn btn-primary" style="flex:1;padding:12px;font-weight:800;">
+            📷 Abrir Cámara
+          </button>
+          <button type="button" id="btnStopQrScan" class="btn btn-outline" style="display:none;padding:12px;font-weight:800;">
+            ⏹️ Cerrar Cámara
+          </button>
+        </div>
+        <div id="qrReaderBox" style="margin-top:10px;display:none;"></div>
+
+        <div style="margin-top:12px;padding-top:10px;border-top:1px dashed #cbd5e1;">
+          <label class="form-label" for="manualLotSelect" style="font-size:0.78rem;margin-bottom:4px;">O selecciona la tarima directamente:</label>
+          <select id="manualLotSelect" class="form-control" style="width:100%;font-weight:700;"></select>
+          <button type="button" id="btnToggleNewLot" class="btn btn-outline" style="width:100%;margin-top:10px;padding:10px;font-weight:800;border-color:#15803d;color:#14532d;background:#f0fdf4;">
+            + Alta individual de tarima
+          </button>
+        </div>
+      </div>
+
+      <!-- ALTA INDIVIDUAL DE TARIMA (SIN QR / SIN TERMO MASIVO) -->
+      <div id="newLotCard" class="alm-card" style="display:none;border:2px solid #86efac;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #e2e8f0;">
+          <strong style="color:var(--green-950);font-size:0.98rem;">📦 Nueva Tarima Individual</strong>
+          <button type="button" id="btnCancelNewLot" class="btn btn-outline btn-sm" style="padding:3px 10px;font-size:0.76rem;">✕ Cancelar</button>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <div class="form-group" style="margin-bottom:6px;">
+            <label class="form-label" for="newLotThermoInput" style="font-size:0.76rem;">Código Termo</label>
+            <input type="text" id="newLotThermoInput" class="form-control" value="T01" maxlength="12" style="font-weight:700;">
+          </div>
+          <div class="form-group" style="margin-bottom:6px;">
+            <label class="form-label" for="newLotBoxesInput" style="font-size:0.76rem;">Cajas (10 kg)</label>
+            <input type="number" id="newLotBoxesInput" class="form-control" value="100" min="1" max="500" style="font-weight:800;">
+          </div>
+          <div class="form-group" style="margin-bottom:6px;">
+            <label class="form-label" for="newLotGradeSelect" style="font-size:0.76rem;">Tipo / Tamaño</label>
+            <select id="newLotGradeSelect" class="form-control" style="font-weight:700;"></select>
+          </div>
+          <div class="form-group" style="margin-bottom:6px;">
+            <label class="form-label" for="newLotRoomSelect" style="font-size:0.76rem;">Cuarto Frío / Ubicación</label>
+            <select id="newLotRoomSelect" class="form-control" style="font-weight:700;"></select>
+          </div>
+          <div class="form-group" style="margin-bottom:6px;">
+            <label class="form-label" for="newLotQualitySelect" style="font-size:0.76rem;">Calidad visual</label>
+            <select id="newLotQualitySelect" class="form-control"></select>
+          </div>
+          <div class="form-group" style="margin-bottom:6px;">
+            <label class="form-label" for="newLotRipenessSelect" style="font-size:0.76rem;">Maduración</label>
+            <select id="newLotRipenessSelect" class="form-control"></select>
+          </div>
+        </div>
+        <button type="button" id="btnCreateSingleLot" class="btn btn-primary" style="width:100%;padding:12px;margin-top:8px;font-weight:800;">
+          ✅ Registrar Tarima
+        </button>
+      </div>
+
+      <!-- TARJETA DE ACCIÓN DE TARIMA ESCANEADA -->
+      <div id="scannedLotCard" class="alm-card" style="display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #f1f5f9;">
+          <span style="font-size:0.74rem;font-weight:800;color:#64748b;text-transform:uppercase;">Tarima abierta</span>
+          <button type="button" id="btnCloseLotCard" class="btn btn-outline btn-sm" style="padding:3px 10px;font-size:0.76rem;">✕ Cerrar</button>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+          <div>
+            <span id="scLotBadge" class="alm-badge pro">PROCESO</span>
+            <h3 id="scLotCode" style="font-size:1.2rem;color:var(--green-950);margin:4px 0 2px;">T01-PRO-01</h3>
+            <div id="scLotMeta" style="font-size:0.82rem;color:#475569;"></div>
+          </div>
+          <div style="text-align:right;">
+            <div id="scLotBoxes" style="font-size:1.35rem;font-weight:900;color:#14532d;">104 cajas</div>
+            <div id="scLotKg" style="font-size:0.78rem;color:#64748b;font-weight:700;">1,040 kg</div>
+          </div>
+        </div>
+
+        <div class="alm-action-tabs">
+          <button type="button" class="alm-action-tab active" data-wh-act="actReceive">📥 Ubicar / Recibir</button>
+          <button type="button" class="alm-action-tab" data-wh-act="actConvert">🔄 Convertir Proceso</button>
+          <button type="button" class="alm-action-tab" data-wh-act="actLoad">🚛 Cargar a Chofer</button>
+          <button type="button" class="alm-action-tab" data-wh-act="actDirectSale">💵 Venta Directa</button>
+          <button type="button" class="alm-action-tab" data-wh-act="actAdjust">📦 Mover / Quiebre / Merma</button>
+        </div>
+
+        <!-- Acción 1: Ubicar / Recibir -->
+        <div id="actReceive" class="wh-act-pane">
+          <div class="form-group">
+            <label class="form-label">Cuarto Frío / Ubicación</label>
+            <div id="rcvRoomChips" class="alm-chip-row"></div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Cajas de 10 kg en esta tarima</label>
+            <input type="number" id="rcvBoxesInput" class="form-control" min="0" max="500" style="font-weight:800;">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Tipo / Tamaño</label>
+            <div id="rcvGradeChips" class="alm-chip-row"></div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Calidad visual</label>
+            <div id="rcvQualityChips" class="alm-chip-row"></div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Maduración</label>
+            <div id="rcvRipenessChips" class="alm-chip-row"></div>
+          </div>
+          <button type="button" id="btnSaveReceive" class="btn btn-primary" style="width:100%;padding:12px;">
+            ✅ Guardar Ubicación e Inventario
+          </button>
+        </div>
+
+        <!-- Acción 2: Convertir Proceso -->
+        <div id="actConvert" class="wh-act-pane" style="display:none;">
+          <p style="font-size:0.82rem;color:#475569;margin-bottom:6px;">
+            Captura cuántas cajas de <strong>10 kg</strong> salieron al seleccionar esta tarima de Proceso:
+          </p>
+          <div class="alm-conv-grid">
+            <div class="alm-conv-box"><label>Súper (S)</label><input type="number" class="conv-qty" data-grade="S" min="0" value="0"></div>
+            <div class="alm-conv-box"><label>Extra (E)</label><input type="number" class="conv-qty" data-grade="E" min="0" value="0"></div>
+            <div class="alm-conv-box"><label>Primera (P)</label><input type="number" class="conv-qty" data-grade="P" min="0" value="0"></div>
+            <div class="alm-conv-box"><label>Mediano (M)</label><input type="number" class="conv-qty" data-grade="M" min="0" value="0"></div>
+            <div class="alm-conv-box"><label>Comercial (C)</label><input type="number" class="conv-qty" data-grade="C" min="0" value="0"></div>
+            <div class="alm-conv-box" style="background:#fef2f2;border-color:#fecaca;">
+              <label style="color:#991b1b;">Merma (cajas 10kg)</label>
+              <input type="number" id="convMermaQty" min="0" value="0" style="color:#991b1b;">
+            </div>
+          </div>
+
+          <div id="convBalanceBar" class="alm-balance-bar partial">0 / 0 cajas</div>
+
+          <div class="form-group">
+            <label class="form-label">Calidad resultante</label>
+            <div id="convQualityChips" class="alm-chip-row"></div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Maduración resultante</label>
+            <div id="convRipenessChips" class="alm-chip-row"></div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Guardar cajas clasificadas en:</label>
+            <div id="convRoomChips" class="alm-chip-row"></div>
+          </div>
+          <button type="button" id="btnConfirmConvert" class="btn btn-primary" style="width:100%;padding:12px;">
+            🔄 Confirmar Conversión de Lote
+          </button>
+        </div>
+
+        <!-- Acción 3: Cargar a Chofer -->
+        <div id="actLoad" class="wh-act-pane" style="display:none;">
+          <div class="form-group">
+            <label class="form-label">Chofer / Unidad que carga</label>
+            <select id="loadDriverSelect" class="form-control" style="font-weight:700;"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Cajas de 10 kg a cargar</label>
+            <input type="number" id="loadBoxesInput" class="form-control" min="1" value="10" style="font-size:1.1rem;font-weight:800;">
+          </div>
+          <button type="button" id="btnConfirmLoad" class="btn btn-primary" style="width:100%;padding:12px;">
+            🚛 Confirmar Carga a Unidad
+          </button>
+        </div>
+
+        <!-- Acción 4: Venta Directa en Almacén -->
+        <div id="actDirectSale" class="wh-act-pane" style="display:none;">
+          <div class="form-group">
+            <label class="form-label" for="dsClientInput">Cliente / Negocio (Mostrador)</label>
+            <input type="text" id="dsClientInput" class="form-control" placeholder="Ej. Mostrador / Carnicería ..." value="Cliente Mostrador">
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div class="form-group">
+              <label class="form-label" for="dsBoxesInput">Cajas de 10 kg</label>
+              <input type="number" id="dsBoxesInput" class="form-control" min="1" value="1" style="font-size:1.05rem;font-weight:800;">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="dsPriceInput">Precio / caja (lista)</label>
+              <input type="number" id="dsPriceInput" class="form-control" min="0" value="0" style="font-size:1.05rem;font-weight:800;">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="dsPaySelect">Forma de pago</label>
+            <select id="dsPaySelect" class="form-control" style="font-weight:700;">
+              <option value="Contado">Efectivo (Contado)</option>
+              <option value="Transferencia">Transferencia</option>
+              <option value="Credito">Crédito</option>
+            </select>
+          </div>
+          <div id="dsTotalPreview" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:10px 12px;margin-bottom:10px;font-weight:800;color:#14532d;display:flex;justify-content:space-between;">
+            <span>Total venta directa:</span>
+            <span id="dsTotalAmount">$0</span>
+          </div>
+          <button type="button" id="btnConfirmDirectSale" class="btn btn-primary" style="width:100%;padding:12px;">
+            💵 Confirmar Venta Directa
+          </button>
+        </div>
+
+        <!-- Acción 5: Mover Cuarto / Emplayado-Quiebre / Piso / Maduración / Merma -->
+        <div id="actAdjust" class="wh-act-pane" style="display:none;">
+          <div class="form-group">
+            <label class="form-label">Mover a Ubicación (Cuarto Frío / Emplayado / Piso)</label>
+            <div id="adjRoomChips" class="alm-chip-row"></div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="adjMoveBoxesInput">Cajas de 10 kg a mover <span style="font-weight:400;color:#64748b;">(si pones menos del total, crea sub-tarima hija)</span></label>
+            <input type="number" id="adjMoveBoxesInput" class="form-control" min="1" value="0" style="font-weight:800;">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Actualizar Maduración</label>
+            <div id="adjRipenessChips" class="alm-chip-row"></div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Reportar Merma adicional (cajas de 10 kg)</label>
+            <input type="number" id="adjMermaInput" class="form-control" min="0" value="0">
+          </div>
+          <button type="button" id="btnConfirmAdjust" class="btn btn-primary" style="width:100%;padding:12px;">
+            💾 Guardar Movimiento / Merma
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- PANE 2: CUARTOS FRÍOS -->
+    <section id="paneRooms" class="wh-pane" style="display:none;">
+      <div class="alm-card">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px;">
+          <h3 style="font-size:1.05rem;color:var(--green-950);margin:0;">❄️ Inventario en Bodega</h3>
+          <span style="font-size:0.74rem;color:#64748b;font-weight:700;">Total real</span>
+        </div>
+        <div id="roomSummaryStats" style="margin-bottom:10px;"></div>
+        <div id="roomFilterChips" class="alm-chip-row"></div>
+      </div>
+      <div id="roomsLotsList"></div>
+    </section>
+
+    <!-- PANE 3: CARGAS HOY -->
+    <section id="paneLoads" class="wh-pane" style="display:none;">
+      <div class="alm-card">
+        <h3 style="font-size:1.05rem;color:var(--green-950);margin-bottom:8px;">🚛 Cargas y Movimientos de Hoy</h3>
+        <div id="whLoadsTodayList"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Bottom Nav -->
+  <nav id="whBottomNav" class="driver-bottom-nav" style="display:none;grid-template-columns:repeat(3,1fr);">
+    <button type="button" class="drv-nav-btn active" data-pane="paneScan"><span class="ico">📷</span>Escanear</button>
+    <button type="button" class="drv-nav-btn" data-pane="paneRooms"><span class="ico">❄️</span>Cuartos Fríos</button>
+    <button type="button" class="drv-nav-btn" data-pane="paneLoads"><span class="ico">🚛</span>Cargas Hoy</button>
+  </nav>
+
+  <div id="toastBox" class="toast-box"></div>
+
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <script type="module" src="js/almacen.js"></script>
+</body>
+</html>

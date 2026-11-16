@@ -3,6 +3,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  writeBatch,
   collection,
   query,
   where,
@@ -12,10 +13,15 @@ import {
   serverTimestamp,
   DEFAULT_STORE_SETTINGS,
   PLACE_CATEGORIES,
+  LOT_GRADES,
+  normalizeColdRoom,
+  haversineMeters,
   parseCoordsFromInput,
   sha256Hex,
   computeDriverPinHash,
+  computeWarehousePinHash,
   executeAdminBatch,
+  executeSuperadminBatch,
   formatCurrency,
   cleanPhoneForWhatsApp
 } from "./firebase-config.js";
@@ -432,7 +438,8 @@ function startRealtimeListeners() {
         ...DEFAULT_STORE_SETTINGS,
         ...data,
         calibers: mergeCalibers(data.calibers || {}),
-        drivers: Array.isArray(data.drivers) ? data.drivers : DEFAULT_STORE_SETTINGS.drivers
+        drivers: Array.isArray(data.drivers) ? data.drivers : DEFAULT_STORE_SETTINGS.drivers,
+        warehouseStaff: Array.isArray(data.warehouseStaff) ? data.warehouseStaff : []
       };
     } else {
       storeSettings.calibers = mergeCalibers({});
@@ -440,6 +447,7 @@ function startRealtimeListeners() {
     populateCatalogForm();
     updateBroadcastPreview();
     renderDriversEditor();
+    if (typeof renderWhStaffEditor === "function") renderWhStaffEditor();
     populateTripDriverSelect();
     populateRouteDriverFilter();
     renderOrdersList();
@@ -491,6 +499,10 @@ function startRealtimeListeners() {
     renderAdminPlacesDirectory();
     renderOrdersList();
   });
+
+  if (typeof startThermosAndLotsListeners === "function") {
+    startThermosAndLotsListeners();
+  }
 }
 
 function subscribeWarehouseDay(dateStr) {
@@ -1292,6 +1304,10 @@ function placeMatchesMapFilter(place, status) {
 }
 
 function fitAllMapMarkers() {
+  if (focusedTrailDriverId) {
+    focusedTrailDriverId = null;
+    renderGpsMapAndChips();
+  }
   ensureLeafletMap();
   if (!leafletMap) return;
   const pts = [];
@@ -1471,9 +1487,10 @@ function renderGpsMapAndChips() {
         const isOnline = onlineLocs.some((o) => o.id === loc.id);
         const dot = isOnline ? "🟢" : "⚪";
         const boxesTxt = typeof loc.boxesInCar === "number" ? ` • ${loc.boxesInCar} cajas` : "";
+        const pingCue = isOnline ? "" : ` <span title="Toca para pedir GPS por notificación">🔔</span>`;
         return `
-          <button type="button" class="gps-driver-chip ${isOnline ? "online" : ""}" data-focus-driver="${escapeHtml(loc.id)}">
-            <span>${dot} ${escapeHtml(loc.driverName || loc.id)}</span>
+          <button type="button" class="gps-driver-chip ${isOnline ? "online" : ""}" data-focus-driver="${escapeHtml(loc.id)}" title="${isOnline ? "Enfocar en mapa" : "Toca para enviar notificación Push y pedir GPS"}">
+            <span>${dot} ${escapeHtml(loc.driverName || loc.id)}${pingCue}</span>
             <span style="font-weight:600;color:var(--slate-500);">${formatMinutesAgo(loc.updatedAtIso)}${boxesTxt}</span>
           </button>
         `;
@@ -1610,19 +1627,57 @@ function renderGpsMapAndChips() {
 
   // 2. Driver Daily Trajectory Trails + Live Car Markers (only when GPS is active/online)
   const trailColors = ["#15803d", "#0284c7", "#7c3aed", "#b45309"];
+  // Agrupar choferes cercanos para separarlos en círculo en píxeles de pantalla (sin traslape al hacer zoom out)
+  const driverClusters = [];
+  onlineLocs.forEach((loc) => {
+    const match = driverClusters.find(
+      (cl) => Math.abs(cl.lat - loc.lat) < 0.0004 && Math.abs(cl.lng - loc.lng) < 0.0004
+    );
+    if (match) match.items.push(loc);
+    else driverClusters.push({ lat: loc.lat, lng: loc.lng, items: [loc] });
+  });
+  const driverPixelOffsets = new Map();
+  driverClusters.forEach((cl) => {
+    const n = cl.items.length;
+    if (n === 1) {
+      driverPixelOffsets.set(cl.items[0].id, { dx: 0, dy: 0 });
+      return;
+    }
+    const radiusPx = n === 2 ? 18 : n <= 4 ? 22 : 26;
+    cl.items.forEach((item, k) => {
+      const angle = (2 * Math.PI * k) / n - Math.PI / 2;
+      driverPixelOffsets.set(item.id, {
+        dx: Math.round(radiusPx * Math.cos(angle)),
+        dy: Math.round(radiusPx * Math.sin(angle))
+      });
+    });
+  });
+
   onlineLocs.forEach((loc, idx) => {
     boundsPoints.push([loc.lat, loc.lng]);
+    const offset = driverPixelOffsets.get(loc.id) || { dx: 0, dy: 0 };
+    const trailColor = trailColors[idx % trailColors.length];
 
-    if (loc.trailDate === todayStr && Array.isArray(loc.trail) && loc.trail.length >= 2) {
-      const latlngs = loc.trail
-        .filter((pt) => typeof pt.lat === "number" && typeof pt.lng === "number")
-        .map((pt) => [pt.lat, pt.lng]);
-      if (latlngs.length >= 2) {
-        window.L.polyline(latlngs, {
-          color: trailColors[idx % trailColors.length],
-          weight: 4,
-          opacity: 0.72
-        }).addTo(mapLayerGroup);
+    // Mostrar recorrido sutil solo del chofer seleccionado, cortando huecos > 450m para evitar diagonales
+    if (focusedTrailDriverId === loc.id && loc.trailDate === todayStr && Array.isArray(loc.trail) && loc.trail.length >= 2) {
+      const pts = loc.trail.filter((pt) => typeof pt.lat === "number" && typeof pt.lng === "number");
+      let currentSeg = [];
+      for (let i = 0; i < pts.length; i++) {
+        const pt = pts[i];
+        if (currentSeg.length > 0) {
+          const prev = currentSeg[currentSeg.length - 1];
+          const gapM = haversineMeters(prev[0], prev[1], pt.lat, pt.lng);
+          if (gapM !== null && gapM > 450) {
+            if (currentSeg.length >= 2) {
+              window.L.polyline(currentSeg, { color: trailColor, weight: 3, opacity: 0.55 }).addTo(mapLayerGroup);
+            }
+            currentSeg = [];
+          }
+        }
+        currentSeg.push([pt.lat, pt.lng]);
+      }
+      if (currentSeg.length >= 2) {
+        window.L.polyline(currentSeg, { color: trailColor, weight: 3, opacity: 0.55 }).addTo(mapLayerGroup);
       }
     }
 
@@ -1631,10 +1686,10 @@ function renderGpsMapAndChips() {
     const boxesBadge = typeof loc.boxesInCar === "number" ? ` • ${loc.boxesInCar} cajas` : "";
     const carIcon = window.L.divIcon({
       className: "salinas-div-icon",
-      html: `<div class="pin-car-badge" style="border-color:${trailColors[idx % trailColors.length]};" title="🚗 ${escapeHtml(fullDriverLabel)}${boxesBadge}">${escapeHtml(initials)}</div>`,
+      html: `<div class="pin-car-badge" style="border-color:${trailColor};" title="🚗 ${escapeHtml(fullDriverLabel)}${boxesBadge}">${escapeHtml(initials)}</div>`,
       iconSize: [28, 28],
-      iconAnchor: [14, 14],
-      popupAnchor: [0, -14]
+      iconAnchor: [14 - offset.dx, 14 - offset.dy],
+      popupAnchor: [offset.dx, -14 + offset.dy]
     });
 
     const speedTxt =
@@ -1661,6 +1716,14 @@ function renderGpsMapAndChips() {
     const m = window.L.marker([loc.lat, loc.lng], { icon: carIcon, zIndexOffset: 600 })
       .addTo(mapLayerGroup)
       .bindPopup(popupHtml);
+    m.on("click", () => {
+      if (focusedTrailDriverId !== loc.id) {
+        focusedTrailDriverId = loc.id;
+        renderGpsMapAndChips();
+        const freshMarker = mapFocusMarkers.get(`driver:${loc.id}`);
+        if (freshMarker) freshMarker.openPopup();
+      }
+    });
     mapFocusMarkers.set(`driver:${loc.id}`, m);
   });
 
@@ -1733,7 +1796,36 @@ function renderGpsMapAndChips() {
   }
 }
 
-function focusDriverOnMap(id) {
+async function sendDriverGpsPing(driverName, driverId = "", triggerBtn = null) {
+  if (!driverName && !driverId) return;
+  if (triggerBtn) triggerBtn.disabled = true;
+  try {
+    const resp = await fetch("https://us-central1-aguacates-salinas.cloudfunctions.net/pingDriverGps", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        driverId: driverId || undefined,
+        driverName,
+        adminKeyHash: currentKeyHash
+      })
+    });
+    const json = await resp.json().catch(() => ({}));
+    if (resp.ok && json.ok) {
+      showToast(`📍 Aviso enviado a ${driverName || driverId}. En cuanto lo toque enviará su GPS.`);
+    } else {
+      showToast(json.error || "No se pudo enviar el aviso GPS.");
+    }
+  } catch (err) {
+    console.error(err);
+    showToast("Error de red al pedir GPS.");
+  } finally {
+    if (triggerBtn) triggerBtn.disabled = false;
+  }
+}
+
+let focusedTrailDriverId = null;
+
+function focusDriverOnMap(id, triggerBtn = null) {
   const loc = driverLocations.find((d) => d.id === id);
   if (!loc) return;
   const isOnline =
@@ -1741,9 +1833,11 @@ function focusDriverOnMap(id) {
     loc.updatedAtIso &&
     Date.now() - new Date(loc.updatedAtIso).getTime() < 20 * 60 * 1000;
   if (!isOnline || typeof loc.lat !== "number") {
-    showToast(`${loc.driverName || id} tiene el GPS apagado en este momento.`);
+    sendDriverGpsPing(loc.driverName || id, id, triggerBtn);
     return;
   }
+  focusedTrailDriverId = focusedTrailDriverId === id ? null : id;
+  renderGpsMapAndChips();
   ensureLeafletMap();
   if (leafletMap) {
     leafletMap.flyTo([loc.lat, loc.lng], 15, { duration: 0.7 });
@@ -1754,12 +1848,12 @@ function focusDriverOnMap(id) {
 
 document.getElementById("gpsDriverChips")?.addEventListener("click", (e) => {
   const chip = e.target.closest("button[data-focus-driver]");
-  if (chip) focusDriverOnMap(chip.dataset.focusDriver);
+  if (chip) focusDriverOnMap(chip.dataset.focusDriver, chip);
 });
 
 document.getElementById("fsDriverChips")?.addEventListener("click", (e) => {
   const chip = e.target.closest("button[data-focus-driver]");
-  if (chip) focusDriverOnMap(chip.dataset.focusDriver);
+  if (chip) focusDriverOnMap(chip.dataset.focusDriver, chip);
 });
 
 document.getElementById("mapFilterBar")?.addEventListener("click", (e) => {
@@ -2824,11 +2918,16 @@ document.getElementById("catalogForm").addEventListener("submit", async (e) => {
       whatsappPrimary: cleanPhoneForWhatsApp(phone1Display),
       whatsappSecondary: cleanPhoneForWhatsApp(phone2Display),
       drivers: storeSettings.drivers || DEFAULT_STORE_SETTINGS.drivers,
+      warehouseStaff: Array.isArray(storeSettings.warehouseStaff) ? storeSettings.warehouseStaff : [],
       calibers: updatedCalibers
     };
 
     await executeAdminBatch(currentKeyHash, (batch, proofId) => {
-      batch.set(doc(db, "settings", "store"), { ...newSettings, proofId, updatedAt: serverTimestamp() });
+      batch.set(
+        doc(db, "settings", "store"),
+        { ...newSettings, proofId, updatedAt: serverTimestamp() },
+        { merge: true }
+      );
     });
 
     showToast("¡Precios de lista y mínimos de ruta actualizados!");
@@ -2842,25 +2941,76 @@ document.getElementById("catalogForm").addEventListener("submit", async (e) => {
 });
 
 // ================= TAB 4: EDITABLE DRIVERS, PIN & SECURITY =================
-function buildDriverInviteWhatsAppUrl(drv, typedPin = "") {
+const sessionDriverPins = new Map();
+
+function buildDriverInviteText(drv, typedPin = "") {
   const appUrl = `${window.location.origin}/chofer.html?chofer=${encodeURIComponent(drv.name)}`;
-  const cleanPhone = cleanPhoneForWhatsApp(drv.phone || "");
-  const pinLine = typedPin
-    ? `🔑 *Tu PIN de acceso:* ${typedPin}\n`
-    : `🔑 *Ingresa con tu PIN de 4 dígitos asignado en oficina.*\n`;
+  const effectivePin = typedPin || sessionDriverPins.get(drv.name) || "";
+  const pinLine = effectivePin
+    ? `*Tu PIN de acceso:* ${effectivePin}\n`
+    : `*Ingresa con tu PIN de 4 digitos asignado en oficina.*\n`;
 
-  const msg =
-    `Hola *${drv.name}*, aquí tienes el enlace de tu *App de Ruta — Comercializadora Salinas* 🥑🚗:\n\n` +
-    `👉 ${appUrl}\n\n` +
+  return (
+    `Hola *${drv.name}*, aqui tienes el enlace de tu *App de Ruta - Comercializadora Salinas*:\n\n` +
+    `${appUrl}\n\n` +
     pinLine +
-    `Ahí verás tus cajas cargadas, pedidos asignados, registro de ventas y tu corte automático.`;
+    `Ahi veras tus cajas cargadas, pedidos asignados, registro de ventas y tu corte automatico.`
+  );
+}
 
+function buildDriverInviteWhatsAppUrl(drv, typedPin = "") {
+  const cleanPhone = cleanPhoneForWhatsApp(drv.phone || "");
+  const msg = buildDriverInviteText(drv, typedPin);
   return cleanPhone
-    ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`
-    : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+    ? `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(msg)}`
+    : `https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`;
+}
+
+function getDriverCardPayload(idx) {
+  const stored = (storeSettings.drivers || [])[idx];
+  if (!stored) return null;
+  const nameInp = document.querySelector(`.drv-edit-name[data-idx='${idx}']`);
+  const phoneInp = document.querySelector(`.drv-edit-phone[data-idx='${idx}']`);
+  const pinInp = document.querySelector(`.drv-edit-pin[data-idx='${idx}']`);
+  return {
+    drv: {
+      ...stored,
+      name: (nameInp?.value || stored.name || "").trim(),
+      phone: (phoneInp?.value ?? stored.phone ?? "").trim()
+    },
+    typedPin: pinInp ? pinInp.value.trim() : ""
+  };
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand("copy");
+  document.body.removeChild(ta);
+}
+
+function syncGpsPingConfigForm() {
+  const en = document.getElementById("gpsPingEnabled");
+  const iv = document.getElementById("gpsPingIntervalMin");
+  const sh = document.getElementById("gpsPingStartHour");
+  const eh = document.getElementById("gpsPingEndHour");
+  if (!en || !iv || !sh || !eh) return;
+  en.checked = Boolean(storeSettings.gpsPingEnabled);
+  iv.value = String(storeSettings.gpsPingIntervalMin || 15);
+  sh.value = String(storeSettings.gpsPingStartHour ?? 8);
+  eh.value = String(storeSettings.gpsPingEndHour ?? 19);
 }
 
 function renderDriversEditor() {
+  syncGpsPingConfigForm();
   const listEl = document.getElementById("driversListEditor");
   const drivers = storeSettings.drivers || [];
 
@@ -2889,6 +3039,8 @@ function renderDriversEditor() {
         </div>
         <div class="driver-card-actions">
           <button type="button" class="btn btn-whatsapp btn-sm" data-invite-driver="${idx}">📲 Mandar App</button>
+          <button type="button" class="btn btn-outline btn-sm" data-copy-driver="${idx}">📋 Copiar</button>
+          <button type="button" class="btn btn-outline btn-sm" data-ping-driver="${idx}" title="Enviar notificación Push para que reporte su GPS">📍 Pedir GPS</button>
           <button type="button" class="btn btn-primary btn-sm" data-save-driver="${idx}">Guardar</button>
           <button type="button" class="btn btn-outline btn-sm" data-remove-driver="${idx}" style="color:var(--red-600);border-color:#eccaca;">Quitar</button>
         </div>
@@ -2901,12 +3053,31 @@ function renderDriversEditor() {
 document.getElementById("driversListEditor").addEventListener("click", async (e) => {
   const inviteBtn = e.target.closest("button[data-invite-driver]");
   if (inviteBtn) {
-    const idx = Number(inviteBtn.dataset.inviteDriver);
-    const drv = (storeSettings.drivers || [])[idx];
-    if (!drv) return;
-    const pinInp = document.querySelector(`.drv-edit-pin[data-idx='${idx}']`);
-    const typedPin = pinInp ? pinInp.value.trim() : "";
-    window.open(buildDriverInviteWhatsAppUrl(drv, typedPin), "_blank", "noopener");
+    const payload = getDriverCardPayload(Number(inviteBtn.dataset.inviteDriver));
+    if (!payload) return;
+    window.open(buildDriverInviteWhatsAppUrl(payload.drv, payload.typedPin), "_blank", "noopener");
+    return;
+  }
+
+  const copyBtn = e.target.closest("button[data-copy-driver]");
+  if (copyBtn) {
+    const payload = getDriverCardPayload(Number(copyBtn.dataset.copyDriver));
+    if (!payload) return;
+    try {
+      await copyTextToClipboard(buildDriverInviteText(payload.drv, payload.typedPin));
+      showToast(`📋 Mensaje de ${payload.drv.name} copiado. Pégalo en WhatsApp.`);
+    } catch (err) {
+      console.error(err);
+      showToast("No se pudo copiar el mensaje.");
+    }
+    return;
+  }
+
+  const pingBtn = e.target.closest("button[data-ping-driver]");
+  if (pingBtn) {
+    const payload = getDriverCardPayload(Number(pingBtn.dataset.pingDriver));
+    if (!payload || !payload.drv.name) return;
+    await sendDriverGpsPing(payload.drv.name, "", pingBtn);
     return;
   }
 
@@ -2947,12 +3118,15 @@ document.getElementById("driversListEditor").addEventListener("click", async (e)
 
     try {
       await executeAdminBatch(currentKeyHash, (batch, proofId) => {
-        batch.set(doc(db, "settings", "store"), {
-          ...storeSettings,
-          drivers: updatedDrivers,
-          proofId,
-          updatedAt: serverTimestamp()
-        });
+        batch.set(
+          doc(db, "settings", "store"),
+          {
+            drivers: updatedDrivers,
+            proofId,
+            updatedAt: serverTimestamp()
+          },
+          { merge: true }
+        );
         if (pinHashToSave) {
           batch.set(doc(db, "driver_keys", pinHashToSave), {
             driverName: newName,
@@ -2962,6 +3136,7 @@ document.getElementById("driversListEditor").addEventListener("click", async (e)
           });
         }
       });
+      if (newPin) sessionDriverPins.set(newName, newPin);
       if (pinInput) pinInput.value = "";
       showToast(pinHashToSave ? `Datos y PIN de ${newName} activados.` : `Datos de ${newName} guardados.`);
     } catch (err) {
@@ -2975,25 +3150,74 @@ document.getElementById("driversListEditor").addEventListener("click", async (e)
   if (removeBtn) {
     const idx = Number(removeBtn.dataset.removeDriver);
     const drv = (storeSettings.drivers || [])[idx];
-    if (!confirm(`¿Quitar a ${drv?.name || "este chofer"} de la lista?`)) return;
+    const driverName = drv?.name || "este chofer";
+    const confirmed = await showConfirmDialog({
+      title: `¿Quitar a ${driverName}?`,
+      message: "Dejará de aparecer en la lista activa de choferes. Su historial de viajes y ventas anteriores se conserva.",
+      confirmText: "Sí, quitar chofer"
+    });
+    if (!confirmed) return;
     const updatedDrivers = (storeSettings.drivers || []).filter((_, i) => i !== idx);
 
     try {
       await executeAdminBatch(currentKeyHash, (batch, proofId) => {
-        batch.set(doc(db, "settings", "store"), {
-          ...storeSettings,
-          drivers: updatedDrivers,
-          proofId,
-          updatedAt: serverTimestamp()
-        });
+        batch.set(
+          doc(db, "settings", "store"),
+          {
+            drivers: updatedDrivers,
+            proofId,
+            updatedAt: serverTimestamp()
+          },
+          { merge: true }
+        );
       });
-      showToast("Chofer eliminado de la lista.");
+      showToast(`Chofer ${driverName} eliminado de la lista.`);
     } catch (err) {
       console.error(err);
       showToast("Error al eliminar chofer.");
     }
   }
 });
+
+function showConfirmDialog({ title, message, confirmText = "Confirmar" }) {
+  const modal = document.getElementById("confirmActionModal");
+  const titleEl = document.getElementById("confirmModalTitle");
+  const msgEl = document.getElementById("confirmModalMessage");
+  const okBtn = document.getElementById("btnConfirmOk");
+  const cancelBtn = document.getElementById("btnConfirmCancel");
+  const closeBtn = document.getElementById("btnCloseConfirmModal");
+  if (!modal || !okBtn) return Promise.resolve(window.confirm(title || message));
+
+  titleEl.textContent = title || "¿Confirmar acción?";
+  msgEl.textContent = message || "";
+  okBtn.textContent = confirmText;
+  modal.classList.add("open");
+
+  return new Promise((resolve) => {
+    const cleanup = (result) => {
+      modal.classList.remove("open");
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn?.removeEventListener("click", onCancel);
+      closeBtn?.removeEventListener("click", onCancel);
+      modal.removeEventListener("click", onBackdrop);
+      document.removeEventListener("keydown", onKey);
+      resolve(result);
+    };
+    const onOk = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    const onBackdrop = (ev) => {
+      if (ev.target === modal) cleanup(false);
+    };
+    const onKey = (ev) => {
+      if (ev.key === "Escape") cleanup(false);
+    };
+    okBtn.addEventListener("click", onOk);
+    cancelBtn?.addEventListener("click", onCancel);
+    closeBtn?.addEventListener("click", onCancel);
+    modal.addEventListener("click", onBackdrop);
+    document.addEventListener("keydown", onKey);
+  });
+}
 
 document.getElementById("btnAddDriver").addEventListener("click", async () => {
   const nameInp = document.getElementById("newDriverName");
@@ -3024,12 +3248,15 @@ document.getElementById("btnAddDriver").addEventListener("click", async () => {
 
   try {
     await executeAdminBatch(currentKeyHash, (batch, proofId) => {
-      batch.set(doc(db, "settings", "store"), {
-        ...storeSettings,
-        drivers: updatedDrivers,
-        proofId,
-        updatedAt: serverTimestamp()
-      });
+      batch.set(
+        doc(db, "settings", "store"),
+        {
+          drivers: updatedDrivers,
+          proofId,
+          updatedAt: serverTimestamp()
+        },
+        { merge: true }
+      );
       batch.set(doc(db, "driver_keys", pinHash), {
         driverName: name,
         active: true,
@@ -3037,6 +3264,7 @@ document.getElementById("btnAddDriver").addEventListener("click", async () => {
         createdAt: serverTimestamp()
       });
     });
+    sessionDriverPins.set(name, pin);
     nameInp.value = "";
     phoneInp.value = "";
     if (pinInp) pinInp.value = "";
@@ -3044,6 +3272,38 @@ document.getElementById("btnAddDriver").addEventListener("click", async () => {
   } catch (err) {
     console.error(err);
     showToast("No se pudo agregar el chofer.");
+  }
+});
+
+document.getElementById("gpsPingConfigForm")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const gpsPingEnabled = Boolean(document.getElementById("gpsPingEnabled")?.checked);
+  const gpsPingIntervalMin = Number(document.getElementById("gpsPingIntervalMin")?.value || 15);
+  const gpsPingStartHour = Number(document.getElementById("gpsPingStartHour")?.value || 8);
+  const gpsPingEndHour = Number(document.getElementById("gpsPingEndHour")?.value || 19);
+  try {
+    await executeAdminBatch(currentKeyHash, (batch, proofId) => {
+      batch.set(
+        doc(db, "settings", "store"),
+        {
+          gpsPingEnabled,
+          gpsPingIntervalMin,
+          gpsPingStartHour,
+          gpsPingEndHour,
+          proofId,
+          updatedAt: serverTimestamp()
+        },
+        { merge: true }
+      );
+    });
+    showToast(
+      gpsPingEnabled
+        ? `🔔 Recordatorio automático activado (cada ${gpsPingIntervalMin} min, ${gpsPingStartHour}:00–${gpsPingEndHour}:00).`
+        : "Recordatorio automático de GPS desactivado."
+    );
+  } catch (err) {
+    console.error(err);
+    showToast("No se pudo guardar la configuración Push.");
   }
 });
 
@@ -3230,4 +3490,546 @@ function printStaffManual(m) {
   setTimeout(() => document.body.classList.remove("printing-receipt"), 500);
 }
 
+// ================= ALMACENISTAS Y PIN =================
+function renderWhStaffEditor() {
+  const container = document.getElementById("whStaffListEditor");
+  if (!container) return;
+  const list = Array.isArray(storeSettings.warehouseStaff) ? storeSettings.warehouseStaff : [];
+  if (list.length === 0) {
+    container.innerHTML = `<p style="font-size:0.82rem;color:var(--slate-500);">No hay almacenistas dados de alta. Agrega uno abajo para que entre a <code>/almacen.html</code>.</p>`;
+    return;
+  }
+  container.innerHTML = list
+    .map(
+      (s, i) => `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;">
+        <div>
+          <strong>❄️ ${escapeHtml(s.name)}</strong>
+          <span style="font-size:0.75rem;color:#64748b;margin-left:6px;">${s.hasPin ? "PIN activo" : "Sin PIN"}</span>
+        </div>
+        <button type="button" class="btn btn-outline btn-sm" data-reset-wh-pin="${i}">🔑 Cambiar PIN</button>
+      </div>
+    `
+    )
+    .join("");
+
+  container.querySelectorAll("button[data-reset-wh-pin]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const idx = Number(btn.dataset.resetWhPin);
+      const staff = list[idx];
+      if (!staff) return;
+      const newPin = prompt(`Nuevo PIN (4+ dígitos) para ${staff.name}:`);
+      if (!newPin || newPin.trim().length < 4) return showToast("El PIN debe tener al menos 4 dígitos.");
+      try {
+        const hash = await computeWarehousePinHash(staff.name, newPin.trim());
+        await executeAdminBatch(currentKeyHash, (batch, proofId) => {
+          batch.set(doc(db, "warehouse_keys", hash), {
+            staffName: staff.name,
+            active: true,
+            createdAtIso: new Date().toISOString(),
+            proofId
+          });
+        });
+        showToast(`✅ PIN actualizado para ${staff.name}`);
+      } catch (err) {
+        console.error(err);
+        showToast("Error guardando PIN de almacén.");
+      }
+    });
+  });
+}
+
+document.getElementById("btnAddWhStaff")?.addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  const name = document.getElementById("newWhStaffName")?.value.trim();
+  const pin = document.getElementById("newWhStaffPin")?.value.trim();
+  if (!name) return showToast("Escribe el nombre del almacenista.");
+  if (!pin || pin.length < 4) return showToast("El PIN debe tener al menos 4 dígitos.");
+
+  const list = Array.isArray(storeSettings.warehouseStaff) ? [...storeSettings.warehouseStaff] : [];
+  if (list.some((s) => s.name.toLowerCase() === name.toLowerCase())) {
+    return showToast("Ya existe un almacenista con ese nombre.");
+  }
+  const newItem = { id: "alm_" + Date.now().toString(36), name, hasPin: true };
+  list.push(newItem);
+
+  btn.disabled = true;
+  try {
+    const hash = await computeWarehousePinHash(name, pin);
+    await executeAdminBatch(currentKeyHash, (batch, proofId) => {
+      batch.set(
+        doc(db, "settings", "store"),
+        { warehouseStaff: list, proofId, updatedAt: serverTimestamp() },
+        { merge: true }
+      );
+      batch.set(doc(db, "warehouse_keys", hash), {
+        staffName: name,
+        active: true,
+        createdAtIso: new Date().toISOString(),
+        proofId
+      });
+    });
+    storeSettings.warehouseStaff = list;
+    renderWhStaffEditor();
+    document.getElementById("newWhStaffName").value = "";
+    document.getElementById("newWhStaffPin").value = "";
+    showToast(`✅ ${name} dado de alta para /almacen.html`);
+  } catch (err) {
+    console.error(err);
+    showToast("Error agregando almacenista.");
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ================= TERMOS, CUARTOS FRÍOS Y LOTES QR =================
+let allThermos = [];
+let allPalletLots = [];
+let thermosUnsub = null;
+let lotsUnsub = null;
+
+function startThermosAndLotsListeners() {
+  if (thermosUnsub) thermosUnsub();
+  if (lotsUnsub) lotsUnsub();
+
+  const thermoDateInput = document.getElementById("thermoDateInput");
+  if (thermoDateInput && !thermoDateInput.value) thermoDateInput.value = getLocalDateStr();
+
+  thermosUnsub = onSnapshot(collection(db, "thermos"), (snap) => {
+    allThermos = snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => String(b.arrivalDate || "").localeCompare(String(a.arrivalDate || "")));
+    populateLotsThermoSelects();
+    renderLotsDashboard();
+    if (superadminKeyHash) renderSuperadminDashboard();
+  });
+
+  lotsUnsub = onSnapshot(collection(db, "pallet_lots"), (snap) => {
+    allPalletLots = snap.docs
+      .map((d) => {
+        const data = d.data();
+        return { id: d.id, ...data, coldRoom: normalizeColdRoom(data.coldRoom) };
+      })
+      .sort((a, b) => String(a.lotCode || a.id).localeCompare(String(b.lotCode || b.id)));
+    renderLotsDashboard();
+  });
+}
+
+function populateLotsThermoSelects() {
+  const fSel = document.getElementById("filterLotsThermo");
+  const saSel = document.getElementById("saCostThermoSelect");
+  const opts = allThermos.map(
+    (t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.code)} (${escapeHtml(t.arrivalDate || "")})</option>`
+  );
+  if (fSel) {
+    const prev = fSel.value;
+    fSel.innerHTML = [`<option value="all">Todos los Termos</option>`, ...opts].join("");
+    if (prev) fSel.value = prev;
+  }
+  if (saSel) {
+    const prevSa = saSel.value;
+    saSel.innerHTML = opts.length ? opts.join("") : `<option value="">Sin termos registrados</option>`;
+    if (prevSa) saSel.value = prevSa;
+  }
+}
+
+document.getElementById("createThermoForm")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const code = (document.getElementById("thermoCodeInput")?.value || "T01").trim().toUpperCase();
+  const arrivalDate = document.getElementById("thermoDateInput")?.value || getLocalDateStr();
+  const priCount = Math.max(0, Number(document.getElementById("thermoPriCount")?.value) || 0);
+  const extCount = Math.max(0, Number(document.getElementById("thermoExtCount")?.value) || 0);
+  const proCount = Math.max(0, Number(document.getElementById("thermoProCount")?.value) || 0);
+  const boxesPerPallet = Math.max(1, Number(document.getElementById("thermoBoxesPerPallet")?.value) || 100);
+  const totalPallets = priCount + extCount + proCount;
+  if (totalPallets === 0) return showToast("Agrega al menos 1 tarima.");
+
+  const thermoId = `${code}_${arrivalDate}`;
+  const palletsToCreate = [];
+  const pushPallets = (grade, count, quality, kind) => {
+    for (let i = 1; i <= count; i++) {
+      const num = String(i).padStart(2, "0");
+      const lotCode = `${code}-${grade}-${num}`;
+      palletsToCreate.push({
+        id: `${thermoId}_${grade}_${num}`,
+        lotCode,
+        grade,
+        quality,
+        kind
+      });
+    }
+  };
+  pushPallets("PRI", priCount, "Limpio", "clasificado");
+  pushPallets("EXT", extCount, "Limpio", "clasificado");
+  pushPallets("PRO", proCount, "Proceso", "proceso");
+
+  try {
+    await executeAdminBatch(currentKeyHash, (batch, proofId) => {
+      batch.set(doc(db, "thermos", thermoId), {
+        code,
+        arrivalDate,
+        palletsCount: totalPallets,
+        totalKgExpected: totalPallets * boxesPerPallet * 10,
+        status: "activo",
+        createdAtIso: new Date().toISOString(),
+        proofId
+      });
+      for (const p of palletsToCreate) {
+        const gCode = p.grade === "PRI" ? "P" : p.grade === "EXT" ? "E" : "PRO";
+        batch.set(doc(db, "pallet_lots", p.id), {
+          lotCode: p.lotCode,
+          thermoId,
+          thermoCode: code,
+          parentLotId: null,
+          arrivalDate,
+          coldRoom: "Cuarto 1",
+          grade: gCode,
+          kind: p.kind,
+          quality: p.quality,
+          ripeness: "Verde",
+          initialBoxes: boxesPerPallet,
+          remainingBoxes: boxesPerPallet,
+          mermaBoxes: 0,
+          state: "disponible",
+          events: [{ type: "creacion", by: "Administración", atIso: new Date().toISOString(), note: `Termo ${code} creado` }],
+          createdAtIso: new Date().toISOString(),
+          updatedAtIso: new Date().toISOString(),
+          proofId
+        });
+      }
+    });
+    showToast(`✅ Termo ${code} creado con ${totalPallets} tarimas QR listas para imprimir.`);
+  } catch (err) {
+    console.error(err);
+    showToast("Error creando termo.");
+  }
+});
+
+["filterLotsThermo", "filterLotsRoom", "filterLotsKind"].forEach((id) => {
+  document.getElementById(id)?.addEventListener("change", renderLotsDashboard);
+});
+
+function renderLotsDashboard() {
+  const sumEl = document.getElementById("lotsSummaryCards");
+  const tblEl = document.getElementById("lotsTableContainer");
+  if (!sumEl || !tblEl) return;
+
+  const tFilter = document.getElementById("filterLotsThermo")?.value || "all";
+  const rFilter = document.getElementById("filterLotsRoom")?.value || "all";
+  const kFilter = document.getElementById("filterLotsKind")?.value || "active";
+
+  const thermoScope = allPalletLots.filter((l) => tFilter === "all" || l.thermoId === tFilter);
+  let proBoxes = 0;
+  let readyBoxes = 0;
+  let mermaBoxes = 0;
+  const byGrade = { S: 0, E: 0, P: 0, M: 0, C: 0 };
+
+  thermoScope.forEach((l) => {
+    const rem = Number(l.remainingBoxes) || 0;
+    mermaBoxes += Number(l.mermaBoxes) || 0;
+    if (l.grade === "PRO" || l.kind === "proceso") proBoxes += rem;
+    else {
+      readyBoxes += rem;
+      if (byGrade[l.grade] !== undefined) byGrade[l.grade] += rem;
+    }
+  });
+
+  sumEl.innerHTML = `
+    <div class="kpi-card"><div class="kpi-label">Proceso (Por seleccionar)</div><div class="kpi-value" style="color:#b45309;">${proBoxes}</div><div class="kpi-sub">${(proBoxes * 10).toLocaleString("es-MX")} kg en transición</div></div>
+    <div class="kpi-card"><div class="kpi-label">Clasificado Listo Venta</div><div class="kpi-value" style="color:#15803d;">${readyBoxes}</div><div class="kpi-sub">S:${byGrade.S} E:${byGrade.E} P:${byGrade.P} M:${byGrade.M} C:${byGrade.C}</div></div>
+    <div class="kpi-card"><div class="kpi-label">Merma Acumulada</div><div class="kpi-value" style="color:#dc2626;">${mermaBoxes}</div><div class="kpi-sub">${(mermaBoxes * 10).toLocaleString("es-MX")} kg descartados</div></div>
+    <div class="kpi-card"><div class="kpi-label">Total Tarimas / Lotes</div><div class="kpi-value">${thermoScope.filter((l) => (l.remainingBoxes || 0) > 0).length}</div><div class="kpi-sub">Con existencia &gt; 0</div></div>
+  `;
+
+  const rows = thermoScope.filter((l) => {
+    if (rFilter !== "all" && l.coldRoom !== rFilter) return false;
+    const rem = Number(l.remainingBoxes) || 0;
+    if (kFilter === "active") return rem > 0;
+    if (kFilter === "PRO") return rem > 0 && (l.grade === "PRO" || l.kind === "proceso");
+    if (kFilter === "clasificado") return rem > 0 && l.grade !== "PRO" && l.kind !== "proceso";
+    return true;
+  });
+
+  if (rows.length === 0) {
+    tblEl.innerHTML = `<p style="color:#64748b;font-size:0.86rem;">No hay lotes para mostrar con este filtro.</p>`;
+    return;
+  }
+
+  tblEl.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:0.84rem;">
+      <thead>
+        <tr style="background:#f1f5f9;text-align:left;color:#334155;">
+          <th style="padding:8px;">Código QR</th>
+          <th style="padding:8px;">Cuarto Frío</th>
+          <th style="padding:8px;">Calibre / Calidad</th>
+          <th style="padding:8px;">Madurez</th>
+          <th style="padding:8px;">Antigüedad</th>
+          <th style="padding:8px;text-align:right;">Cajas (10kg)</th>
+          <th style="padding:8px;text-align:right;">Merma</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows
+          .map((l) => {
+            const days = l.arrivalDate ? Math.max(0, Math.floor((Date.now() - new Date(`${l.arrivalDate}T00:00:00`)) / 86400000)) : 0;
+            const sem = days >= 7 ? "🔴" : days >= 4 ? "🟡" : "🟢";
+            const gLabel = LOT_GRADES[l.grade]?.short || l.grade;
+            return `
+              <tr style="border-bottom:1px solid #e2e8f0;">
+                <td style="padding:8px;font-weight:800;color:#14532d;">${escapeHtml(l.lotCode)}</td>
+                <td style="padding:8px;">❄️ ${escapeHtml(l.coldRoom || "-")}</td>
+                <td style="padding:8px;"><strong>${escapeHtml(gLabel)}</strong> · ${escapeHtml(l.quality || "-")}</td>
+                <td style="padding:8px;">${escapeHtml(l.ripeness || "-")}</td>
+                <td style="padding:8px;">${sem} ${days} d</td>
+                <td style="padding:8px;text-align:right;font-weight:800;">${l.remainingBoxes ?? 0}</td>
+                <td style="padding:8px;text-align:right;color:#dc2626;">${l.mermaBoxes ?? 0}</td>
+              </tr>
+            `;
+          })
+          .join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+document.getElementById("btnPrintThermoQrs")?.addEventListener("click", () => {
+  const tFilter = document.getElementById("filterLotsThermo")?.value || "all";
+  const targetLots = allPalletLots.filter((l) => !l.parentLotId && (tFilter === "all" || l.thermoId === tFilter));
+  if (targetLots.length === 0) return showToast("Crea primero un Termo para imprimir sus QRs.");
+  if (typeof window.QRCode === "undefined") return showToast("Librería QR aún cargando.");
+
+  const area = document.getElementById("printReceiptArea");
+  area.innerHTML = `
+    <div style="font-family:Arial,sans-serif;display:grid;grid-template-columns:repeat(2,1fr);gap:8mm;">
+      ${targetLots
+        .map(
+          (l) => `
+          <div style="border:2px solid #14532d;border-radius:8px;padding:6mm;display:flex;align-items:center;gap:5mm;page-break-inside:avoid;">
+            <div id="qr_print_${escapeHtml(l.id)}" style="width:30mm;height:30mm;flex-shrink:0;"></div>
+            <div style="flex:1;">
+              <div style="font-size:8pt;color:#475569;font-weight:700;">COMERCIALIZADORA SALINAS • 10 KG</div>
+              <div style="font-size:16pt;font-weight:900;color:#14532d;margin:2px 0;">${escapeHtml(l.lotCode)}</div>
+              <div style="font-size:9.5pt;font-weight:800;">Tipo: ${escapeHtml(LOT_GRADES[l.grade]?.short || l.grade)} (${escapeHtml(l.quality || "-")})</div>
+              <div style="font-size:8.5pt;color:#334155;">Llegada: ${escapeHtml(l.arrivalDate || "-")} • Cajas: ${l.initialBoxes || 100}</div>
+              <div style="margin-top:4px;border-top:1px dashed #94a3b8;padding-top:3px;font-size:8pt;color:#64748b;">Cuarto: __________ • Madurez: __________</div>
+            </div>
+          </div>
+        `
+        )
+        .join("")}
+    </div>
+  `;
+
+  targetLots.forEach((l) => {
+    const el = document.getElementById(`qr_print_${l.id}`);
+    if (el) {
+      new window.QRCode(el, { text: `SALINAS_LOT:${l.id}`, width: 112, height: 112, correctLevel: window.QRCode.CorrectLevel.M });
+    }
+  });
+
+  setTimeout(() => {
+    document.body.classList.add("printing-receipt");
+    window.print();
+    setTimeout(() => document.body.classList.remove("printing-receipt"), 500);
+  }, 250);
+});
+
+// ================= SUPERADMIN (PRECIOS COMPRA, GASTOS Y UTILIDAD) =================
+let superadminKeyHash = null;
+let isSuperadminInitialized = true;
+let allThermoCosts = [];
+let allExpenses = [];
+let costsUnsub = null;
+let expensesUnsub = null;
+
+async function checkSuperadminInit() {
+  try {
+    const snap = await getDoc(doc(db, "settings", "superadmin_init"));
+    isSuperadminInitialized = snap.exists();
+    const titleEl = document.getElementById("saLockTitle");
+    const descEl = document.getElementById("saLockDesc");
+    const btnEl = document.getElementById("btnSuperadminUnlock");
+    if (!isSuperadminInitialized && titleEl && descEl && btnEl) {
+      titleEl.textContent = "Configurar Clave Maestra Superadmin";
+      descEl.textContent = "Primera vez: crea tu clave/PIN exclusivo de Superadmin para proteger precios de compra y utilidades.";
+      btnEl.textContent = "Crear Clave Superadmin y Entrar";
+    }
+  } catch (_) {}
+}
+
+document.getElementById("superadminAuthForm")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const pin = document.getElementById("superadminPinInput")?.value.trim();
+  if (!pin || pin.length < 4) return showToast("Mínimo 4 caracteres.");
+  const hash = await sha256Hex("SUPERADMIN::" + pin);
+
+  try {
+    if (!isSuperadminInitialized) {
+      const batch = writeBatch(db);
+      batch.set(doc(db, "settings", "superadmin_init"), { initialized: true, createdAtIso: new Date().toISOString() });
+      batch.set(doc(db, "superadmin_keys", hash), { active: true, label: "Superadmin Principal", createdAtIso: new Date().toISOString() });
+      await batch.commit();
+      isSuperadminInitialized = true;
+      showToast("✅ Clave Superadmin configurada.");
+    } else {
+      const snap = await getDoc(doc(db, "superadmin_keys", hash));
+      if (!snap.exists() || snap.data().active !== true) {
+        return showToast("Clave Superadmin incorrecta.");
+      }
+    }
+    superadminKeyHash = hash;
+    document.getElementById("superadminPinInput").value = "";
+    document.getElementById("superadminLockCard").style.display = "none";
+    document.getElementById("superadminContent").style.display = "block";
+    const expDate = document.getElementById("saExpDate");
+    if (expDate && !expDate.value) expDate.value = getLocalDateStr();
+    startSuperadminListeners();
+  } catch (err) {
+    console.error(err);
+    showToast("Error autenticando Superadmin.");
+  }
+});
+
+document.getElementById("btnLockSuperadmin")?.addEventListener("click", () => {
+  superadminKeyHash = null;
+  if (costsUnsub) costsUnsub();
+  if (expensesUnsub) expensesUnsub();
+  document.getElementById("superadminContent").style.display = "none";
+  document.getElementById("superadminLockCard").style.display = "block";
+});
+
+function startSuperadminListeners() {
+  if (costsUnsub) costsUnsub();
+  if (expensesUnsub) expensesUnsub();
+  costsUnsub = onSnapshot(collection(db, "thermo_costs"), (snap) => {
+    allThermoCosts = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    renderSuperadminDashboard();
+  });
+  expensesUnsub = onSnapshot(collection(db, "expenses"), (snap) => {
+    allExpenses = snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+    renderSuperadminDashboard();
+  });
+}
+
+document.getElementById("saThermoCostForm")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!superadminKeyHash) return;
+  const thermoId = document.getElementById("saCostThermoSelect")?.value;
+  if (!thermoId) return showToast("Crea primero un Termo en la pestaña Termos y Lotes QR.");
+  const costPriKg = Number(document.getElementById("saCostPriKg")?.value) || 0;
+  const kgPri = Number(document.getElementById("saKgPri")?.value) || 0;
+  const costProKg = Number(document.getElementById("saCostProKg")?.value) || 0;
+  const kgPro = Number(document.getElementById("saKgPro")?.value) || 0;
+  const freightCost = Number(document.getElementById("saCostFreight")?.value) || 0;
+  const totalFruitCost = costPriKg * kgPri + costProKg * kgPro;
+  const totalCost = totalFruitCost + freightCost;
+
+  try {
+    await executeSuperadminBatch(superadminKeyHash, (batch, proofId) => {
+      batch.set(doc(db, "thermo_costs", thermoId), {
+        thermoId,
+        costPriKg,
+        kgPri,
+        costProKg,
+        kgPro,
+        freightCost,
+        totalFruitCost,
+        totalCost,
+        updatedAtIso: new Date().toISOString(),
+        proofId
+      });
+    });
+    showToast(`💾 Costo guardado para ${thermoId}`);
+  } catch (err) {
+    console.error(err);
+    showToast("Error guardando costo.");
+  }
+});
+
+document.getElementById("saExpenseForm")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!superadminKeyHash) return;
+  const date = document.getElementById("saExpDate").value || getLocalDateStr();
+  const category = document.getElementById("saExpCategory").value;
+  const amount = Math.max(1, Number(document.getElementById("saExpAmount").value) || 0);
+  const note = document.getElementById("saExpNote").value.trim();
+  const expId = `exp_${date}_${Date.now().toString(36)}`;
+
+  try {
+    await executeSuperadminBatch(superadminKeyHash, (batch, proofId) => {
+      batch.set(doc(db, "expenses", expId), {
+        date,
+        category,
+        amount,
+        note,
+        createdAtIso: new Date().toISOString(),
+        proofId
+      });
+    });
+    document.getElementById("saExpAmount").value = "";
+    document.getElementById("saExpNote").value = "";
+    showToast("💸 Gasto registrado.");
+  } catch (err) {
+    console.error(err);
+    showToast("Error registrando gasto.");
+  }
+});
+
+function renderSuperadminDashboard() {
+  const kpiEl = document.getElementById("saFinancialKpis");
+  const costsEl = document.getElementById("saThermoCostsList");
+  const expEl = document.getElementById("saExpensesList");
+  if (!kpiEl) return;
+
+  const ordersRev = allOrders
+    .filter((o) => o.status !== "cancelado")
+    .reduce((acc, o) => acc + (Number(o.totalAmount) || 0), 0);
+  const routeRev = (typeof allRouteSales !== "undefined" ? allRouteSales : []).reduce(
+    (acc, s) => acc + (Number(s.totalAmount) || 0),
+    0
+  );
+  const totalRevenue = ordersRev + routeRev;
+  const totalThermoPurchases = allThermoCosts.reduce((acc, c) => acc + (Number(c.totalCost) || 0), 0);
+  const totalOpExpenses = allExpenses.reduce((acc, x) => acc + (Number(x.amount) || 0), 0);
+  const totalOutflow = totalThermoPurchases + totalOpExpenses;
+  const netProfit = totalRevenue - totalOutflow;
+  const marginPct = totalRevenue > 0 ? ((netProfit / totalRevenue) * 100).toFixed(1) : "0.0";
+
+  kpiEl.innerHTML = `
+    <div class="kpi-card"><div class="kpi-label">Ingresos Totales</div><div class="kpi-value" style="color:#15803d;">${formatCurrency(totalRevenue)}</div><div class="kpi-sub">Web: ${formatCurrency(ordersRev)} • Ruta: ${formatCurrency(routeRev)}</div></div>
+    <div class="kpi-card"><div class="kpi-label">Compras de Termos</div><div class="kpi-value" style="color:#b45309;">${formatCurrency(totalThermoPurchases)}</div><div class="kpi-sub">${allThermoCosts.length} termo(s) costeado(s)</div></div>
+    <div class="kpi-card"><div class="kpi-label">Gastos Operativos</div><div class="kpi-value" style="color:#dc2626;">${formatCurrency(totalOpExpenses)}</div><div class="kpi-sub">${allExpenses.length} movimiento(s)</div></div>
+    <div class="kpi-card"><div class="kpi-label">Balance Neto</div><div class="kpi-value" style="color:${netProfit >= 0 ? "#15803d" : "#dc2626"};">${formatCurrency(netProfit)}</div><div class="kpi-sub">Margen s/ ingresos: ${marginPct}%</div></div>
+  `;
+
+  if (costsEl) {
+    costsEl.innerHTML = allThermoCosts.length
+      ? allThermoCosts
+          .map(
+            (c) => `<div style="padding:7px 0;border-bottom:1px solid #e2e8f0;font-size:0.82rem;display:flex;justify-content:space-between;">
+              <span><strong>${escapeHtml(c.thermoId)}</strong> (Pri/Ext \$${c.costPriKg}/kg • Pro \$${c.costProKg}/kg + Flete ${formatCurrency(c.freightCost)})</span>
+              <strong>${formatCurrency(c.totalCost)}</strong>
+            </div>`
+          )
+          .join("")
+      : `<p style="font-size:0.8rem;color:#64748b;">Aún no has capturado precios de compra de termos.</p>`;
+  }
+
+  if (expEl) {
+    expEl.innerHTML = allExpenses.length
+      ? allExpenses
+          .map(
+            (x) => `<div style="padding:7px 0;border-bottom:1px solid #e2e8f0;font-size:0.82rem;display:flex;justify-content:space-between;">
+              <span><strong>${escapeHtml(x.category)}</strong> • ${escapeHtml(x.note)} <small style="color:#64748b;">(${escapeHtml(x.date)})</small></span>
+              <strong style="color:#dc2626;">-${formatCurrency(x.amount)}</strong>
+            </div>`
+          )
+          .join("")
+      : `<p style="font-size:0.8rem;color:#64748b;">Sin gastos operativos registrados.</p>`;
+  }
+}
+
+checkSuperadminInit();
 checkInitialAuth();
