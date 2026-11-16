@@ -1,0 +1,51 @@
+workflows:
+  salinas-ios-testflight:
+    name: Salinas Reparto iOS (TestFlight)
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: Codemagic CI
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.salinas.reparto
+      vars:
+        XCODE_PROJECT: "ios/App/App.xcodeproj"
+        XCODE_SCHEME: "App"
+        BUNDLE_ID: "com.salinas.reparto"
+        APPLE_TEAM_ID: "9AYUAQ4FNN"
+      node: 22
+      xcode: latest
+    scripts:
+      - name: Instalar dependencias y sincronizar Capacitor iOS
+        script: |
+          npm install
+          npm run sync:ios
+      - name: Actualizar número de compilación (CFBundleVersion)
+        script: |
+          BUILD_NUM=${PROJECT_BUILD_NUMBER:-1}
+          echo "Asignando CURRENT_PROJECT_VERSION = ${BUILD_NUM}"
+          sed -i '' "s/CURRENT_PROJECT_VERSION = [0-9]*;/CURRENT_PROJECT_VERSION = ${BUILD_NUM};/g" ios/App/App.xcodeproj/project.pbxproj
+      - name: Configurar firma digital de Apple (Code Signing)
+        script: |
+          xcode-project use-profiles --project "$XCODE_PROJECT"
+      - name: Compilar archivo IPA para TestFlight
+        script: |
+          xcode-project build-ipa \
+            --project "$XCODE_PROJECT" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - ios/App/build/**/*.dSYM
+    publishing:
+      email:
+        recipients:
+          - telgame772003@gmail.com
+        notify:
+          success: true
+          failure: true
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: false
+        submit_to_app_store: false
