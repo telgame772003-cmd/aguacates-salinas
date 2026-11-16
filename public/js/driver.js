@@ -20,7 +20,7 @@ import {
   getLocalDateStr,
   formatCurrency,
   cleanPhoneForWhatsApp
-} from "./firebase-config.js";
+} from "./firebase-config.js?v=nav3d_2";
 import { STAFF_MANUALS } from "./manuals-data.js";
 
 const DRIVER_SESSION_KEY = "salinas_driver_session_v1";
@@ -298,6 +298,7 @@ async function enterDriverApp() {
   loadRecentClientsDatalist();
   syncDefaultSalePrices();
   renderStreetSaleCalibers();
+  renderAssignedOrders();
   startDriverListeners();
 
   // Preload today's existing trail if any so we append instead of resetting
@@ -1467,25 +1468,73 @@ window.addEventListener("message", async (event) => {
   }
 });
 
-document.getElementById("btnNavigateAllOrders3D")?.addEventListener("click", () => {
-  const stops = [];
+function buildNearestPlacesStops(maxStops = 15) {
+  const valid = allPlaces.filter((p) => typeof p.lat === "number" && typeof p.lng === "number");
+  if (valid.length === 0) return [];
+
+  // Priorizar clientes aún pendientes de visita hoy; si todos fueron visitados, usar catálogo completo
+  const pendingToday = valid.filter((p) => getPlaceStatusToday(p).code === "pending");
+  const pool = pendingToday.length > 0 ? pendingToday : valid;
+
+  const sorted = [...pool].sort((a, b) => {
+    if (lastGpsCoords) {
+      const da = haversineMeters(lastGpsCoords.lat, lastGpsCoords.lng, a.lat, a.lng) ?? 999999;
+      const dbDist = haversineMeters(lastGpsCoords.lat, lastGpsCoords.lng, b.lat, b.lng) ?? 999999;
+      return da - dbDist;
+    }
+    return String(a.name || "").localeCompare(String(b.name || ""), "es");
+  });
+
+  return sorted.slice(0, maxStops).map((p) => {
+    const cat = PLACE_CATEGORIES[p.category] || PLACE_CATEGORIES.tienda;
+    return {
+      id: p.id,
+      kind: "place",
+      name: `${cat.emoji} ${p.name}`,
+      address: p.address || "",
+      subtitle: `${cat.label}${p.address ? ` • ${p.address}` : ""}`,
+      lat: p.lat,
+      lng: p.lng
+    };
+  });
+}
+
+function launchSmartNav3D() {
+  // 1. Si tiene pedidos asignados con coordenadas, abrir ruta 3D hacia sus pedidos
+  const orderStops = [];
   for (const ord of assignedOrders) {
     const c = resolveOrderCoordsSync(ord);
-    if (c) stops.push(buildOrderNavStop(ord, c));
+    if (c) orderStops.push(buildOrderNavStop(ord, c));
   }
-  if (stops.length === 0) {
-    showToast("Tus pedidos actuales no tienen coordenadas GPS registradas.");
+  if (orderStops.length > 0) {
+    if (lastGpsCoords && orderStops.length > 1) {
+      orderStops.sort(
+        (a, b) =>
+          (haversineMeters(lastGpsCoords.lat, lastGpsCoords.lng, a.lat, a.lng) || 999999) -
+          (haversineMeters(lastGpsCoords.lat, lastGpsCoords.lng, b.lat, b.lng) || 999999)
+      );
+    }
+    openNav3DModal(orderStops, 0);
     return;
   }
-  // Ordenar por cercanía desde la posición actual del chofer si ya tiene GPS
-  if (lastGpsCoords) {
-    stops.sort(
-      (a, b) =>
-        (haversineMeters(lastGpsCoords.lat, lastGpsCoords.lng, a.lat, a.lng) || 999999) -
-        (haversineMeters(lastGpsCoords.lat, lastGpsCoords.lng, b.lat, b.lng) || 999999)
-    );
+
+  // 2. Si no tiene pedidos asignados en este momento, abrir ruta 3D por los clientes/tiendas más cercanos
+  const placeStops = buildNearestPlacesStops(15);
+  if (placeStops.length > 0) {
+    openNav3DModal(placeStops, 0);
+    return;
   }
-  openNav3DModal(stops, 0);
+
+  showToast("Primero guarda al menos un cliente con GPS en la pestaña 🏪 Clientes.");
+  switchToDriverPane("drvPanePlaces");
+}
+
+document.getElementById("btnTopOpenNav3D")?.addEventListener("click", () => {
+  launchSmartNav3D();
+});
+
+document.getElementById("btnNavigateAllOrders3D")?.addEventListener("click", () => {
+  launchSmartNav3D();
 });
 
 function renderAssignedOrders() {
@@ -1495,17 +1544,28 @@ function renderAssignedOrders() {
 
   const routableCount = assignedOrders.filter((o) => resolveOrderCoordsSync(o) !== null).length;
   if (multiBtn) {
-    multiBtn.style.display = routableCount >= 2 ? "inline-flex" : "none";
+    multiBtn.style.display = routableCount >= 1 ? "inline-flex" : "none";
     if (routableCount >= 2) {
       multiBtn.textContent = `🧭 Ruta 3D (${routableCount})`;
+    } else if (routableCount === 1) {
+      multiBtn.textContent = `🧭 Navegar 3D`;
     }
   }
 
   if (assignedOrders.length === 0) {
     listEl.innerHTML = `
-      <div class="cart-empty" style="background:var(--white);">
-        No tienes pedidos pendientes asignados por oficina en este momento.<br>
-        <span style="font-size:0.8rem;">Toca <strong>🏪 Clientes</strong> para ver tus tiendas o <strong>➕ Vender</strong> abajo.</span>
+      <div class="cart-empty" style="background:var(--white);padding:18px 14px;">
+        <div style="margin-bottom:12px;">
+          No tienes pedidos pendientes asignados por oficina en este momento.
+        </div>
+        <div style="display:grid;grid-template-columns:1fr;gap:8px;max-width:340px;margin:0 auto;">
+          <button type="button" class="btn btn-nav-3d btn-sm" data-launch-nearest-nav3d="1" style="padding:11px 14px;font-size:0.86rem;">
+            🧭 Navegar 3D a Clientes Cercanos
+          </button>
+          <button type="button" class="btn btn-outline btn-sm" data-goto-places-pane="1" style="padding:9px 14px;font-size:0.82rem;">
+            🏪 Ver Lista de Clientes (${allPlaces.length})
+          </button>
+        </div>
       </div>
     `;
     return;
@@ -1582,6 +1642,15 @@ document.getElementById("btnCloseDeliverModal").addEventListener("click", () => 
 });
 
 document.getElementById("driverAssignedOrdersList").addEventListener("click", async (e) => {
+  if (e.target.closest("button[data-launch-nearest-nav3d]")) {
+    launchSmartNav3D();
+    return;
+  }
+  if (e.target.closest("button[data-goto-places-pane]")) {
+    switchToDriverPane("drvPanePlaces");
+    return;
+  }
+
   const nav3dBtn = e.target.closest("button[data-nav3d-order]");
   if (nav3dBtn) {
     const orderId = nav3dBtn.dataset.nav3dOrder;
