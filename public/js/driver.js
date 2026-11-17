@@ -2531,6 +2531,46 @@ function subscribeDriverRouteListener() {
   });
 }
 
+function openDriverConfirmModal({ title = "¿Confirmar acción?", message = "", confirmLabel = "Sí, confirmar" } = {}) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("drvConfirmModal");
+    const titleEl = document.getElementById("drvConfirmModalTitle");
+    const msgEl = document.getElementById("drvConfirmModalMessage");
+    const btnOk = document.getElementById("btnDrvConfirmOk");
+    const btnCancel = document.getElementById("btnDrvConfirmCancel");
+    const btnClose = document.getElementById("btnCloseDrvConfirmModal");
+    if (!modal || !btnOk) {
+      resolve(window.confirm(message || title));
+      return;
+    }
+    if (titleEl) titleEl.textContent = title;
+    if (msgEl) msgEl.textContent = message;
+    btnOk.textContent = confirmLabel;
+
+    let done = false;
+    const finish = (val) => {
+      if (done) return;
+      done = true;
+      modal.classList.remove("open");
+      btnOk.removeEventListener("click", onOk);
+      btnCancel?.removeEventListener("click", onCancel);
+      btnClose?.removeEventListener("click", onCancel);
+      modal.removeEventListener("click", onBackdrop);
+      resolve(val);
+    };
+    const onOk = () => finish(true);
+    const onCancel = () => finish(false);
+    const onBackdrop = (ev) => {
+      if (ev.target === modal) finish(false);
+    };
+    btnOk.addEventListener("click", onOk);
+    btnCancel?.addEventListener("click", onCancel);
+    btnClose?.addEventListener("click", onCancel);
+    modal.addEventListener("click", onBackdrop);
+    modal.classList.add("open");
+  });
+}
+
 function renderDriverActiveRouteCard() {
   const metaEl = document.getElementById("drvRouteMetaText");
   const listEl = document.getElementById("driverActiveRouteList");
@@ -2569,13 +2609,18 @@ function renderDriverActiveRouteCard() {
             <button type="button" class="route-mini-btn" data-drv-rt-move="-1" data-drv-rt-idx="${idx}">▲</button>
             <button type="button" class="route-mini-btn" data-drv-rt-move="1" data-drv-rt-idx="${idx}">▼</button>
             <button type="button" class="route-mini-btn" data-drv-rt-toggle="${idx}" title="Marcar listo / pendiente">${isDone ? "↩️" : "✓"}</button>
+            <button type="button" class="route-mini-btn" data-drv-rt-remove="${idx}" title="Quitar de mi ruta" style="color:#dc2626;">✕</button>
           </div>
         </div>
       `;
     })
     .join("");
 
-  footerEl.style.display = pending.length > 0 ? "flex" : "none";
+  footerEl.style.display = activeRouteStops.length > 0 ? "flex" : "none";
+  const btn3d = document.getElementById("btnStartActiveRoute3D");
+  const btnReopt = document.getElementById("btnReoptimizeActiveRoute");
+  if (btn3d) btn3d.style.display = pending.length > 0 ? "" : "none";
+  if (btnReopt) btnReopt.style.display = pending.length >= 2 ? "" : "none";
 
   attachTouchDragSort(listEl, ".route-stop-row", ".route-drag-handle", async (newOrder) => {
     activeRouteStops = newOrder.map((i) => activeRouteStops[i]).filter(Boolean);
@@ -2658,7 +2703,38 @@ document.getElementById("driverActiveRouteList")?.addEventListener("click", asyn
     activeRouteStops[idx].status = activeRouteStops[idx].status === "done" ? "pending" : "done";
     renderDriverActiveRouteCard();
     await persistDriverActiveRoute("driver");
+    return;
   }
+  const rem = e.target.closest("button[data-drv-rt-remove]");
+  if (rem) {
+    const idx = Number(rem.dataset.drvRtRemove);
+    const targetStop = activeRouteStops[idx];
+    if (!targetStop) return;
+    const confirmed = await openDriverConfirmModal({
+      title: "¿Quitar parada de tu ruta?",
+      message: `Se quitará "${targetStop.name || "esta parada"}" de tu lista de hoy.`,
+      confirmLabel: "Sí, quitar"
+    });
+    if (!confirmed) return;
+    activeRouteStops.splice(idx, 1);
+    renderDriverActiveRouteCard();
+    await persistDriverActiveRoute("driver");
+    showToast("Parada quitada de tu ruta.");
+  }
+});
+
+document.getElementById("btnClearActiveRoute")?.addEventListener("click", async () => {
+  if (activeRouteStops.length === 0) return;
+  const confirmed = await openDriverConfirmModal({
+    title: "¿Limpiar toda tu ruta?",
+    message: `Se quitarán las ${activeRouteStops.length} parada${activeRouteStops.length === 1 ? "" : "s"} de tu lista de hoy.`,
+    confirmLabel: "Sí, limpiar"
+  });
+  if (!confirmed) return;
+  activeRouteStops = [];
+  renderDriverActiveRouteCard();
+  await persistDriverActiveRoute("driver");
+  showToast("🗑️ Ruta limpiada.");
 });
 
 document.getElementById("btnStartActiveRoute3D")?.addEventListener("click", () => {
@@ -2766,6 +2842,18 @@ document.getElementById("drvRbFilterAll")?.addEventListener("click", () => {
   drvRbFilterMode = "all";
   document.getElementById("drvRbFilterAll").className = "btn btn-primary btn-sm";
   document.getElementById("drvRbFilterPending").className = "btn btn-outline btn-sm";
+  renderDriverRouteBuilderChecklist();
+});
+
+document.getElementById("btnDrvRbClearSel")?.addEventListener("click", async () => {
+  if (drvRbSelectedIds.size === 0) return;
+  const confirmed = await openDriverConfirmModal({
+    title: "¿Limpiar selección?",
+    message: `Se desmarcarán las ${drvRbSelectedIds.size} tienda${drvRbSelectedIds.size === 1 ? "" : "s"} seleccionada${drvRbSelectedIds.size === 1 ? "" : "s"}.`,
+    confirmLabel: "Sí, desmarcar"
+  });
+  if (!confirmed) return;
+  drvRbSelectedIds.clear();
   renderDriverRouteBuilderChecklist();
 });
 

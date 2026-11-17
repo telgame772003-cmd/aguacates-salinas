@@ -239,6 +239,29 @@ export function attachTouchDragSort(listContainerEl, itemSelector, handleSelecto
   let draggingEl = null;
   let fromIdx = -1;
   let startY = 0;
+  let pending = null;
+
+  function cancelPending() {
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    pending = null;
+  }
+
+  function activateDrag(item, handle, pointerId, clientY) {
+    const items = Array.from(listContainerEl.querySelectorAll(itemSelector));
+    const idx = items.indexOf(item);
+    if (idx < 0) return;
+    fromIdx = idx;
+    draggingEl = item;
+    startY = clientY;
+    item.classList.add("is-dragging");
+    try {
+      navigator.vibrate?.(25);
+    } catch (_) {}
+    try {
+      handle.setPointerCapture(pointerId);
+    } catch (_) {}
+  }
 
   listContainerEl.addEventListener("pointerdown", (ev) => {
     const handle = ev.target.closest(handleSelector);
@@ -246,21 +269,39 @@ export function attachTouchDragSort(listContainerEl, itemSelector, handleSelecto
     const item = handle.closest(itemSelector);
     if (!item) return;
 
-    const items = Array.from(listContainerEl.querySelectorAll(itemSelector));
-    fromIdx = items.indexOf(item);
-    if (fromIdx < 0) return;
+    cancelPending();
 
-    draggingEl = item;
-    startY = ev.clientY;
-    item.classList.add("is-dragging");
-    try {
-      handle.setPointerCapture(ev.pointerId);
-    } catch (_) {}
-    ev.preventDefault();
+    if (ev.pointerType === "mouse") {
+      ev.preventDefault();
+      activateDrag(item, handle, ev.pointerId, ev.clientY);
+      return;
+    }
+
+    // Touch / pen: require 280ms hold without scrolling (>8px) so normal page scroll is never hijacked
+    const pState = {
+      item,
+      handle,
+      pointerId: ev.pointerId,
+      startX: ev.clientX,
+      startY: ev.clientY,
+      timer: setTimeout(() => {
+        if (pending !== pState) return;
+        pending = null;
+        activateDrag(item, handle, pState.pointerId, pState.startY);
+      }, 280)
+    };
+    pending = pState;
   });
 
   listContainerEl.addEventListener("pointermove", (ev) => {
+    if (pending && ev.pointerId === pending.pointerId) {
+      if (Math.hypot(ev.clientX - pending.startX, ev.clientY - pending.startY) > 8) {
+        cancelPending();
+      }
+      return;
+    }
     if (!draggingEl) return;
+    if (ev.cancelable) ev.preventDefault();
     const dy = ev.clientY - startY;
     draggingEl.style.transform = `translateY(${dy}px)`;
 
@@ -287,9 +328,10 @@ export function attachTouchDragSort(listContainerEl, itemSelector, handleSelecto
         break;
       }
     }
-  });
+  }, { passive: false });
 
   function finishDrag() {
+    cancelPending();
     if (!draggingEl) return;
     draggingEl.classList.remove("is-dragging");
     draggingEl.style.transform = "";
