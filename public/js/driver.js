@@ -895,13 +895,13 @@ function getOneShotGpsPosition() {
 // ================= REALTIME OPERATIONAL LISTENERS =================
 function startDriverListeners() {
   todayStr = getLocalDateStr();
-  subscribeDriverRouteListener();
   if (whUnsub) whUnsub();
   if (ordersUnsub) ordersUnsub();
   if (salesUnsub) salesUnsub();
   if (placesUnsub) placesUnsub();
   if (visitsUnsub) visitsUnsub();
   if (routeDocUnsub) routeDocUnsub();
+  subscribeDriverRouteListener();
 
   // 1. Today's warehouse car trips for this driver
   whUnsub = onSnapshot(doc(db, "warehouse_days", todayStr), (snap) => {
