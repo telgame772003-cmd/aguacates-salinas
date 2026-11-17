@@ -1479,9 +1479,21 @@ function renderGpsMapAndChips() {
   const summaryEl = document.getElementById("placesSupervisionSummary");
   if (!chipsEl || !badgeEl) return;
 
-  const validLocs = driverLocations.filter(
-    (loc) => typeof loc.lat === "number" && typeof loc.lng === "number"
+  const activeDriverNamesSet = new Set(
+    (storeSettings.drivers || []).map((d) => String(d.name || "").trim().toLowerCase()).filter(Boolean)
   );
+  const activeDriverSlugsSet = new Set(
+    (storeSettings.drivers || []).map((d) => rbDriverSlug(d.name)).filter(Boolean)
+  );
+
+  // Filtrar solo choferes vigentes del catálogo oficial (oculta registros viejos/duplicados o de prueba)
+  const validLocs = driverLocations.filter((loc) => {
+    if (typeof loc.lat !== "number" || typeof loc.lng !== "number") return false;
+    if (activeDriverNamesSet.size === 0) return true;
+    const nameKey = String(loc.driverName || "").trim().toLowerCase();
+    const idKey = String(loc.id || "").trim().toLowerCase();
+    return activeDriverNamesSet.has(nameKey) || activeDriverSlugsSet.has(idKey);
+  });
 
   // Consider "online" if active === true and updated within last 20 minutes
   const onlineLocs = validLocs.filter((loc) => {
@@ -1504,10 +1516,9 @@ function renderGpsMapAndChips() {
         const isOnline = onlineLocs.some((o) => o.id === loc.id);
         const dot = isOnline ? "🟢" : "⚪";
         const boxesTxt = typeof loc.boxesInCar === "number" ? ` • ${loc.boxesInCar}c` : "";
-        const pingCue = isOnline ? "" : ` 🔔`;
         return `
-          <button type="button" class="gps-driver-chip ${isOnline ? "online" : ""}" data-focus-driver="${escapeHtml(loc.id)}" title="${isOnline ? "Enfocar en mapa" : "Toca para pedir GPS por notificación"}">
-            <span>${dot} ${escapeHtml(loc.driverName || loc.id)}${pingCue}</span>
+          <button type="button" class="gps-driver-chip ${isOnline ? "online" : ""}" data-focus-driver="${escapeHtml(loc.id)}" title="${isOnline ? "Enfocar en mapa" : "Ver última ubicación conocida"}">
+            <span>${dot} ${escapeHtml(loc.driverName || loc.id)}</span>
             <span style="font-weight:600;color:var(--slate-500);">${formatMinutesAgo(loc.updatedAtIso).replace(/^hace\s+/, "")}${boxesTxt}</span>
           </button>
         `;
@@ -1858,17 +1869,13 @@ async function sendDriverGpsPing(driverName, driverId = "", triggerBtn = null) {
 
 let focusedTrailDriverId = null;
 
-function focusDriverOnMap(id, triggerBtn = null) {
+function focusDriverOnMap(id) {
   const loc = driverLocations.find((d) => d.id === id);
-  if (!loc) return;
+  if (!loc || typeof loc.lat !== "number" || typeof loc.lng !== "number") return;
   const isOnline =
     loc.active === true &&
     loc.updatedAtIso &&
     Date.now() - new Date(loc.updatedAtIso).getTime() < 20 * 60 * 1000;
-  if (!isOnline || typeof loc.lat !== "number") {
-    sendDriverGpsPing(loc.driverName || id, id, triggerBtn);
-    return;
-  }
   focusedTrailDriverId = focusedTrailDriverId === id ? null : id;
   renderGpsMapAndChips();
   ensureLeafletMap();
@@ -1876,6 +1883,9 @@ function focusDriverOnMap(id, triggerBtn = null) {
     leafletMap.flyTo([loc.lat, loc.lng], 15, { duration: 0.7 });
     const marker = mapFocusMarkers.get(`driver:${id}`);
     if (marker) marker.openPopup();
+    if (!isOnline) {
+      showToast(`📍 Última ubicación de ${loc.driverName || id} (${formatMinutesAgo(loc.updatedAtIso)}).`);
+    }
   }
 }
 

@@ -378,7 +378,6 @@ async function enterDriverApp() {
   if (!gpsActive && localStorage.getItem("salinas_gps_manual_pause") !== "1") {
     startGpsSharing();
   }
-  initDriverPushNotifications(false);
   if (new URLSearchParams(window.location.search).get("ping") === "gps") {
     sendImmediateGpsPing("push");
   }
@@ -446,112 +445,7 @@ function sendImmediateGpsPing(reason = "ping") {
   );
 }
 
-function setPushBtnState(state) {
-  const pushBtn = document.getElementById("btnEnableDriverPush");
-  if (!pushBtn) return;
-  if (state === "granted") {
-    pushBtn.style.display = "none";
-    if (driverTopActions) driverTopActions.style.display = "none";
-    return;
-  }
-  if (driverTopActions) driverTopActions.style.display = "flex";
-  pushBtn.style.display = "inline-flex";
-  if (state === "denied") {
-    pushBtn.textContent = "🔕 Bloqueado";
-    pushBtn.style.background = "#fee2e2";
-    pushBtn.style.color = "#991b1b";
-    pushBtn.style.borderColor = "#fca5a5";
-  } else {
-    pushBtn.textContent = "🔔 Avisos";
-    pushBtn.style.background = "#fef3c7";
-    pushBtn.style.color = "#92400e";
-    pushBtn.style.borderColor = "#f59e0b";
-  }
-}
-
-async function initDriverPushNotifications(interactive = false) {
-  if (!currentDriverKeyHash || !currentDriverName) return;
-  if (isNativeCapacitorApp()) {
-    setPushBtnState("granted");
-    return;
-  }
-  if (!("Notification" in window) || !("serviceWorker" in navigator)) {
-    setPushBtnState("default");
-    if (interactive) {
-      showToast("En iPhone: abre en Safari → Compartir → Agregar a inicio y abre desde ese ícono.");
-    }
-    return;
-  }
-
-  if (Notification.permission === "denied") {
-    setPushBtnState("denied");
-    if (interactive) {
-      showToast("Notificaciones bloqueadas: toca el candado/ajustes junto a la URL → Permisos → Notificaciones → Permitir.");
-    }
-    return;
-  }
-
-  if (Notification.permission === "default") {
-    setPushBtnState("default");
-    if (!interactive) return;
-    const perm = await Notification.requestPermission();
-    if (perm !== "granted") {
-      setPushBtnState(perm === "denied" ? "denied" : "default");
-      showToast("Permiso de avisos no otorgado.");
-      return;
-    }
-  }
-
-  try {
-    const swReg = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
-    const { getMessaging, getToken, onMessage, isSupported } = await import(
-      "https://www.gstatic.com/firebasejs/11.1.0/firebase-messaging.js"
-    );
-    const supported = await isSupported();
-    if (!supported) {
-      setPushBtnState("default");
-      if (interactive) showToast("Este navegador no soporta Push Web.");
-      return;
-    }
-
-    const messaging = getMessaging(app);
-    onMessage(messaging, (payload) => {
-      if (payload?.data?.type === "gps_ping") {
-        try { navigator.vibrate?.([150, 80, 150]); } catch (_) {}
-        sendImmediateGpsPing("push");
-      }
-    });
-    const token = await getToken(messaging, {
-      vapidKey: FCM_VAPID_KEY,
-      serviceWorkerRegistration: swReg
-    });
-    if (!token) return;
-
-    await executeDriverBatch(currentDriverKeyHash, (batch, proofId) => {
-      batch.set(
-        doc(db, "driver_push_tokens", driverSlug(currentDriverName)),
-        {
-          driverName: currentDriverName,
-          token,
-          updatedAtIso: new Date().toISOString(),
-          updatedAt: serverTimestamp(),
-          proofId
-        },
-        { merge: true }
-      );
-    });
-    setPushBtnState("granted");
-    if (interactive) showToast("🔔 Avisos de ubicación activos.");
-  } catch (err) {
-    console.warn("Aviso FCM chofer:", err);
-    setPushBtnState("default");
-    if (interactive) showToast("No se pudieron activar los avisos en este dispositivo.");
-  }
-}
-
-document.getElementById("btnEnableDriverPush")?.addEventListener("click", () => {
-  initDriverPushNotifications(true);
-});
+// Las notificaciones Web Push para GPS fueron reemplazadas por el motor nativo 24/7 (APK / TestFlight)
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("message", (event) => {
