@@ -2113,6 +2113,49 @@ body.map-fullscreen-open {
 .pin-place-dot.st-sold { background: #16a34a; }
 .pin-place-dot.st-visited { background: #eab308; }
 .pin-place-dot.st-pending { background: #64748b; }
+.pin-place-dot.is-frequent {
+  box-shadow: 0 0 0 2.5px #f59e0b, 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+.leaflet-tooltip.salinas-place-tooltip {
+  background: #ffffff;
+  color: #1e293b;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 8px 10px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.16);
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 0.76rem;
+  line-height: 1.4;
+  max-width: 260px;
+  white-space: normal;
+}
+
+.salinas-tt-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 800;
+  font-size: 0.82rem;
+  color: #0f172a;
+  margin-bottom: 2px;
+}
+
+.salinas-tt-gold {
+  background: #fef3c7;
+  color: #b45309;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.salinas-tt-meta {
+  color: #475569;
+  margin-top: 2px;
+}
 
 /* Tier FAR (zoom <= 12: city-wide overview) */
 #adminLiveMap[data-zoom-tier="far"] .pin-place-dot {

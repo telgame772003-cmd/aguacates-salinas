@@ -87,6 +87,9 @@ let selectedRouteDate = getLocalDateStr();
 let routeWhDoc = createEmptyWhDoc(selectedRouteDate);
 let routeSalesList = [];
 let routeVisitsList = [];
+let historicalSales30d = [];
+let historicalVisits30d = [];
+let historical30dLoaded = false;
 let allPlaces = [];
 let routeDriverFilterVal = "todos";
 let driverLocations = [];
@@ -396,6 +399,9 @@ btnLogout.addEventListener("click", () => {
   if (routeWhUnsub) routeWhUnsub();
   if (routeSalesUnsub) routeSalesUnsub();
   if (routeVisitsUnsub) routeVisitsUnsub();
+  historicalSales30d = [];
+  historicalVisits30d = [];
+  historical30dLoaded = false;
   initialOrdersLoaded = false;
   knownOrderIds.clear();
   dashboardView.style.display = "none";
@@ -424,6 +430,7 @@ function enterDashboard() {
   startRealtimeListeners();
   subscribeWarehouseDay(selectedWhDate);
   subscribeRouteCorteDay(selectedRouteDate);
+  load30DayPlaceHistory();
 }
 
 document.getElementById("btnTopManual")?.addEventListener("click", () => {
@@ -1342,12 +1349,21 @@ document.addEventListener("keydown", (ev) => {
   }
 });
 
-function placeMatchesMapFilter(place, status) {
+function placeMatchesMapFilter(place, status, stats30d) {
   if (mapPinFilter === "all") return true;
   if (mapPinFilter === "orders") return false;
   if (mapPinFilter === "sold") return status.state === "sold";
   if (mapPinFilter === "visited") return status.state === "visited";
   if (mapPinFilter === "pending") return status.state === "pending";
+  if (mapPinFilter === "stale3d") {
+    return stats30d ? (stats30d.daysSinceLastVisit === null || stats30d.daysSinceLastVisit >= 3) : false;
+  }
+  if (mapPinFilter === "stale7d") {
+    return stats30d ? (stats30d.daysSinceLastSale === null || stats30d.daysSinceLastSale >= 7) : false;
+  }
+  if (mapPinFilter === "frequent") {
+    return stats30d ? (stats30d.salesCount30d >= 2 || stats30d.totalTouches30d >= 3) : false;
+  }
   if (mapPinFilter.startsWith("cat:")) {
     return (place.category || "tienda") === mapPinFilter.slice(4);
   }
@@ -1496,6 +1512,188 @@ function getPlaceDailyStatus(place) {
   return { state: "pending" };
 }
 
+function getOffsetLocalDateStr(daysAgo) {
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function diffDaysBetweenDateStrs(laterStr, earlierStr) {
+  if (!laterStr || !earlierStr) return null;
+  const t1 = Date.parse(`${laterStr}T12:00:00`);
+  const t2 = Date.parse(`${earlierStr}T12:00:00`);
+  if (!Number.isFinite(t1) || !Number.isFinite(t2)) return null;
+  return Math.max(0, Math.round((t1 - t2) / 86400000));
+}
+
+function formatShortEsDate(dateStr) {
+  if (!dateStr) return "";
+  const parts = String(dateStr).split("-");
+  if (parts.length !== 3) return dateStr;
+  const months = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+  const mIdx = Number(parts[1]) - 1;
+  return `${Number(parts[2])} ${months[mIdx] || parts[1]}`;
+}
+
+function formatRelativeDaysLabel(days, dateStr) {
+  if (days === null || days === undefined) return "Sin registro (30d)";
+  if (days === 0) return "Hoy";
+  const datePart = dateStr ? ` (${formatShortEsDate(dateStr)})` : "";
+  if (days === 1) return `Ayer${datePart}`;
+  return `Hace ${days} días${datePart}`;
+}
+
+async function load30DayPlaceHistory() {
+  try {
+    const thirtyDaysAgoStr = getOffsetLocalDateStr(30);
+    const [salesSnap, visitsSnap] = await Promise.all([
+      getDocs(query(collection(db, "route_sales"), where("date", ">=", thirtyDaysAgoStr))),
+      getDocs(query(collection(db, "place_visits"), where("date", ">=", thirtyDaysAgoStr)))
+    ]);
+    historicalSales30d = salesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    historicalVisits30d = visitsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    historical30dLoaded = true;
+    if (allPlaces.length > 0) {
+      renderGpsMapAndChips();
+    }
+  } catch (err) {
+    console.warn("No se pudo cargar historial 30d de negocios:", err);
+  }
+}
+
+function buildHistory30dIndex() {
+  const salesMap = new Map();
+  for (const s of historicalSales30d) salesMap.set(s.id, s);
+  for (const s of routeSalesList) salesMap.set(s.id, s);
+
+  const visitsMap = new Map();
+  for (const v of historicalVisits30d) visitsMap.set(v.id, v);
+  for (const v of routeVisitsList) visitsMap.set(v.id, v);
+
+  const salesByPlaceId = new Map();
+  const salesByPhone10 = new Map();
+  const unindexedSales = [];
+  for (const s of salesMap.values()) {
+    if (s.placeId) {
+      if (!salesByPlaceId.has(s.placeId)) salesByPlaceId.set(s.placeId, []);
+      salesByPlaceId.get(s.placeId).push(s);
+    } else {
+      const p10 = normalizePhone10(s.phone);
+      if (p10) {
+        if (!salesByPhone10.has(p10)) salesByPhone10.set(p10, []);
+        salesByPhone10.get(p10).push(s);
+      } else {
+        unindexedSales.push(s);
+      }
+    }
+  }
+
+  const visitsByPlaceId = new Map();
+  const unindexedVisits = [];
+  for (const v of visitsMap.values()) {
+    if (v.placeId) {
+      if (!visitsByPlaceId.has(v.placeId)) visitsByPlaceId.set(v.placeId, []);
+      visitsByPlaceId.get(v.placeId).push(v);
+    } else {
+      unindexedVisits.push(v);
+    }
+  }
+
+  return { salesByPlaceId, salesByPhone10, unindexedSales, visitsByPlaceId, unindexedVisits };
+}
+
+function computePlace30dStats(place, index, todayStr) {
+  const pPhone10 = normalizePhone10(place.phone);
+  const matchedSales = [];
+  const seenSaleIds = new Set();
+  const addSale = (s) => {
+    if (!seenSaleIds.has(s.id)) {
+      seenSaleIds.add(s.id);
+      matchedSales.push(s);
+    }
+  };
+  for (const s of index.salesByPlaceId.get(place.id) || []) addSale(s);
+  if (pPhone10) {
+    for (const s of index.salesByPhone10.get(pPhone10) || []) addSale(s);
+  }
+  for (const s of index.unindexedSales) {
+    if (namesMatchPlace(place.name, s.customerName)) addSale(s);
+  }
+
+  const matchedVisits = [];
+  const seenVisitIds = new Set();
+  const addVisit = (v) => {
+    if (!seenVisitIds.has(v.id)) {
+      seenVisitIds.add(v.id);
+      matchedVisits.push(v);
+    }
+  };
+  for (const v of index.visitsByPlaceId.get(place.id) || []) addVisit(v);
+  for (const v of index.unindexedVisits) {
+    if (namesMatchPlace(place.name, v.placeName)) addVisit(v);
+  }
+
+  matchedSales.sort((a, b) =>
+    String(b.createdAtIso || b.date || "").localeCompare(String(a.createdAtIso || a.date || ""))
+  );
+  matchedVisits.sort((a, b) =>
+    String(b.arrivedAtIso || b.createdAtIso || b.date || "").localeCompare(
+      String(a.arrivedAtIso || a.createdAtIso || a.date || "")
+    )
+  );
+
+  const salesCount30d = matchedSales.length;
+  const boxes30d = matchedSales.reduce((acc, s) => acc + (Number(s.totalBoxes) || 0), 0);
+  const amount30d = matchedSales.reduce((acc, s) => acc + (Number(s.totalAmount) || 0), 0);
+  const visitsOnlyCount30d = matchedVisits.length;
+  const totalTouches30d = salesCount30d + visitsOnlyCount30d;
+
+  const latestSale = matchedSales[0] || null;
+  const latestVisitOnly = matchedVisits[0] || null;
+
+  const latestSaleKey = latestSale ? String(latestSale.createdAtIso || latestSale.date || "") : "";
+  const latestVisitOnlyKey = latestVisitOnly
+    ? String(latestVisitOnly.arrivedAtIso || latestVisitOnly.createdAtIso || latestVisitOnly.date || "")
+    : "";
+
+  let lastVisitDate = null;
+  let lastVisitDriver = "";
+  let lastVisitWasSale = false;
+  if (latestSaleKey && (!latestVisitOnlyKey || latestSaleKey >= latestVisitOnlyKey)) {
+    lastVisitDate = latestSale.date || (latestSale.createdAtIso ? latestSale.createdAtIso.slice(0, 10) : null);
+    lastVisitDriver = latestSale.driver || "";
+    lastVisitWasSale = true;
+  } else if (latestVisitOnly) {
+    lastVisitDate =
+      latestVisitOnly.date || (latestVisitOnly.createdAtIso ? latestVisitOnly.createdAtIso.slice(0, 10) : null);
+    lastVisitDriver = latestVisitOnly.driver || "";
+  }
+
+  const lastSaleDate = latestSale
+    ? latestSale.date || (latestSale.createdAtIso ? latestSale.createdAtIso.slice(0, 10) : null)
+    : null;
+
+  return {
+    salesCount30d,
+    boxes30d,
+    amount30d,
+    visitsOnlyCount30d,
+    totalTouches30d,
+    lastSaleDate,
+    lastSaleBoxes: latestSale ? Number(latestSale.totalBoxes) || 0 : 0,
+    lastSaleAmount: latestSale ? Number(latestSale.totalAmount) || 0 : 0,
+    lastSaleDriver: latestSale ? latestSale.driver || "" : "",
+    lastVisitDate,
+    lastVisitDriver,
+    lastVisitWasSale,
+    daysSinceLastSale: diffDaysBetweenDateStrs(todayStr, lastSaleDate),
+    daysSinceLastVisit: diffDaysBetweenDateStrs(todayStr, lastVisitDate)
+  };
+}
+
 function getDriverInitials(rawName) {
   const cleaned = String(rawName || "")
     .normalize("NFD")
@@ -1598,16 +1796,25 @@ function renderGpsMapAndChips() {
   let soldCount = 0;
   let visitedCount = 0;
   let pendingCount = 0;
+  let stale3dCount = 0;
+  let stale7dCount = 0;
+  let frequentCount = 0;
   const catCounts = { tienda: 0, restaurante: 0, carniceria: 0, fruteria: 0 };
+  const todayStr = getLocalDateStr();
+  const historyIndex = buildHistory30dIndex();
   const validPlaces = allPlaces.filter((p) => typeof p.lat === "number" && typeof p.lng === "number");
   const placeEvaluations = validPlaces.map((p) => {
     const st = getPlaceDailyStatus(p);
+    const stats30d = computePlace30dStats(p, historyIndex, todayStr);
     if (st.state === "sold") soldCount++;
     else if (st.state === "visited") visitedCount++;
     else pendingCount++;
+    if (stats30d.daysSinceLastVisit === null || stats30d.daysSinceLastVisit >= 3) stale3dCount++;
+    if (stats30d.daysSinceLastSale === null || stats30d.daysSinceLastSale >= 7) stale7dCount++;
+    if (stats30d.salesCount30d >= 2 || stats30d.totalTouches30d >= 3) frequentCount++;
     const catKey = p.category || "tienda";
     if (catCounts[catKey] !== undefined) catCounts[catKey]++;
-    return { place: p, status: st };
+    return { place: p, status: st, stats30d };
   });
 
   // Active orders with coordinates
@@ -1629,6 +1836,9 @@ function renderGpsMapAndChips() {
       { id: "sold", label: "🟢 Compraron", count: soldCount },
       { id: "visited", label: "🟡 Visitados", count: visitedCount },
       { id: "pending", label: "⚪ Sin visita", count: pendingCount },
+      { id: "stale3d", label: "⏳ +3d s/visita", count: stale3dCount },
+      { id: "stale7d", label: "🚨 +7d s/compra", count: stale7dCount },
+      { id: "frequent", label: "🔥 Frecuentes", count: frequentCount },
       { id: "cat:tienda", label: "🏪 Tiendas", count: catCounts.tienda },
       { id: "cat:restaurante", label: "🍽️ Rest.", count: catCounts.restaurante },
       { id: "cat:carniceria", label: "🥩 Carnes", count: catCounts.carniceria },
@@ -1659,15 +1869,15 @@ function renderGpsMapAndChips() {
   mapFocusMarkers.clear();
 
   const boundsPoints = [];
-  const todayStr = getLocalDateStr();
 
   // 1. Registered Places (Tiendas, Carnicerías, Restaurantes, Fruterías)
-  for (const { place, status } of placeEvaluations) {
-    if (!placeMatchesMapFilter(place, status)) continue;
+  for (const { place, status, stats30d } of placeEvaluations) {
+    if (!placeMatchesMapFilter(place, status, stats30d)) continue;
     boundsPoints.push([place.lat, place.lng]);
     const cat = PLACE_CATEGORIES[place.category] || PLACE_CATEGORIES.tienda;
     const stClass =
       status.state === "sold" ? "st-sold" : status.state === "visited" ? "st-visited" : "st-pending";
+    const isGoldFrequent = stats30d.salesCount30d >= 3;
     const stBadge =
       status.state === "sold"
         ? `<div style="margin-top:5px;background:#dcfce7;color:#14532d;padding:4px 7px;border-radius:6px;font-size:0.78rem;font-weight:700;">🟢 Compró hoy: ${status.boxes} caja(s) (${formatCurrency(status.amount)}) • ${escapeHtml(status.driver)}</div>`
@@ -1675,21 +1885,62 @@ function renderGpsMapAndChips() {
           ? `<div style="margin-top:5px;background:#fef9c3;color:#713f12;padding:4px 7px;border-radius:6px;font-size:0.78rem;font-weight:700;">🟡 Visitado hoy por ${escapeHtml(status.driver)}: ${escapeHtml(status.reason)}${status.distanceMeters !== null ? ` (GPS a ${status.distanceMeters} m)` : ""}</div>`
           : `<div style="margin-top:5px;background:#f1f5f9;color:#475569;padding:4px 7px;border-radius:6px;font-size:0.78rem;">⚪ Aún sin visita registrada en esta fecha</div>`;
 
+    const lastSaleLine = stats30d.lastSaleDate
+      ? `🛒 Últ. compra: <strong>${escapeHtml(formatRelativeDaysLabel(stats30d.daysSinceLastSale, stats30d.lastSaleDate))}</strong> • ${stats30d.lastSaleBoxes} caja(s) (${formatCurrency(stats30d.lastSaleAmount)})${stats30d.lastSaleDriver ? ` • ${escapeHtml(stats30d.lastSaleDriver)}` : ""}`
+      : `🛒 Últ. compra: <span style="color:#b91c1c;font-weight:700;">Sin compras en 30 días</span>`;
+
+    const lastVisitLine = stats30d.lastVisitDate
+      ? `👋 Últ. visita: <strong>${escapeHtml(formatRelativeDaysLabel(stats30d.daysSinceLastVisit, stats30d.lastVisitDate))}</strong>${stats30d.lastVisitDriver ? ` • ${escapeHtml(stats30d.lastVisitDriver)}` : ""}`
+      : `👋 Últ. visita: <span style="color:#b45309;font-weight:700;">Sin visitas en 30 días</span>`;
+
+    const freqLine = `📊 30d: <strong>${stats30d.salesCount30d}</strong> compra(s) • <strong>${stats30d.boxes30d}</strong> cajas • <strong>${stats30d.totalTouches30d}</strong> visita(s)`;
+
+    const historyBoxHtml = historical30dLoaded
+      ? `<div style="margin-top:6px;padding:5px 7px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:0.74rem;line-height:1.45;color:#334155;">
+          <div>${lastSaleLine}</div>
+          <div>${lastVisitLine}</div>
+          <div>${freqLine}</div>
+        </div>`
+      : "";
+
+    const todayHoverBadge =
+      status.state === "sold"
+        ? `<div style="color:#15803d;font-weight:700;">🟢 Hoy: ${status.boxes} caja(s) (${formatCurrency(status.amount)})</div>`
+        : status.state === "visited"
+          ? `<div style="color:#a16207;font-weight:700;">🟡 Visitado hoy (${escapeHtml(status.driver || "chofer")})</div>`
+          : `<div style="color:#64748b;">⚪ Sin visita hoy</div>`;
+
+    const tooltipHtml = `
+      <div class="salinas-tt-inner">
+        <div class="salinas-tt-head">
+          <span>${cat.emoji} ${escapeHtml(place.name)}</span>
+          ${isGoldFrequent ? `<span class="salinas-tt-gold">⭐ Frecuente</span>` : ""}
+        </div>
+        ${todayHoverBadge}
+        ${historical30dLoaded ? `
+          <div class="salinas-tt-meta">${lastSaleLine}</div>
+          ${!stats30d.lastVisitWasSale || !stats30d.lastSaleDate ? `<div class="salinas-tt-meta">${lastVisitLine}</div>` : ""}
+          <div class="salinas-tt-meta">${freqLine}</div>
+        ` : `<div class="salinas-tt-meta" style="color:#94a3b8;">Cargando historial 30d…</div>`}
+      </div>
+    `;
+
     const icon = window.L.divIcon({
       className: "salinas-div-icon",
-      html: `<div class="pin-place-dot ${stClass}" title="${escapeHtml(place.name)}"><span class="pin-emoji">${cat.emoji}</span></div>`,
+      html: `<div class="pin-place-dot ${stClass}${isGoldFrequent ? " is-frequent" : ""}"><span class="pin-emoji">${cat.emoji}</span></div>`,
       iconSize: [24, 24],
       iconAnchor: [12, 12],
       popupAnchor: [0, -10]
     });
 
     const popupHtml = `
-      <div style="font-family:sans-serif;min-width:190px;">
-        <div style="font-size:0.72rem;font-weight:800;color:#475569;text-transform:uppercase;">${cat.emoji} ${escapeHtml(cat.label)}</div>
+      <div style="font-family:sans-serif;min-width:205px;">
+        <div style="font-size:0.72rem;font-weight:800;color:#475569;text-transform:uppercase;">${cat.emoji} ${escapeHtml(cat.label)}${isGoldFrequent ? ` • <span style="color:#d97706;">⭐ Frecuente</span>` : ""}</div>
         <strong style="font-size:0.95rem;color:#132615;">${escapeHtml(place.name)}</strong>
         ${place.address ? `<div style="font-size:0.78rem;color:#475569;margin-top:2px;">📍 ${escapeHtml(place.address)}</div>` : ""}
         ${place.phone ? `<div style="font-size:0.78rem;color:#475569;margin-top:2px;">📞 ${escapeHtml(place.phone)}</div>` : ""}
         ${stBadge}
+        ${historyBoxHtml}
         <div style="margin-top:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
           <a href="https://maps.google.com/?q=${place.lat},${place.lng}" target="_blank" rel="noopener" style="font-size:0.76rem;font-weight:800;color:#15803d;text-decoration:underline;">Abrir en Google Maps ↗</a>
           <button type="button" onclick="window.__salinasAddPlaceToRoute?.('${escapeHtml(place.id)}')" style="border:none;background:#065f46;color:#fff;padding:4px 9px;border-radius:8px;font-size:0.74rem;font-weight:800;cursor:pointer;">➕ Sumar a Ruta</button>
@@ -1697,9 +1948,16 @@ function renderGpsMapAndChips() {
       </div>
     `;
 
-    const zOff = status.state === "sold" ? 300 : status.state === "visited" ? 200 : 0;
+    const zOff = status.state === "sold" ? 300 : status.state === "visited" ? 200 : isGoldFrequent ? 100 : 0;
     const m = window.L.marker([place.lat, place.lng], { icon, zIndexOffset: zOff })
       .addTo(mapLayerGroup)
+      .bindTooltip(tooltipHtml, {
+        direction: "top",
+        sticky: true,
+        opacity: 0.98,
+        className: "salinas-place-tooltip",
+        offset: [0, -10]
+      })
       .bindPopup(popupHtml);
     mapFocusMarkers.set(`place:${place.id}`, m);
   }
