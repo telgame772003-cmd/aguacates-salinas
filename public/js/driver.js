@@ -128,7 +128,6 @@ const activeGeofenceDwells = new Map();
 const driverLoginView = document.getElementById("driverLoginView");
 const driverAppMain = document.getElementById("driverAppMain");
 const driverBottomNav = document.getElementById("driverBottomNav");
-const driverTopActions = document.getElementById("driverTopActions");
 const topDriverName = document.getElementById("topDriverName");
 const loginDriverSelect = document.getElementById("loginDriverSelect");
 const loginDriverPin = document.getElementById("loginDriverPin");
@@ -333,7 +332,6 @@ document.getElementById("btnDriverLogout").addEventListener("click", async () =>
 
   driverAppMain.style.display = "none";
   driverBottomNav.style.display = "none";
-  driverTopActions.style.display = "none";
   const utilEl = document.getElementById("driverTopUtility");
   if (utilEl) utilEl.style.display = "none";
   topDriverName.textContent = "Modo Chofer";
@@ -346,7 +344,6 @@ async function enterDriverApp() {
   driverLoginView.style.display = "none";
   driverAppMain.style.display = "block";
   driverBottomNav.style.display = "grid";
-  driverTopActions.style.display = "none";
   const utilEl = document.getElementById("driverTopUtility");
   if (utilEl) utilEl.style.display = "flex";
   topDriverName.textContent = `🚗 ${currentDriverName}`;
