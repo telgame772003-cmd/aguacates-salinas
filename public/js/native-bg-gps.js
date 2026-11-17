@@ -63,7 +63,7 @@ function getCapacitorHttpPlugin() {
   return null;
 }
 
-export async function startNativeBackgroundGps({ onLocation, onPermissionDenied }) {
+export async function startNativeBackgroundGps({ onLocation, onPermissionDenied, brandShortName = "Salinas", pinEmoji = "🥑" }) {
   const bgGeo = getBackgroundGeoPlugin();
   if (!bgGeo) return false;
 
@@ -74,7 +74,7 @@ export async function startNativeBackgroundGps({ onLocation, onPermissionDenied 
   try {
     activeWatcherId = await bgGeo.addWatcher(
       {
-        backgroundTitle: "🥑 Ruta Salinas en Curso",
+        backgroundTitle: `${pinEmoji} Ruta ${brandShortName} en Curso`,
         backgroundMessage: "Ubicación GPS activa para Despacho • Toca para abrir",
         requestPermissions: true,
         stale: false,
@@ -184,22 +184,38 @@ function toFirestoreValue(val) {
 export async function commitDriverDocNativeRest({
   apiKey,
   projectId,
+  tenantSlug,
+  vaultId,
   driverKeyHash,
   collectionName,
   docId,
   payloadData,
   timestampField = "updatedAt"
 }) {
+  const tSlug = tenantSlug || (typeof window !== "undefined" ? window.__RPD_ACTIVE_TENANT : null) || "salinas";
+  const vId = vaultId || (typeof window !== "undefined" ? window.__RPD_ACTIVE_VAULT : null) || "";
   const proofId = `dprf_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
   const dbRoot = `projects/${projectId}/databases/(default)/documents`;
-  const proofDocName = `${dbRoot}/driver_proofs/${proofId}`;
-  const targetDocName = `${dbRoot}/${collectionName}/${docId}`;
+  const proofDocName = vId
+    ? `${dbRoot}/tenants/${tSlug}/driver_proofs/${proofId}`
+    : `${dbRoot}/driver_proofs/${proofId}`;
+  const targetDocName = vId
+    ? `${dbRoot}/vaults/${vId}/${collectionName}/${docId}`
+    : `${dbRoot}/${collectionName}/${docId}`;
 
   const docFields = {};
-  for (const [k, v] of Object.entries({ ...payloadData, proofId })) {
+  for (const [k, v] of Object.entries({ ...payloadData, tenantSlug: tSlug, proofId })) {
     if (v !== undefined) {
       docFields[k] = toFirestoreValue(v);
     }
+  }
+
+  const proofFields = {
+    keyHash: { stringValue: driverKeyHash },
+    tenantSlug: { stringValue: tSlug }
+  };
+  if (vId) {
+    proofFields.vaultId = { stringValue: vId };
   }
 
   const commitBody = {
@@ -207,9 +223,7 @@ export async function commitDriverDocNativeRest({
       {
         update: {
           name: proofDocName,
-          fields: {
-            keyHash: { stringValue: driverKeyHash }
-          }
+          fields: proofFields
         },
         currentDocument: { exists: false },
         updateTransforms: [

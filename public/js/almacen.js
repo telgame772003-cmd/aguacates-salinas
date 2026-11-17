@@ -7,6 +7,12 @@ import {
   onSnapshot,
   serverTimestamp,
   DEFAULT_STORE_SETTINGS,
+  ACTIVE_TENANT_SLUG,
+  tenantScopedStorageKey,
+  clearActiveVaultId,
+  getUnitConfig,
+  applyTenantWhiteLabelToDOM,
+  mountTenantSwitcherPill,
   COLD_ROOMS,
   normalizeColdRoom,
   LOT_GRADES,
@@ -18,7 +24,9 @@ import {
   formatCurrency
 } from "./firebase-config.js";
 
-const WH_SESSION_KEY = "salinas_warehouse_session_v1";
+const WH_SESSION_KEY = tenantScopedStorageKey("salinas_warehouse_session_v1");
+
+mountTenantSwitcherPill(ACTIVE_TENANT_SLUG);
 
 let storeSettings = { ...DEFAULT_STORE_SETTINGS, warehouseStaff: [{ id: "alm_1", name: "Almacenista 1" }] };
 let currentStaffName = null;
@@ -87,21 +95,27 @@ function getSelectedChip(containerId, fallback) {
 }
 
 // ================= SETTINGS & AUTH =================
-onSnapshot(doc(db, "settings", "store"), (snap) => {
-  if (snap.exists()) {
-    const d = snap.data();
-    storeSettings = {
-      ...DEFAULT_STORE_SETTINGS,
-      ...d,
-      drivers: Array.isArray(d.drivers) && d.drivers.length ? d.drivers : DEFAULT_STORE_SETTINGS.drivers,
-      warehouseStaff: Array.isArray(d.warehouseStaff) && d.warehouseStaff.length
-        ? d.warehouseStaff
-        : [{ id: "alm_1", name: "Almacenista 1" }]
-    };
-  }
-  populateWhStaffSelect();
-  populateLoadDrivers();
-});
+let whSettingsUnsub = null;
+function subscribeWhSettings(sourceDoc = "public_storefront") {
+  if (whSettingsUnsub) whSettingsUnsub();
+  whSettingsUnsub = onSnapshot(doc(db, "settings", sourceDoc), (snap) => {
+    if (snap.exists()) {
+      const d = snap.data();
+      storeSettings = {
+        ...DEFAULT_STORE_SETTINGS,
+        ...d,
+        drivers: Array.isArray(d.drivers) && d.drivers.length ? d.drivers : DEFAULT_STORE_SETTINGS.drivers,
+        warehouseStaff: Array.isArray(d.warehouseStaff) && d.warehouseStaff.length
+          ? d.warehouseStaff
+          : [{ id: "alm_1", name: "Almacenista 1" }]
+      };
+    }
+    applyTenantWhiteLabelToDOM(storeSettings, ACTIVE_TENANT_SLUG);
+    populateWhStaffSelect();
+    populateLoadDrivers();
+  });
+}
+subscribeWhSettings("public_storefront");
 
 function populateWhStaffSelect() {
   const list = storeSettings.warehouseStaff || [{ name: "Almacenista 1" }];
@@ -197,10 +211,15 @@ document.getElementById("btnWhHomeLogo")?.addEventListener("click", (e) => {
 
 document.getElementById("btnWhLogout").addEventListener("click", async () => {
   await stopQrCamera();
+  if (lotsUnsub) lotsUnsub();
+  if (thermosUnsub) thermosUnsub();
+  if (whDayUnsub) whDayUnsub();
+  clearActiveVaultId();
   currentStaffName = null;
   currentWhKeyHash = null;
   localStorage.removeItem(WH_SESSION_KEY);
   sessionStorage.removeItem(WH_SESSION_KEY);
+  subscribeWhSettings("public_storefront");
   whAppMain.style.display = "none";
   whBottomNav.style.display = "none";
   whTopActions.style.display = "none";
@@ -214,6 +233,7 @@ function enterWarehouseApp() {
   whBottomNav.style.display = "grid";
   whTopActions.style.display = "flex";
   topWarehouseName.textContent = `❄️ ${currentStaffName}`;
+  subscribeWhSettings("store");
   startLotsListener();
 }
 
@@ -364,7 +384,18 @@ async function startQrCamera() {
       async (decodedText) => {
         const clean = String(decodedText || "").trim();
         let lotId = clean;
-        if (clean.startsWith("SALINAS_LOT:")) lotId = clean.slice("SALINAS_LOT:".length).trim();
+        if (clean.startsWith("RPD_LOT:")) {
+          const parts = clean.split(":");
+          const qrTenant = parts[1] || "";
+          lotId = parts.slice(2).join(":").trim();
+          if (qrTenant && qrTenant !== ACTIVE_TENANT_SLUG) {
+            await stopQrCamera();
+            showToast(`⚠️ Este marbete QR pertenece a la empresa "${qrTenant}".`);
+            return;
+          }
+        } else if (clean.startsWith("SALINAS_LOT:")) {
+          lotId = clean.slice("SALINAS_LOT:".length).trim();
+        }
         const found = allLots.find((l) => l.id === lotId || l.lotCode === lotId);
         await stopQrCamera();
         if (found) {
@@ -411,8 +442,9 @@ function openLotCard(lot) {
   document.getElementById("scLotCode").textContent = lot.lotCode || lot.id;
   const days = daysBetween(lot.arrivalDate);
   const rem = Number(lot.remainingBoxes) || 0;
-  document.getElementById("scLotBoxes").textContent = `${rem} cajas`;
-  document.getElementById("scLotKg").textContent = `${(rem * 10).toLocaleString("es-MX")} kg`;
+  const uCfg = getUnitConfig(storeSettings);
+  document.getElementById("scLotBoxes").textContent = `${rem} ${uCfg.unitPlural}`;
+  document.getElementById("scLotKg").textContent = `${(rem * uCfg.subUnitsPerUnit).toLocaleString("es-MX")} ${uCfg.subUnit}`;
   document.getElementById("scLotMeta").innerHTML = `
     ❄️ <strong>${escapeHtml(lot.coldRoom || "Sin ubicar")}</strong> •
     Madurez: <strong>${escapeHtml(lot.ripeness || "Verde")}</strong> •

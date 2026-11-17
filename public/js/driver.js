@@ -12,6 +12,17 @@ import {
   onSnapshot,
   serverTimestamp,
   DEFAULT_STORE_SETTINGS,
+  ACTIVE_TENANT_SLUG,
+  tenantScopedStorageKey,
+  clearActiveVaultId,
+  getUnitConfig,
+  getTenantModules,
+  getTenantBranding,
+  getOrderedProducts,
+  getProductCodes,
+  formatDynamicUnits,
+  applyTenantWhiteLabelToDOM,
+  mountTenantSwitcherPill,
   PLACE_CATEGORIES,
   FCM_VAPID_KEY,
   haversineMeters,
@@ -22,25 +33,27 @@ import {
   matchesSmartSearch,
   formatCurrency,
   cleanPhoneForWhatsApp
-} from "./firebase-config.js?v=nav3d_9";
+} from "./firebase-config.js?v=rpd_1";
 import {
   isNativeCapacitorApp,
   startNativeBackgroundGps,
   stopNativeBackgroundGps,
   commitDriverDocNativeRest,
   commitDriverLocationNativeRest
-} from "./native-bg-gps.js?v=nav3d_9";
+} from "./native-bg-gps.js?v=rpd_1";
 import {
   optimizeStopsWithOsrm,
   computeOrderedRouteMetrics,
   attachTouchDragSort,
   formatRouteKm,
   formatRouteMin
-} from "./route-optimizer.js?v=nav3d_9";
-import { STAFF_MANUALS } from "./manuals-data.js";
+} from "./route-optimizer.js?v=rpd_1";
+import { STAFF_MANUALS } from "./manuals-data.js?v=rpd_1";
 
-const DRIVER_SESSION_KEY = "salinas_driver_session_v1";
-const RECENT_CLIENTS_KEY = "salinas_driver_clients_v1";
+const DRIVER_SESSION_KEY = tenantScopedStorageKey("salinas_driver_session_v1");
+const RECENT_CLIENTS_KEY = tenantScopedStorageKey("salinas_driver_clients_v1");
+
+mountTenantSwitcherPill(ACTIVE_TENANT_SLUG);
 
 // Integración SaaS B2B: Ruta Pro Nav Embed 3D (alojado 100% en Hosting de Ruta Pro)
 const RP_NAV_EMBED_ORIGIN = "https://ruta-pro-companion.web.app";
@@ -48,34 +61,37 @@ const RP_NAV_EMBED_LICENSE_KEY = "rp_live_salinas_2026_9f4a8c2e";
 const RP_NAV_EMBED_URL = `${RP_NAV_EMBED_ORIGIN}/nav-embed.html?key=${encodeURIComponent(RP_NAV_EMBED_LICENSE_KEY)}&v=1.1.0`;
 
 // Perfil White-Label exclusivo de Comercializadora Aguacates Salinas (no afecta a Ruta Pro ni a otros clientes)
-const SALINAS_NAV3D_UI_CONFIG = {
-  branding: {
-    badgeText: "Ruta Salinas 3D",
-    showBrandBadge: true,
-    accentColor: "#10b981",
-    accentDarkColor: "#047857",
-    routeLineColor: "#10b981",
-    puckColor: "#10b981"
-  },
-  labels: {
-    primaryAction: "✅ Entregar / Cobrar",
-    arrivalAction: "✅ Cobrar Aquí",
-    arrivalTitle: "📍 ¡Ya llegaste con el cliente!",
-    arrivalSubtitle: "Listo para entregar aguacate",
-    closeBtn: "✕ Salir",
-    defaultPinEmoji: "🥑",
-    speedUnit: "km/h"
-  },
-  cockpit: {
-    showSpeedOnPuck: true,
-    showBottomSpeedometer: true,
-    showPrimaryActionBtn: true,
-    showVoiceBtn: true,
-    showThemeBtn: true,
-    showCameraModeBtn: true,
-    arrivalRadiusMeters: 45
-  }
-};
+function buildTenantNav3DUiConfig() {
+  const brand = getTenantBranding(storeSettings, ACTIVE_TENANT_SLUG);
+  return {
+    branding: {
+      badgeText: `Ruta ${brand.shortName} 3D`,
+      showBrandBadge: true,
+      accentColor: brand.primaryColor || "#10b981",
+      accentDarkColor: brand.darkColor || "#047857",
+      routeLineColor: brand.primaryColor || "#10b981",
+      puckColor: brand.primaryColor || "#10b981"
+    },
+    labels: {
+      primaryAction: "✅ Entregar / Cobrar",
+      arrivalAction: "✅ Cobrar Aquí",
+      arrivalTitle: "📍 ¡Ya llegaste con el cliente!",
+      arrivalSubtitle: `Listo para entregar (${brand.shortName})`,
+      closeBtn: "✕ Salir",
+      defaultPinEmoji: brand.pinEmoji || "🥑",
+      speedUnit: "km/h"
+    },
+    cockpit: {
+      showSpeedOnPuck: true,
+      showBottomSpeedometer: true,
+      showPrimaryActionBtn: true,
+      showVoiceBtn: true,
+      showThemeBtn: true,
+      showCameraModeBtn: true,
+      arrivalRadiusMeters: 45
+    }
+  };
+}
 
 let storeSettings = structuredClone(DEFAULT_STORE_SETTINGS);
 let currentDriverName = null;
@@ -92,10 +108,10 @@ let visitsToday = [];
 let placeSearchQuery = "";
 
 // Street sale form state
-let saleQtys = { S: 0, E: 0, P: 0, M: 0 };
-let saleKgs = { S: 0, E: 0, P: 0, M: 0 };
-let salePrices = { S: 400, E: 360, P: 320, M: 250 };
-let saleKgPrices = { S: 40, E: 36, P: 32, M: 25 };
+let saleQtys = {};
+let saleKgs = {};
+let salePrices = {};
+let saleKgPrices = {};
 let salePayMethod = "Efectivo";
 
 function isSaleCancelled(s) {
@@ -103,19 +119,17 @@ function isSaleCancelled(s) {
 }
 
 function round1(n) {
-  return Math.round((Number(n) || 0) * 10) / 10;
+  const factor = getUnitConfig(storeSettings).subUnitsPerUnit || 10;
+  return Math.round((Number(n) || 0) * factor) / factor;
 }
 
 function formatBoxesKg(boxesVal) {
-  const rounded = round1(boxesVal);
-  const sign = rounded < 0 ? "-" : "";
-  const absKg = Math.round(Math.abs(rounded) * 10);
-  const fullBoxes = Math.floor(absKg / 10);
-  const extraKg = absKg % 10;
-  if (fullBoxes === 0 && extraKg === 0) return "0 cj";
-  if (fullBoxes === 0) return `${sign}${extraKg} kg`;
-  if (extraKg === 0) return `${sign}${fullBoxes} cj`;
-  return `${sign}${fullBoxes} cj + ${extraKg} kg`;
+  return formatDynamicUnits(boxesVal, storeSettings);
+}
+
+function getActiveProductCodes() {
+  const fallback = ACTIVE_TENANT_SLUG === "salinas" ? DEFAULT_STORE_SETTINGS.calibers : {};
+  return getProductCodes(storeSettings, fallback);
 }
 
 // Listeners & GPS state
@@ -190,13 +204,16 @@ function normalizePhone10(raw) {
 
 function mergeCalibers(remoteCalibers = {}) {
   const out = {};
-  for (const code of ["S", "E", "P", "M"]) {
+  const keys = Object.keys(remoteCalibers);
+  const srcCodes = keys.length > 0 ? keys : (ACTIVE_TENANT_SLUG === "salinas" ? ["S", "E", "P", "M"] : []);
+  for (const code of srcCodes) {
+    const def = DEFAULT_STORE_SETTINGS.calibers[code] || { code, name: code, price: 100, minPrice: 1, order: 99 };
     out[code] = {
-      ...DEFAULT_STORE_SETTINGS.calibers[code],
+      ...def,
       ...(remoteCalibers[code] || {})
     };
     if (!out[code].minPrice) {
-      out[code].minPrice = DEFAULT_STORE_SETTINGS.calibers[code].minPrice;
+      out[code].minPrice = def.minPrice || 1;
     }
   }
   return out;
@@ -213,33 +230,41 @@ function switchToDriverPane(paneId) {
 }
 
 // ================= STORE SETTINGS & LOGIN SELECT =================
-onSnapshot(
-  doc(db, "settings", "store"),
-  (snap) => {
-    if (snap.exists()) {
-      const data = snap.data();
-      storeSettings = {
-        ...DEFAULT_STORE_SETTINGS,
-        ...data,
-        calibers: mergeCalibers(data.calibers || {}),
-        drivers: Array.isArray(data.drivers) && data.drivers.length > 0
-          ? data.drivers
-          : DEFAULT_STORE_SETTINGS.drivers
-      };
-    } else {
-      storeSettings.calibers = mergeCalibers({});
+let drvSettingsUnsub = null;
+function subscribeDriverSettings(sourceDoc = "public_storefront") {
+  if (drvSettingsUnsub) drvSettingsUnsub();
+  drvSettingsUnsub = onSnapshot(
+    doc(db, "settings", sourceDoc),
+    (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        storeSettings = {
+          ...DEFAULT_STORE_SETTINGS,
+          ...data,
+          calibers: mergeCalibers(data.calibers || {}),
+          drivers: Array.isArray(data.drivers) && data.drivers.length > 0
+            ? data.drivers
+            : DEFAULT_STORE_SETTINGS.drivers
+        };
+      } else {
+        storeSettings.calibers = mergeCalibers({});
+      }
+      applyTenantWhiteLabelToDOM(storeSettings, ACTIVE_TENANT_SLUG);
+      populateLoginDrivers();
+      syncDefaultSalePrices();
+      renderStreetSaleCalibers();
+      if (currentDriverName) refreshAllViews();
+    },
+    (err) => {
+      console.warn("Aviso cargando configuración:", err);
+      applyTenantWhiteLabelToDOM(storeSettings, ACTIVE_TENANT_SLUG);
+      populateLoginDrivers();
+      syncDefaultSalePrices();
+      renderStreetSaleCalibers();
     }
-    populateLoginDrivers();
-    syncDefaultSalePrices();
-    renderStreetSaleCalibers();
-  },
-  (err) => {
-    console.warn("Aviso cargando configuración:", err);
-    populateLoginDrivers();
-    syncDefaultSalePrices();
-    renderStreetSaleCalibers();
-  }
-);
+  );
+}
+subscribeDriverSettings("public_storefront");
 
 function populateLoginDrivers() {
   const drivers = storeSettings.drivers || [];
@@ -258,14 +283,15 @@ function populateLoginDrivers() {
 }
 
 function syncDefaultSalePrices() {
-  for (const code of ["S", "E", "P", "M"]) {
+  const factor = getUnitConfig(storeSettings).subUnitsPerUnit || 10;
+  for (const code of getActiveProductCodes()) {
     const cal = storeSettings.calibers[code];
-    const boxPrice = Number(cal?.price) || DEFAULT_STORE_SETTINGS.calibers[code].price;
-    const kgPrice = Number(cal?.pricePerKg) || Math.round((boxPrice / 10) * 100) / 100;
-    if (cal && saleQtys[code] === 0) {
+    const boxPrice = Number(cal?.price) || 100;
+    const kgPrice = Number(cal?.pricePerKg) || Math.round((boxPrice / factor) * 100) / 100;
+    if (cal && !saleQtys[code]) {
       salePrices[code] = boxPrice;
     }
-    if (cal && saleKgs[code] === 0) {
+    if (cal && !saleKgs[code]) {
       saleKgPrices[code] = kgPrice;
     }
   }
@@ -354,8 +380,10 @@ document.getElementById("btnDriverLogout").addEventListener("click", async () =>
 
   currentDriverName = null;
   currentDriverKeyHash = null;
+  clearActiveVaultId();
   localStorage.removeItem(DRIVER_SESSION_KEY);
   sessionStorage.removeItem(DRIVER_SESSION_KEY);
+  subscribeDriverSettings("public_storefront");
 
   driverAppMain.style.display = "none";
   driverBottomNav.style.display = "none";
@@ -374,6 +402,7 @@ async function enterDriverApp() {
   const utilEl = document.getElementById("driverTopUtility");
   if (utilEl) utilEl.style.display = "flex";
   topDriverName.textContent = `🚗 ${currentDriverName}`;
+  subscribeDriverSettings("store");
 
   loadRecentClientsDatalist();
   syncDefaultSalePrices();
@@ -777,7 +806,10 @@ async function startGpsSharing() {
     gpsLabel.textContent = "GPS 24/7";
     requestRouteWakeLock();
 
+    const brand = getTenantBranding(storeSettings, ACTIVE_TENANT_SLUG);
     const started = await startNativeBackgroundGps({
+      brandShortName: brand.shortName,
+      pinEmoji: brand.pinEmoji,
       onLocation: async (fix, isKeepAlive) => {
         postGpsToNav3DEmbed(fix);
         await publishDriverLocationUpdate({
@@ -1365,11 +1397,17 @@ document.getElementById("newPlaceForm").addEventListener("submit", async (e) => 
 
 // ================= TRUNK & CORTE CALCULATIONS =================
 function computeMyTrunkAndCorte() {
-  const cals = ["M", "P", "E", "S"];
-  const out = { M: 0, P: 0, E: 0, S: 0 };
-  const ret = { M: 0, P: 0, E: 0, S: 0 };
-  const sold = { M: 0, P: 0, E: 0, S: 0 };
-  const avail = { M: 0, P: 0, E: 0, S: 0 };
+  const cals = getActiveProductCodes();
+  const out = {};
+  const ret = {};
+  const sold = {};
+  const avail = {};
+  for (const c of cals) {
+    out[c] = 0;
+    ret[c] = 0;
+    sold[c] = 0;
+    avail[c] = 0;
+  }
 
   let lastRipeness = "";
   let vueltas = 0;
@@ -1377,8 +1415,12 @@ function computeMyTrunkAndCorte() {
   for (const t of whTripsToday) {
     vueltas++;
     lastRipeness = t.ripeness || lastRipeness;
-    for (const c of cals) {
+    for (const c of Object.keys(t.out || {})) {
+      if (out[c] === undefined) { out[c] = 0; ret[c] = 0; sold[c] = 0; avail[c] = 0; if (!cals.includes(c)) cals.push(c); }
       out[c] += Number(t.out?.[c]) || 0;
+    }
+    for (const c of Object.keys(t.ret || {})) {
+      if (ret[c] === undefined) { out[c] = 0; ret[c] = 0; sold[c] = 0; avail[c] = 0; if (!cals.includes(c)) cals.push(c); }
       ret[c] += Number(t.ret?.[c]) || 0;
     }
   }
@@ -1390,7 +1432,8 @@ function computeMyTrunkAndCorte() {
 
   for (const s of mySalesToday) {
     if (isSaleCancelled(s)) continue;
-    for (const c of cals) {
+    for (const c of Object.keys(s.boxesByCaliber || {})) {
+      if (sold[c] === undefined) { out[c] = 0; ret[c] = 0; sold[c] = 0; avail[c] = 0; if (!cals.includes(c)) cals.push(c); }
       sold[c] = round1(sold[c] + (Number(s.boxesByCaliber?.[c]) || 0));
     }
     grossMoney += Number(s.totalAmount) || 0;
@@ -1405,14 +1448,15 @@ function computeMyTrunkAndCorte() {
   let totalAvailable = 0;
 
   for (const c of cals) {
-    avail[c] = out[c] - ret[c] - sold[c];
-    totalOut += out[c];
-    totalRet += ret[c];
-    totalSold += sold[c];
-    totalAvailable += avail[c];
+    avail[c] = round1((out[c] || 0) - (ret[c] || 0) - (sold[c] || 0));
+    totalOut = round1(totalOut + (out[c] || 0));
+    totalRet = round1(totalRet + (ret[c] || 0));
+    totalSold = round1(totalSold + (sold[c] || 0));
+    totalAvailable = round1(totalAvailable + avail[c]);
   }
 
   return {
+    cals,
     out,
     ret,
     sold,
@@ -1432,28 +1476,35 @@ function computeMyTrunkAndCorte() {
 
 function refreshAllViews() {
   const stats = computeMyTrunkAndCorte();
+  const mods = getTenantModules(storeSettings);
 
-  document.getElementById("trunkTotalAvailable").textContent = `${stats.totalAvailable} caja${stats.totalAvailable === 1 ? "" : "s"}`;
+  document.getElementById("trunkTotalAvailable").textContent = formatBoxesKg(stats.totalAvailable);
   document.getElementById("trunkRipenessTag").textContent = stats.vueltas > 0
-    ? `${stats.vueltas} vuelta${stats.vueltas === 1 ? "" : "s"} • ${stats.lastRipeness || "Surtido"}`
+    ? `${stats.vueltas} vuelta${stats.vueltas === 1 ? "" : "s"}${mods.ripeness ? ` • ${stats.lastRipeness || "Surtido"}` : ""}`
     : "Sin salida registrada hoy";
 
-  document.getElementById("trunkM").textContent = String(stats.avail.M);
-  document.getElementById("trunkP").textContent = String(stats.avail.P);
-  document.getElementById("trunkE").textContent = String(stats.avail.E);
-  document.getElementById("trunkS").textContent = String(stats.avail.S);
+  const trunkGrid = document.getElementById("trunkCalGrid");
+  if (trunkGrid) {
+    const prods = getOrderedProducts(storeSettings, ACTIVE_TENANT_SLUG === "salinas" ? DEFAULT_STORE_SETTINGS.calibers : {});
+    trunkGrid.innerHTML = prods
+      .map((p) => {
+        const shortLbl = String(p.name || p.code).split("/")[0].trim().slice(0, 10);
+        return `<div class="trunk-cal-box"><div class="code">${escapeHtml(p.code)} · ${escapeHtml(shortLbl)}</div><div class="num">${formatBoxesKg(stats.avail[p.code] ?? 0)}</div></div>`;
+      })
+      .join("");
+  }
 
   document.querySelectorAll("[data-avail-badge]").forEach((el) => {
     const code = el.dataset.availBadge;
-    el.textContent = `En carro: ${stats.avail[code] ?? 0}`;
+    el.textContent = `En carro: ${formatBoxesKg(stats.avail[code] ?? 0)}`;
   });
 
-  document.getElementById("corteBoxesOut").textContent = `${stats.totalOut} cajas`;
-  document.getElementById("corteBoxesSold").textContent = `${stats.totalSold} cajas`;
-  document.getElementById("corteBoxesRet").textContent = `${stats.totalRet} cajas`;
-  document.getElementById("corteBoxesPending").textContent = `${stats.totalAvailable} cajas`;
+  document.getElementById("corteBoxesOut").textContent = formatBoxesKg(stats.totalOut);
+  document.getElementById("corteBoxesSold").textContent = formatBoxesKg(stats.totalSold);
+  document.getElementById("corteBoxesRet").textContent = formatBoxesKg(stats.totalRet);
+  document.getElementById("corteBoxesPending").textContent = formatBoxesKg(stats.totalAvailable);
   document.getElementById("corteBoxesPendingSub").textContent =
-    `M:${stats.avail.M} • P:${stats.avail.P} • E:${stats.avail.E} • S:${stats.avail.S}`;
+    stats.cals.map((c) => `${c}:${formatBoxesKg(stats.avail[c] ?? 0)}`).join(" • ");
 
   document.getElementById("corteMoneyGross").textContent = formatCurrency(stats.grossMoney);
   document.getElementById("corteMoneyTransf").textContent = formatCurrency(stats.transfMoney);
@@ -1549,8 +1600,8 @@ function sendInitToNav3DEmbed() {
       {
         type: "RP_NAV_INIT",
         licenseKey: RP_NAV_EMBED_LICENSE_KEY,
-        driverName: currentDriverName || "Chofer Salinas",
-        uiConfig: SALINAS_NAV3D_UI_CONFIG,
+        driverName: currentDriverName || "Chofer",
+        uiConfig: buildTenantNav3DUiConfig(),
         stops: pendingNav3DPayload.stops,
         destination: pendingNav3DPayload.stops[pendingNav3DPayload.activeStopIndex || 0] || null,
         activeStopIndex: pendingNav3DPayload.activeStopIndex || 0,
@@ -2019,17 +2070,20 @@ function renderStreetSaleCalibers() {
   if (!container) return;
 
   const stats = computeMyTrunkAndCorte();
-  const orderedCodes = ["S", "E", "P", "M"];
+  const orderedCodes = getActiveProductCodes();
+  const uCfg = getUnitConfig(storeSettings);
+  const mods = getTenantModules(storeSettings);
+  const allowFrac = uCfg.allowSubUnit && mods.fractionalSales;
 
   container.innerHTML = orderedCodes
     .map((code) => {
-      const cal = storeSettings.calibers[code] || DEFAULT_STORE_SETTINGS.calibers[code];
+      const cal = storeSettings.calibers[code] || DEFAULT_STORE_SETTINGS.calibers[code] || { code, name: code, price: 100, minPrice: 1 };
       const qty = saleQtys[code] || 0;
-      const kg = saleKgs[code] || 0;
+      const kg = allowFrac ? (saleKgs[code] || 0) : 0;
       const isActiveRow = qty > 0 || kg > 0;
       const unitPrice = salePrices[code] || cal.price;
       const minPrice = Number(cal.minPrice) || 1;
-      const kgPrice = saleKgPrices[code] || Number(cal.pricePerKg) || Math.round((unitPrice / 10) * 100) / 100;
+      const kgPrice = saleKgPrices[code] || Number(cal.pricePerKg) || Math.round((unitPrice / uCfg.subUnitsPerUnit) * 100) / 100;
 
       return `
         <div class="driver-sale-cal-row ${isActiveRow ? "active-row" : ""}" data-cal-row="${code}">
@@ -2037,7 +2091,7 @@ function renderStreetSaleCalibers() {
             <div>
               <strong style="font-size:0.98rem;color:var(--green-950);">${escapeHtml(code)} · ${escapeHtml(cal.name)}</strong>
               <span style="display:block;font-size:0.73rem;color:var(--slate-500);">
-                Lista: ${formatCurrency(cal.price)}/cj (${formatCurrency(Number(cal.pricePerKg) || cal.price / 10)}/kg) • Mín: ${formatCurrency(minPrice)}
+                Lista: ${formatCurrency(cal.price)}/${escapeHtml(uCfg.unitSingular)}${allowFrac ? ` (${formatCurrency(Number(cal.pricePerKg) || cal.price / uCfg.subUnitsPerUnit)}/${escapeHtml(uCfg.subUnit)})` : ""} • Mín: ${formatCurrency(minPrice)}
               </span>
             </div>
             <span class="ripeness-badge" data-avail-badge="${code}">En carro: ${formatBoxesKg(stats.avail[code] ?? 0)}</span>
@@ -2046,20 +2100,20 @@ function renderStreetSaleCalibers() {
           <div class="driver-cal-controls" style="flex-wrap:wrap;gap:8px;">
             <div class="stepper">
               <button type="button" data-step-code="${code}" data-delta="-1">−</button>
-              <input type="number" min="0" max="500" inputmode="numeric" data-qty-code="${code}" value="${qty}" title="Cajas (10 kg c/u)">
+              <input type="number" min="0" max="500" inputmode="numeric" data-qty-code="${code}" value="${qty}" title="${escapeHtml(uCfg.unitPlural)}">
               <button type="button" data-step-code="${code}" data-delta="1">+</button>
             </div>
 
-            <div class="stepper" style="border-color:#cbd5e1;" title="Kilos sueltos adicionales">
+            ${allowFrac ? `<div class="stepper" style="border-color:#cbd5e1;" title="Unidades sueltas (${escapeHtml(uCfg.subUnit)})">
               <button type="button" data-kg-step-code="${code}" data-delta="-1">−</button>
               <input type="number" min="0" max="99" inputmode="numeric" data-kg-code="${code}" value="${kg}" style="width:36px;">
               <button type="button" data-kg-step-code="${code}" data-delta="1">+</button>
-              <span style="font-size:0.72rem;font-weight:800;color:var(--slate-500);padding:0 6px 0 2px;">kg</span>
-            </div>
+              <span style="font-size:0.72rem;font-weight:800;color:var(--slate-500);padding:0 6px 0 2px;">${escapeHtml(uCfg.subUnit)}</span>
+            </div>` : ""}
 
             <div class="driver-price-box">
-              <span class="lbl">$/caja <small style="color:var(--slate-500);font-weight:600;" data-kg-price-lbl="${code}">(${formatCurrency(kgPrice)}/kg)</small></span>
-              <input type="number" min="${minPrice}" max="9999" inputmode="numeric" class="form-control" data-price-code="${code}" value="${unitPrice}">
+              <span class="lbl">$/${escapeHtml(uCfg.unitSingular)} ${allowFrac ? `<small style="color:var(--slate-500);font-weight:600;" data-kg-price-lbl="${code}">(${formatCurrency(kgPrice)}/${escapeHtml(uCfg.subUnit)})</small>` : ""}</span>
+              <input type="number" min="${minPrice}" max="99999" inputmode="numeric" class="form-control" data-price-code="${code}" value="${unitPrice}">
             </div>
           </div>
         </div>
@@ -2156,13 +2210,14 @@ document.getElementById("saleAdvanceInput").addEventListener("input", () => {
 function recalcStreetSaleTotals() {
   let totalBoxes = 0;
   let totalAmount = 0;
+  const uCfg = getUnitConfig(storeSettings);
 
-  for (const code of ["S", "E", "P", "M"]) {
+  for (const code of getActiveProductCodes()) {
     const boxes = saleQtys[code] || 0;
     const kgs = saleKgs[code] || 0;
     const p = salePrices[code] || 0;
-    const kp = saleKgPrices[code] || p / 10;
-    const equivBoxes = round1(boxes + kgs / 10);
+    const kp = saleKgPrices[code] || p / uCfg.subUnitsPerUnit;
+    const equivBoxes = round1(boxes + kgs / uCfg.subUnitsPerUnit);
     totalBoxes = round1(totalBoxes + equivBoxes);
     totalAmount += Math.round(boxes * p + kgs * kp);
   }
@@ -2277,20 +2332,21 @@ document.getElementById("streetSaleForm").addEventListener("submit", async (e) =
   }
 
   const items = [];
-  const boxesByCaliber = { M: 0, P: 0, E: 0, S: 0 };
+  const boxesByCaliber = {};
   let totalBoxes = 0;
   let totalAmount = 0;
+  const uCfg = getUnitConfig(storeSettings);
 
-  for (const code of ["S", "E", "P", "M"]) {
+  for (const code of getActiveProductCodes()) {
     const boxes = saleQtys[code] || 0;
     const extraKg = saleKgs[code] || 0;
-    const equivBoxes = round1(boxes + extraKg / 10);
+    const equivBoxes = round1(boxes + extraKg / uCfg.subUnitsPerUnit);
     if (equivBoxes <= 0) continue;
 
-    const cal = storeSettings.calibers[code] || DEFAULT_STORE_SETTINGS.calibers[code];
+    const cal = storeSettings.calibers[code] || DEFAULT_STORE_SETTINGS.calibers[code] || { code, name: code, minPrice: 1 };
     const minPrice = Number(cal.minPrice) || 1;
     const unitPrice = salePrices[code] || 0;
-    const kgPrice = saleKgPrices[code] || unitPrice / 10;
+    const kgPrice = saleKgPrices[code] || unitPrice / uCfg.subUnitsPerUnit;
 
     if (unitPrice < minPrice) {
       showToast(`El precio mínimo autorizado para ${cal.name} es ${formatCurrency(minPrice)}.`);
@@ -2298,7 +2354,7 @@ document.getElementById("streetSaleForm").addEventListener("submit", async (e) =
     }
 
     const subtotal = Math.round(boxes * unitPrice + extraKg * kgPrice);
-    const totalKg = Math.round(equivBoxes * 10);
+    const totalKg = Math.round(equivBoxes * uCfg.subUnitsPerUnit);
     items.push({ code, name: cal.name, qty: equivBoxes, boxes, extraKg, totalKg, unitPrice, kgPrice, subtotal });
     boxesByCaliber[code] = equivBoxes;
     totalBoxes = round1(totalBoxes + equivBoxes);
@@ -2363,8 +2419,8 @@ document.getElementById("streetSaleForm").addEventListener("submit", async (e) =
 
     rememberClient(customerName, phone);
 
-    saleQtys = { S: 0, E: 0, P: 0, M: 0 };
-    saleKgs = { S: 0, E: 0, P: 0, M: 0 };
+    saleQtys = {};
+    saleKgs = {};
     syncDefaultSalePrices();
     document.getElementById("saleSelectedPlaceId").value = "";
     document.getElementById("saleLinkedPlaceBadge").style.display = "none";
@@ -2397,14 +2453,15 @@ function buildDigitalReceiptWhatsAppUrl(sale) {
       `*Saldo pendiente (Crédito):* ${formatCurrency(sale.creditBalance)}`;
   }
 
+  const brand = getTenantBranding(storeSettings, ACTIVE_TENANT_SLUG);
   const msg =
-    `🥑 *NOTA DE VENTA — COMERCIALIZADORA SALINAS*\n` +
+    `${brand.pinEmoji} *NOTA DE VENTA — ${brand.brandName.toUpperCase()}*\n` +
     `*Folio:* ${sale.folio}\n` +
     `*Cliente:* ${sale.customerName}\n` +
     `*Atendió:* ${sale.driver}\n\n` +
     `${itemsLines}\n\n` +
     `${payLine}\n\n` +
-    `_“La lealtad es escasa en estos tiempos y nosotros la valoramos. Gracias por tu lealtad.”_`;
+    (brand.loyaltyQuote ? `_${brand.loyaltyQuote}_` : "");
 
   return cleanPhone
     ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`

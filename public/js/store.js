@@ -1,20 +1,25 @@
 import {
   db,
   doc,
-  addDoc,
-  collection,
+  getDoc,
   onSnapshot,
-  serverTimestamp,
   DEFAULT_STORE_SETTINGS,
+  ACTIVE_TENANT_SLUG,
+  FUNCTIONS_BASE_URL,
+  tenantScopedStorageKey,
+  getUnitConfig,
+  getTenantBranding,
+  getOrderedProducts,
+  applyTenantWhiteLabelToDOM,
   formatCurrency,
   cleanPhoneForWhatsApp
 } from "./firebase-config.js";
 
-const STORAGE_CUSTOMER_KEY = "salinas_customer_profile_v1";
-const STORAGE_ORDERS_KEY = "salinas_my_order_ids_v1";
+const STORAGE_CUSTOMER_KEY = tenantScopedStorageKey("salinas_customer_profile_v1");
+const STORAGE_ORDERS_KEY = tenantScopedStorageKey("salinas_my_order_ids_v1");
 
 let storeSettings = structuredClone(DEFAULT_STORE_SETTINGS);
-let cart = { S: 0, E: 0, P: 0, M: 0 };
+let cart = {};
 let customerCoords = null;
 let activeOrderUnsubs = [];
 
@@ -63,11 +68,13 @@ function escapeHtml(str) {
 }
 
 function getOrderedCalibers() {
-  const calObj = storeSettings.calibers || DEFAULT_STORE_SETTINGS.calibers;
-  return Object.values(calObj).sort((a, b) => (a.order || 99) - (b.order || 99));
+  const fallback = ACTIVE_TENANT_SLUG === "salinas" ? DEFAULT_STORE_SETTINGS.calibers : {};
+  return getOrderedProducts(storeSettings, fallback);
 }
 
 function updateHeaderUI() {
+  applyTenantWhiteLabelToDOM(storeSettings, ACTIVE_TENANT_SLUG);
+  const brand = getTenantBranding(storeSettings, ACTIVE_TENANT_SLUG);
   const isOpen = storeSettings.storeOpen !== false;
   storeStatusDot.classList.toggle("closed", !isOpen);
   topBannerText.textContent = isOpen
@@ -76,14 +83,15 @@ function updateHeaderUI() {
 
   heroSchedule.textContent = storeSettings.scheduleText || DEFAULT_STORE_SETTINGS.scheduleText;
   heroPhone1.textContent = "📞 " + (storeSettings.phoneDisplayPrimary || DEFAULT_STORE_SETTINGS.phoneDisplayPrimary);
-  heroPhone2.textContent = "📞 " + (storeSettings.phoneDisplaySecondary || DEFAULT_STORE_SETTINGS.phoneDisplaySecondary);
+  heroPhone2.textContent = storeSettings.phoneDisplaySecondary ? "📞 " + storeSettings.phoneDisplaySecondary : "";
 
   const waNum = cleanPhoneForWhatsApp(storeSettings.whatsappPrimary || DEFAULT_STORE_SETTINGS.whatsappPrimary);
-  navWhatsappBtn.href = `https://wa.me/${waNum}?text=${encodeURIComponent("Hola Comercializadora Salinas, me gustaría pedir informes sobre aguacate.")}`;
+  navWhatsappBtn.href = `https://wa.me/${waNum}?text=${encodeURIComponent(`Hola ${brand.brandName}, me gustaría solicitar información de precios y pedidos.`)}`;
 }
 
 function renderCatalog() {
   const calibers = getOrderedCalibers();
+  const units = getUnitConfig(storeSettings);
   const isStoreOpen = storeSettings.storeOpen !== false;
 
   caliberGrid.innerHTML = calibers
@@ -92,6 +100,7 @@ function renderCatalog() {
       const qty = cart[code] || 0;
       const available = cal.available !== false && isStoreOpen;
       const lineTotal = qty * (Number(cal.price) || 0);
+      const uLbl = qty === 1 ? units.unitSingular : units.unitPlural;
 
       return `
         <article class="caliber-card ${qty > 0 ? "in-cart" : ""} ${!available ? "sold-out" : ""}" data-code="${code}">
@@ -115,23 +124,23 @@ function renderCatalog() {
             <div class="caliber-price-row">
               <div>
                 <span class="price-amount">${formatCurrency(cal.price)}</span>
-                <span class="price-unit">/ caja</span>
+                <span class="price-unit">/ ${escapeHtml(units.unitSingular)}</span>
               </div>
               <div class="line-subtotal">
-                ${qty > 0 ? `${qty} caja${qty === 1 ? "" : "s"} = ${formatCurrency(lineTotal)}` : ""}
+                ${qty > 0 ? `${qty} ${escapeHtml(uLbl)} = ${formatCurrency(lineTotal)}` : ""}
               </div>
             </div>
 
             <div class="qty-controls">
               <div class="stepper">
-                <button type="button" data-action="dec" data-code="${code}" ${!available || qty <= 0 ? "disabled" : ""} aria-label="Restar caja">−</button>
-                <input type="number" min="0" max="999" value="${qty}" data-code="${code}" class="qty-input" ${!available ? "disabled" : ""} aria-label="Cantidad de cajas ${escapeHtml(cal.name)}">
-                <button type="button" data-action="inc" data-code="${code}" ${!available ? "disabled" : ""} aria-label="Sumar caja">+</button>
+                <button type="button" data-action="dec" data-code="${code}" ${!available || qty <= 0 ? "disabled" : ""} aria-label="Restar">−</button>
+                <input type="number" min="0" max="999" value="${qty}" data-code="${code}" class="qty-input" ${!available ? "disabled" : ""} aria-label="Cantidad ${escapeHtml(cal.name)}">
+                <button type="button" data-action="inc" data-code="${code}" ${!available ? "disabled" : ""} aria-label="Sumar">+</button>
               </div>
               <div class="quick-pills">
-                <button type="button" class="quick-pill" data-action="add" data-amount="1" data-code="${code}" ${!available ? "disabled" : ""}>+1 caja</button>
-                <button type="button" class="quick-pill" data-action="add" data-amount="5" data-code="${code}" ${!available ? "disabled" : ""}>+5 cajas</button>
-                <button type="button" class="quick-pill" data-action="add" data-amount="10" data-code="${code}" ${!available ? "disabled" : ""}>+10 cajas</button>
+                <button type="button" class="quick-pill" data-action="add" data-amount="1" data-code="${code}" ${!available ? "disabled" : ""}>+1 ${escapeHtml(units.unitSingular)}</button>
+                <button type="button" class="quick-pill" data-action="add" data-amount="5" data-code="${code}" ${!available ? "disabled" : ""}>+5 ${escapeHtml(units.unitPlural)}</button>
+                <button type="button" class="quick-pill" data-action="add" data-amount="10" data-code="${code}" ${!available ? "disabled" : ""}>+10 ${escapeHtml(units.unitPlural)}</button>
               </div>
             </div>
           </div>
@@ -320,11 +329,12 @@ function refreshOrdersBadge() {
 }
 
 function generateOrderFolio() {
+  const brand = getTenantBranding(storeSettings, ACTIVE_TENANT_SLUG);
   const now = new Date();
   const mm = String(now.getMonth() + 1).padStart(2, "0");
   const dd = String(now.getDate()).padStart(2, "0");
   const rand = Math.floor(100 + Math.random() * 900);
-  return `SAL-${mm}${dd}-${rand}`;
+  return `${brand.folioPrefix}-${mm}${dd}-${rand}`;
 }
 
 // Submit Order to Firestore
@@ -354,7 +364,7 @@ orderForm.addEventListener("submit", async (e) => {
 
   const calibers = getOrderedCalibers();
   const items = [];
-  const boxesByCaliber = { M: 0, P: 0, E: 0, S: 0 };
+  const boxesByCaliber = {};
   let totalBoxes = 0;
   let totalAmount = 0;
 
@@ -377,7 +387,8 @@ orderForm.addEventListener("submit", async (e) => {
   }
 
   if (totalBoxes <= 0) {
-    showToast("Selecciona al menos 1 caja para enviar tu pedido.");
+    const units = getUnitConfig(storeSettings);
+    showToast(`Selecciona al menos 1 ${units.unitSingular} para enviar tu pedido.`);
     return;
   }
 
@@ -399,14 +410,19 @@ orderForm.addEventListener("submit", async (e) => {
       boxesByCaliber,
       totalBoxes,
       totalAmount,
-      ...(customerCoords ? { lat: customerCoords.lat, lng: customerCoords.lng } : {}),
-      status: "nuevo",
-      assignedDriver: "",
-      createdAt: serverTimestamp(),
-      createdAtIso: new Date().toISOString()
+      ...(customerCoords ? { lat: customerCoords.lat, lng: customerCoords.lng } : {})
     };
 
-    const docRef = await addDoc(collection(db, "orders"), orderPayload);
+    const res = await fetch(`${FUNCTIONS_BASE_URL}/submitPublicOrder`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tenantSlug: ACTIVE_TENANT_SLUG, orderPayload })
+    });
+    const json = await res.json();
+    if (!res.ok || !json.ok || !json.orderId) {
+      throw new Error(json.error || "Error al registrar el pedido");
+    }
+
     saveCustomerProfile({
       customerName,
       phone,
@@ -415,15 +431,15 @@ orderForm.addEventListener("submit", async (e) => {
       ripeness,
       ...(customerCoords ? { lat: customerCoords.lat, lng: customerCoords.lng } : {})
     });
-    saveOrderIdLocally(docRef.id);
+    saveOrderIdLocally(json.orderId);
 
     // Clear cart & notes
-    cart = { S: 0, E: 0, P: 0, M: 0 };
+    cart = {};
     document.getElementById("orderNotes").value = "";
     renderCatalog();
 
-    openOrdersModal(folio);
-    showToast(`¡Pedido ${folio} registrado con éxito!`);
+    openOrdersModal(json.folio || folio);
+    showToast(`¡Pedido ${json.folio || folio} registrado con éxito!`);
   } catch (err) {
     console.error("Error guardando pedido:", err);
     showToast("Hubo un problema al enviar tu pedido. Intenta de nuevo.");
@@ -441,17 +457,16 @@ const STATUS_INFO = {
 };
 
 function buildWhatsAppConfirmationUrl(order) {
+  const brand = getTenantBranding(storeSettings, ACTIVE_TENANT_SLUG);
+  const units = getUnitConfig(storeSettings);
   const waNum = cleanPhoneForWhatsApp(storeSettings.whatsappPrimary || DEFAULT_STORE_SETTINGS.whatsappPrimary);
-  const lines = (order.items || []).map((i) => `• ${i.qty} caja(s) ${i.name} (${formatCurrency(i.subtotal)})`).join("\n");
+  const lines = (order.items || []).map((i) => `• ${i.qty} ${units.unitSingular}(s) ${i.name} (${formatCurrency(i.subtotal)})`).join("\n");
   const msg =
-    `Hola *Comercializadora Salinas*, acabo de registrar mi pedido en línea:\n\n` +
+    `Hola *${brand.brandName}*, acabo de registrar mi pedido en línea:\n\n` +
     `*Folio:* ${order.folio}\n` +
-    `*Cliente:* ${order.customerName}\n` +
+    (order.customerName ? `*Cliente:* ${order.customerName}\n` : "") +
     `*Pedido:*\n${lines}\n` +
-    `*Total:* ${formatCurrency(order.totalAmount)} (${order.totalBoxes} cajas)\n` +
-    `*Madurez:* ${order.ripeness || "Surtido"}\n` +
-    `*Dirección:* ${order.address}\n` +
-    `*Pago:* ${order.paymentMethod || "Efectivo"}`;
+    `*Total:* ${formatCurrency(order.totalAmount)} (${order.totalBoxes} ${units.unitPlural})`;
   return `https://wa.me/${waNum}?text=${encodeURIComponent(msg)}`;
 }
 
@@ -571,7 +586,7 @@ function subscribeToMyOrders() {
 
   ids.forEach((orderId) => {
     const unsub = onSnapshot(
-      doc(db, "orders", orderId),
+      doc(db, "public_order_tracking", orderId),
       (snap) => {
         if (snap.exists()) {
           ordersMap.set(orderId, { id: snap.id, ...snap.data() });
@@ -584,25 +599,22 @@ function subscribeToMyOrders() {
   });
 }
 
-myOrdersListContainer.addEventListener("click", (e) => {
+myOrdersListContainer.addEventListener("click", async (e) => {
   const btn = e.target.closest(".btn-reorder");
   if (!btn) return;
   const orderId = btn.dataset.id;
-  onSnapshot(doc(db, "orders", orderId), (snap) => {
-    if (!snap.exists()) return;
-    const data = snap.data();
-    const boxes = data.boxesByCaliber || {};
-    cart = {
-      S: Number(boxes.S) || 0,
-      E: Number(boxes.E) || 0,
-      P: Number(boxes.P) || 0,
-      M: Number(boxes.M) || 0
-    };
-    renderCatalog();
-    closeOrdersModal();
-    document.getElementById("mi-pedido").scrollIntoView({ behavior: "smooth" });
-    showToast("Cajas cargadas en tu pedido actual.");
-  })();
+  const snap = await getDoc(doc(db, "public_order_tracking", orderId));
+  if (!snap.exists()) return;
+  const data = snap.data();
+  const nextCart = {};
+  (data.items || []).forEach((it) => {
+    if (it.code) nextCart[it.code] = Number(it.qty) || 0;
+  });
+  cart = nextCart;
+  renderCatalog();
+  closeOrdersModal();
+  document.getElementById("mi-pedido").scrollIntoView({ behavior: "smooth" });
+  showToast("Productos cargados en tu pedido actual.");
 });
 
 btnOpenMyOrders.addEventListener("click", () => openOrdersModal(null));
@@ -611,19 +623,21 @@ ordersModal.addEventListener("click", (e) => {
   if (e.target === ordersModal) closeOrdersModal();
 });
 
-// Subscribe to live store settings from Firestore
+// Subscribe to live public storefront from Firestore
 onSnapshot(
-  doc(db, "settings", "store"),
+  doc(db, "settings", "public_storefront"),
   (snap) => {
     if (snap.exists()) {
       const remote = snap.data();
       storeSettings = {
         ...DEFAULT_STORE_SETTINGS,
         ...remote,
-        calibers: {
-          ...DEFAULT_STORE_SETTINGS.calibers,
-          ...(remote.calibers || {})
-        }
+        calibers:
+          remote.calibers && Object.keys(remote.calibers).length > 0
+            ? remote.calibers
+            : ACTIVE_TENANT_SLUG === "salinas"
+              ? DEFAULT_STORE_SETTINGS.calibers
+              : {}
       };
     }
     updateHeaderUI();

@@ -1,14 +1,14 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js";
 import {
   initializeFirestore,
-  doc,
-  getDoc,
+  doc as fbDoc,
+  getDoc as fbGetDoc,
   getDocs,
   setDoc,
   addDoc,
   updateDoc,
   writeBatch,
-  collection,
+  collection as fbCollection,
   query,
   where,
   orderBy,
@@ -16,6 +16,38 @@ import {
   onSnapshot,
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+import {
+  TENANT_VAULT_CACHE_PREFIX,
+  resolveInitialTenantSlug,
+  switchActiveTenantSlug,
+  getUnitConfig,
+  getTenantModules,
+  getTenantTerminology,
+  getTenantBranding,
+  getOrderedProducts,
+  getProductCodes,
+  formatDynamicUnits,
+  applyTenantWhiteLabelToDOM,
+  mountTenantSwitcherPill,
+  INDUSTRY_TEMPLATES,
+  SAAS_PLATFORM_BRAND
+} from "./tenant-config.js";
+
+export {
+  resolveInitialTenantSlug,
+  switchActiveTenantSlug,
+  getUnitConfig,
+  getTenantModules,
+  getTenantTerminology,
+  getTenantBranding,
+  getOrderedProducts,
+  getProductCodes,
+  formatDynamicUnits,
+  applyTenantWhiteLabelToDOM,
+  mountTenantSwitcherPill,
+  INDUSTRY_TEMPLATES,
+  SAAS_PLATFORM_BRAND
+};
 
 export const firebaseConfig = {
   apiKey: "AIzaSyBGKOHbw7MB4TyhD8gP5Elfz9SjIouPflE",
@@ -26,6 +58,8 @@ export const firebaseConfig = {
   appId: "1:129226187583:web:ebfea64c53670df642298a"
 };
 
+export const FUNCTIONS_BASE_URL = "https://us-central1-aguacates-salinas.cloudfunctions.net";
+
 export const FCM_VAPID_KEY =
   "BAg6T0bFLmMxQp7oIto7bkbmhW6kCJ2KrY2DxLEN3_40-HYebwimUo2SXSqeOL9RCdL9bV_ygRBGp26FHwtt1Ag";
 
@@ -34,15 +68,244 @@ export const db = initializeFirestore(app, {
   experimentalAutoDetectLongPolling: true
 });
 
+// ================= MULTI-TENANT VAULT ROUTING =================
+export const ACTIVE_TENANT_SLUG = resolveInitialTenantSlug();
+
+const VAULT_STORAGE_KEY = `${TENANT_VAULT_CACHE_PREFIX}${ACTIVE_TENANT_SLUG}`;
+let activeVaultId = "";
+try {
+  activeVaultId =
+    sessionStorage.getItem(VAULT_STORAGE_KEY) ||
+    localStorage.getItem(VAULT_STORAGE_KEY) ||
+    "";
+} catch (_) {}
+
+if (typeof window !== "undefined") {
+  window.__RPD_ACTIVE_TENANT = ACTIVE_TENANT_SLUG;
+  window.__RPD_ACTIVE_VAULT = activeVaultId;
+}
+
+export function getActiveTenantSlug() {
+  return ACTIVE_TENANT_SLUG;
+}
+
+export function getActiveVaultId() {
+  return activeVaultId;
+}
+
+export function setActiveVaultId(vaultId, persistLocal = true) {
+  const clean = String(vaultId || "").trim();
+  if (!clean) return;
+  activeVaultId = clean;
+  if (typeof window !== "undefined") {
+    window.__RPD_ACTIVE_VAULT = clean;
+  }
+  try {
+    sessionStorage.setItem(VAULT_STORAGE_KEY, clean);
+    if (persistLocal) localStorage.setItem(VAULT_STORAGE_KEY, clean);
+  } catch (_) {}
+}
+
+export function clearActiveVaultId() {
+  activeVaultId = "";
+  if (typeof window !== "undefined") {
+    window.__RPD_ACTIVE_VAULT = "";
+  }
+  try {
+    sessionStorage.removeItem(VAULT_STORAGE_KEY);
+    localStorage.removeItem(VAULT_STORAGE_KEY);
+  } catch (_) {}
+}
+
+export function tenantScopedStorageKey(baseKey) {
+  if (ACTIVE_TENANT_SLUG === "salinas") return baseKey;
+  return `${baseKey}__${ACTIVE_TENANT_SLUG}`;
+}
+
+const VAULT_COLLECTIONS = new Set([
+  "places",
+  "place_visits",
+  "route_sales",
+  "orders",
+  "warehouse_days",
+  "thermos",
+  "pallet_lots",
+  "thermo_costs",
+  "expenses",
+  "driver_locations",
+  "driver_routes",
+  "driver_push_tokens"
+]);
+
+const TENANT_KEY_COLLECTIONS = new Set([
+  "admin_keys",
+  "driver_keys",
+  "warehouse_keys",
+  "superadmin_keys",
+  "admin_proofs",
+  "driver_proofs",
+  "warehouse_proofs",
+  "superadmin_proofs",
+  "public_order_tracking"
+]);
+
+function resolveMultiTenantSegments(segments) {
+  if (!segments || segments.length === 0) return segments;
+  const first = segments[0];
+
+  // Raw root paths already prefixed (saas_*, tenants, vaults, tenant_domains)
+  if (
+    first === "tenants" ||
+    first === "vaults" ||
+    first === "saas_config" ||
+    first === "saas_master_keys" ||
+    first === "saas_proofs" ||
+    first === "saas_vault" ||
+    first === "tenant_domains"
+  ) {
+    return segments;
+  }
+
+  // Auth key & proof collections live under tenants/{tenantSlug}/{col}/...
+  if (TENANT_KEY_COLLECTIONS.has(first)) {
+    return ["tenants", ACTIVE_TENANT_SLUG, ...segments];
+  }
+
+  // Settings routing:
+  // - security_init / superadmin_init -> tenants/{tenantSlug}/meta/{docId}
+  // - settings/store -> vaults/{vaultId}/settings/store when unlocked, else tenants/{tenantSlug}/public/storefront
+  if (first === "settings") {
+    const second = segments[1];
+    if (second === "security_init" || second === "superadmin_init") {
+      return ["tenants", ACTIVE_TENANT_SLUG, "meta", second, ...segments.slice(2)];
+    }
+    if (second === "public_storefront") {
+      return ["tenants", ACTIVE_TENANT_SLUG, "public", "storefront"];
+    }
+    if (second === "store") {
+      if (activeVaultId) {
+        return ["vaults", activeVaultId, "settings", "store", ...segments.slice(2)];
+      }
+      return ["tenants", ACTIVE_TENANT_SLUG, "public", "storefront"];
+    }
+    if (activeVaultId) {
+      return ["vaults", activeVaultId, ...segments];
+    }
+    return ["tenants", ACTIVE_TENANT_SLUG, ...segments];
+  }
+
+  // Operational collections live inside the tenant's cryptographic vault: vaults/{vaultId}/{col}/...
+  if (VAULT_COLLECTIONS.has(first)) {
+    const vId = activeVaultId || `__locked_${ACTIVE_TENANT_SLUG}`;
+    return ["vaults", vId, ...segments];
+  }
+
+  return segments;
+}
+
+export function rawDoc(firestoreDb, ...segments) {
+  return fbDoc(firestoreDb, ...segments);
+}
+
+export function rawCollection(firestoreDb, ...segments) {
+  return fbCollection(firestoreDb, ...segments);
+}
+
+export function doc(firestoreDb, ...segments) {
+  if (firestoreDb && firestoreDb.type === "collection") {
+    return fbDoc(firestoreDb, ...segments);
+  }
+  const mapped = resolveMultiTenantSegments(segments);
+  return fbDoc(firestoreDb, ...mapped);
+}
+
+export function collection(firestoreDb, ...segments) {
+  const mapped = resolveMultiTenantSegments(segments);
+  return fbCollection(firestoreDb, ...mapped);
+}
+
+export async function getDoc(docRef) {
+  const snap = await fbGetDoc(docRef);
+  try {
+    const path = docRef?.path || "";
+    if (
+      snap.exists() &&
+      /^tenants\/[^/]+\/(admin_keys|driver_keys|warehouse_keys|superadmin_keys)\//.test(path)
+    ) {
+      const d = snap.data();
+      if (d && d.active === true && d.vaultId) {
+        setActiveVaultId(d.vaultId, true);
+      }
+    }
+  } catch (_) {}
+  return snap;
+}
+
+/**
+ * Construye la proyección pública segura (`tenants/{slug}/public/storefront`)
+ * eliminando precios mínimos confidenciales, teléfonos privados de choferes y coordenadas de bodega.
+ */
+export function buildSanitizedPublicStorefront(fullSettings = {}, extraPublic = {}) {
+  const sanitizedCalibers = {};
+  for (const [code, cal] of Object.entries(fullSettings.calibers || {})) {
+    if (!cal || typeof cal !== "object") continue;
+    sanitizedCalibers[code] = {
+      code: cal.code || code,
+      name: cal.name || code,
+      subtitle: cal.subtitle || "",
+      description: cal.description || "",
+      badge: cal.badge || "",
+      price: Number(cal.price) || 0,
+      pricePerKg: Number(cal.pricePerKg) || Math.round(((Number(cal.price) || 0) / 10) * 100) / 100,
+      available: cal.available !== false,
+      archived: Boolean(cal.archived),
+      order: Number(cal.order) || 99
+    };
+  }
+
+  const sanitizedDrivers = Array.isArray(fullSettings.drivers)
+    ? fullSettings.drivers.map((d) => ({
+        id: d.id || "",
+        name: d.name || "",
+        hasPin: Boolean(d.hasPin)
+      }))
+    : [];
+
+  const sanitizedWhStaff = Array.isArray(fullSettings.warehouseStaff)
+    ? fullSettings.warehouseStaff.map((w) => ({
+        id: w.id || "",
+        name: w.name || ""
+      }))
+    : [];
+
+  return {
+    tenantSlug: ACTIVE_TENANT_SLUG,
+    tenantStatus: fullSettings.tenantStatus || extraPublic.tenantStatus || "active",
+    storeOpen: fullSettings.storeOpen !== false,
+    bannerMessage: fullSettings.bannerMessage || "",
+    whatsappPrimary: fullSettings.whatsappPrimary || "",
+    whatsappSecondary: fullSettings.whatsappSecondary || "",
+    phoneDisplayPrimary: fullSettings.phoneDisplayPrimary || "",
+    phoneDisplaySecondary: fullSettings.phoneDisplaySecondary || "",
+    scheduleText: fullSettings.scheduleText || "",
+    branding: fullSettings.branding || extraPublic.branding || getTenantBranding(fullSettings, ACTIVE_TENANT_SLUG),
+    unitConfig: fullSettings.unitConfig || extraPublic.unitConfig || getUnitConfig(fullSettings),
+    terminology: fullSettings.terminology || extraPublic.terminology || getTenantTerminology(fullSettings),
+    modules: fullSettings.modules || extraPublic.modules || getTenantModules(fullSettings),
+    plan: fullSettings.plan || extraPublic.plan || { tier: "pro", maxDrivers: 25 },
+    calibers: sanitizedCalibers,
+    drivers: sanitizedDrivers,
+    warehouseStaff: sanitizedWhStaff,
+    updatedAt: serverTimestamp()
+  };
+}
+
 export {
-  doc,
-  getDoc,
   getDocs,
   setDoc,
   addDoc,
   updateDoc,
   writeBatch,
-  collection,
   query,
   where,
   orderBy,
@@ -52,6 +315,7 @@ export {
 };
 
 export const DEFAULT_STORE_SETTINGS = {
+  tenantStatus: "active",
   storeOpen: true,
   bannerMessage: "Entregas el mismo día para pedidos realizados por la mañana.",
   whatsappPrimary: "524521715074",
@@ -59,6 +323,44 @@ export const DEFAULT_STORE_SETTINGS = {
   phoneDisplayPrimary: "452 171 50 74",
   phoneDisplaySecondary: "844 677 52 76",
   scheduleText: "Lunes a Sábado • 7:00 AM a 5:00 PM",
+  branding: {
+    brandName: "Comercializadora Salinas",
+    shortName: "Salinas",
+    tagline: "Especialistas en Aguacate",
+    logoUrl: "assets/logo-salinas.png",
+    heroImageUrl: "assets/avocados-icon.png",
+    faviconUrl: "assets/favicon.png",
+    pinEmoji: "🥑",
+    folioPrefix: "SAL",
+    loyaltyQuote: "“La lealtad es escasa en estos tiempos y nosotros la valoramos. Gracias por tu lealtad.”",
+    primaryColor: "#15803d",
+    darkColor: "#132615",
+    accentColor: "#eab308"
+  },
+  unitConfig: {
+    unitSingular: "caja",
+    unitPlural: "cajas",
+    subUnit: "kg",
+    subUnitsPerUnit: 10,
+    allowSubUnit: true
+  },
+  terminology: {
+    batchSingular: "Termo",
+    batchPlural: "Termos",
+    storageArea: "Cuartos Fríos",
+    productGroupLabel: "Calibres"
+  },
+  modules: {
+    coldRooms: true,
+    ripeness: true,
+    onlineStore: true,
+    fractionalSales: true,
+    nav3d: true
+  },
+  plan: {
+    tier: "enterprise",
+    maxDrivers: 50
+  },
   baseLocation: {
     name: "Base / Bodega Salinas",
     address: "Correo Marítimo 2661, Postal Cerritos 2da, Saltillo",
@@ -77,6 +379,7 @@ export const DEFAULT_STORE_SETTINGS = {
       description: "Piezas grandes de excelente presentación y pulpa cremosa. Ideal para carnicerías, fruterías selectas y exhibición.",
       badge: "Calidad Premium",
       price: 400,
+      pricePerKg: 40,
       minPrice: 340,
       available: true,
       order: 1
@@ -88,6 +391,7 @@ export const DEFAULT_STORE_SETTINGS = {
       description: "Tamaño uniforme de gran rendimiento en mesa y mostrador. Excelente balance entre presencia y costo por pieza.",
       badge: "Alto Rendimiento",
       price: 360,
+      pricePerKg: 36,
       minPrice: 310,
       available: true,
       order: 2
@@ -99,6 +403,7 @@ export const DEFAULT_STORE_SETTINGS = {
       description: "El favorito de abarrotes, cocinas económicas y restaurantes por su rotación diaria y tamaño versátil.",
       badge: "Más Pedido",
       price: 320,
+      pricePerKg: 32,
       minPrice: 280,
       available: true,
       order: 3
@@ -110,6 +415,7 @@ export const DEFAULT_STORE_SETTINGS = {
       description: "Misma frescura y sabor con el mejor precio por caja. Ideal para taquerías, guacamole, salsas y venta popular.",
       badge: "Especial Negocios",
       price: 250,
+      pricePerKg: 25,
       minPrice: 210,
       available: true,
       order: 4
@@ -133,11 +439,24 @@ export function generateProofId(prefix = "prf") {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+export function generateVaultId(tenantSlug = "t") {
+  const arr = new Uint8Array(16);
+  crypto.getRandomValues(arr);
+  const hex = Array.from(arr).map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `vlt_${tenantSlug.slice(0, 12)}_${hex}`;
+}
+
 export async function executeAdminBatch(keyHash, buildBatchFn) {
+  if (!activeVaultId) {
+    // Si es inicialización en limpio de un tenant nuevo, generar vaultId
+    setActiveVaultId(generateVaultId(ACTIVE_TENANT_SLUG), true);
+  }
   const batch = writeBatch(db);
   const proofId = generateProofId("prf");
   batch.set(doc(db, "admin_proofs", proofId), {
     keyHash,
+    tenantSlug: ACTIVE_TENANT_SLUG,
+    vaultId: activeVaultId,
     createdAt: serverTimestamp()
   });
   buildBatchFn(batch, proofId);
@@ -149,6 +468,8 @@ export async function executeDriverBatch(driverKeyHash, buildBatchFn) {
   const proofId = generateProofId("dprf");
   batch.set(doc(db, "driver_proofs", proofId), {
     keyHash: driverKeyHash,
+    tenantSlug: ACTIVE_TENANT_SLUG,
+    vaultId: activeVaultId,
     createdAt: serverTimestamp()
   });
   buildBatchFn(batch, proofId);
@@ -165,6 +486,8 @@ export async function executeWarehouseBatch(warehouseKeyHash, buildBatchFn) {
   const proofId = generateProofId("wprf");
   batch.set(doc(db, "warehouse_proofs", proofId), {
     keyHash: warehouseKeyHash,
+    tenantSlug: ACTIVE_TENANT_SLUG,
+    vaultId: activeVaultId,
     createdAt: serverTimestamp()
   });
   buildBatchFn(batch, proofId);
@@ -172,10 +495,15 @@ export async function executeWarehouseBatch(warehouseKeyHash, buildBatchFn) {
 }
 
 export async function executeSuperadminBatch(superadminKeyHash, buildBatchFn) {
+  if (!activeVaultId) {
+    setActiveVaultId(generateVaultId(ACTIVE_TENANT_SLUG), true);
+  }
   const batch = writeBatch(db);
   const proofId = generateProofId("sprf");
   batch.set(doc(db, "superadmin_proofs", proofId), {
     keyHash: superadminKeyHash,
+    tenantSlug: ACTIVE_TENANT_SLUG,
+    vaultId: activeVaultId,
     createdAt: serverTimestamp()
   });
   buildBatchFn(batch, proofId);
@@ -274,13 +602,11 @@ export function parseCoordsFromInput(raw) {
   const txt = String(raw || "").trim();
   if (!txt) return null;
 
-  // Match !3dLAT!4dLNG in Google Maps URLs
   const m3d = txt.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
   if (m3d) {
     return { lat: parseFloat(m3d[1]), lng: parseFloat(m3d[2]) };
   }
 
-  // Match ?q=LAT,LNG or @LAT,LNG or ll=LAT,LNG or plain "LAT, LNG"
   const pair = txt.match(/(-?\d{1,2}\.\d{3,})\s*[,\s]\s*(-?\d{2,3}\.\d{3,})/);
   if (pair) {
     const lat = parseFloat(pair[1]);

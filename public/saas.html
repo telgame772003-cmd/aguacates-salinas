@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Master SaaS Console | Ruta Pro Distribution — Ruta Pro Technologies</title>
+  <link rel="icon" type="image/png" href="assets/favicon.png">
+  <link rel="stylesheet" href="css/styles.css?v=rpd_1">
+  <style>
+    body.saas-body {
+      background: #0f172a;
+      color: #f8fafc;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    .saas-topbar {
+      background: #020617;
+      border-bottom: 1px solid #1e293b;
+      padding: 14px 20px;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+    .saas-topbar-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .saas-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .saas-badge {
+      background: linear-gradient(135deg, #10b981, #0284c7);
+      color: #fff;
+      font-size: 0.68rem;
+      font-weight: 900;
+      padding: 3px 9px;
+      border-radius: 999px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .saas-wrap {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px 16px 60px;
+    }
+    .saas-login-box {
+      max-width: 430px;
+      margin: 60px auto;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 18px;
+      padding: 28px 24px;
+      box-shadow: 0 25px 50px rgba(0, 0, 0, 0.45);
+    }
+    .saas-kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+    .saas-kpi-card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 14px;
+      padding: 16px 18px;
+    }
+    .saas-kpi-lbl {
+      font-size: 0.74rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #94a3b8;
+    }
+    .saas-kpi-val {
+      font-size: 1.75rem;
+      font-weight: 900;
+      color: #f8fafc;
+      margin-top: 4px;
+    }
+    .saas-kpi-sub {
+      font-size: 0.78rem;
+      color: #cbd5e1;
+      margin-top: 3px;
+    }
+    .saas-tenant-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+      gap: 16px;
+    }
+    .saas-tenant-card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 16px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 14px;
+    }
+    .saas-tenant-card.is-suspended {
+      border-color: #ef4444;
+      background: rgba(127, 29, 29, 0.18);
+    }
+    .saas-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.72rem;
+      font-weight: 800;
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: #334155;
+      color: #e2e8f0;
+    }
+    .saas-pill.active { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
+    .saas-pill.suspended { background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); }
+    .saas-link-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 5px 10px;
+      border-radius: 8px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      color: #38bdf8;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .saas-link-chip:hover { background: #1e293b; border-color: #38bdf8; }
+    .saas-dark-modal .modal-card {
+      background: #1e293b;
+      color: #f8fafc;
+      border: 1px solid #334155;
+    }
+    .saas-dark-modal .form-label { color: #cbd5e1; }
+    .saas-dark-modal .form-control {
+      background: #0f172a;
+      border-color: #334155;
+      color: #f8fafc;
+    }
+  </style>
+</head>
+<body class="saas-body">
+
+  <header class="saas-topbar">
+    <div class="saas-topbar-inner">
+      <div class="saas-brand">
+        <span style="font-size:1.45rem;">🌐</span>
+        <div>
+          <strong style="font-size:1.05rem;color:#fff;display:block;line-height:1.15;">Ruta Pro Distribution</strong>
+          <span style="font-size:0.73rem;color:#94a3b8;">Ruta Pro Technologies • Multi-Tenant SaaS Control</span>
+        </div>
+        <span class="saas-badge">Master Superadmin</span>
+      </div>
+
+      <div id="saasHeaderActions" style="display:none;gap:8px;align-items:center;flex-wrap:wrap;">
+        <button type="button" id="btnSaasRefresh" class="btn btn-outline btn-sm" style="color:#e2e8f0;border-color:#475569;">🔄 Actualizar</button>
+        <button type="button" id="btnSaasResyncSalinas" class="btn btn-outline btn-sm" style="color:#fcd34d;border-color:#b45309;" title="Sincronizar colecciones raíz históricas hacia el tenant salinas">🥑 Sincronizar Salinas</button>
+        <button type="button" id="btnOpenNewTenantModal" class="btn btn-primary btn-sm" style="background:#10b981;border:none;font-weight:800;">+ Nuevo Tenant (Empresa)</button>
+        <button type="button" id="btnSaasLogout" class="btn btn-outline btn-sm" style="color:#fca5a5;border-color:#7f1d1d;">Salir</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- LOGIN / INITIALIZATION VIEW -->
+  <section id="saasLoginView" class="saas-wrap">
+    <div class="saas-login-box">
+      <div style="text-align:center;margin-bottom:18px;">
+        <div style="font-size:2.3rem;margin-bottom:6px;">👑</div>
+        <h2 id="saasAuthTitle" style="font-size:1.3rem;margin:0 0 6px;color:#fff;">Consola Maestra SaaS</h2>
+        <p id="saasAuthDesc" style="font-size:0.84rem;color:#94a3b8;margin:0;">
+          Acceso exclusivo para fundadores y socios de <strong>Ruta Pro Technologies</strong>.
+        </p>
+      </div>
+
+      <form id="saasLoginForm">
+        <div class="form-group">
+          <label class="form-label" for="saasMasterPass" style="color:#cbd5e1;">Clave Maestra SaaS *</label>
+          <input type="password" id="saasMasterPass" class="form-control" placeholder="Mínimo 6 caracteres" minlength="6" required style="background:#0f172a;border-color:#334155;color:#fff;font-weight:800;text-align:center;">
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:0.8rem;color:#cbd5e1;margin-bottom:16px;cursor:pointer;">
+          <input type="checkbox" id="saasRememberChk" checked>
+          <span>Recordar sesión en este dispositivo</span>
+        </label>
+        <button type="submit" id="btnSaasLoginSubmit" class="btn btn-primary" style="width:100%;padding:12px;background:#10b981;border:none;font-weight:800;">
+          Entrar a Consola SaaS
+        </button>
+      </form>
+    </div>
+  </section>
+
+  <!-- DASHBOARD VIEW -->
+  <main id="saasDashboardView" class="saas-wrap" style="display:none;">
+    <div class="saas-kpi-grid">
+      <div class="saas-kpi-card">
+        <div class="saas-kpi-lbl">🏢 Empresas (Tenants)</div>
+        <div class="saas-kpi-val" id="kpiSaasTenants">0</div>
+        <div class="saas-kpi-sub" id="kpiSaasTenantsSub">0 activas • 0 en pausa</div>
+      </div>
+      <div class="saas-kpi-card">
+        <div class="saas-kpi-lbl">🚗 Flotilla Conectada Hoy</div>
+        <div class="saas-kpi-val" id="kpiSaasTrucks">0</div>
+        <div class="saas-kpi-sub" id="kpiSaasTrucksSub">0 choferes registrados en total</div>
+      </div>
+      <div class="saas-kpi-card">
+        <div class="saas-kpi-lbl">🏪 Puntos de Venta en Mapa</div>
+        <div class="saas-kpi-val" id="kpiSaasPlaces">0</div>
+        <div class="saas-kpi-sub">Negocios geolocalizados en la red</div>
+      </div>
+      <div class="saas-kpi-card">
+        <div class="saas-kpi-lbl">💰 GMV Procesado Hoy</div>
+        <div class="saas-kpi-val" id="kpiSaasGmv">$0</div>
+        <div class="saas-kpi-sub" id="kpiSaasGmvSub">0 ventas en ruta hoy</div>
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+      <h2 style="font-size:1.2rem;margin:0;color:#f8fafc;">Empresas Suscritas a Ruta Pro Distribution</h2>
+      <input type="search" id="saasSearchInput" class="form-control" placeholder="🔍 Filtrar por nombre, código o giro..." style="max-width:300px;background:#1e293b;border-color:#334155;color:#fff;padding:8px 12px;font-size:0.84rem;">
+    </div>
+
+    <div id="saasTenantsGrid" class="saas-tenant-grid"></div>
+  </main>
+
+  <!-- MODAL: CREATE NEW TENANT (1-CLICK ONBOARDING) -->
+  <div id="newTenantModal" class="modal-backdrop saas-dark-modal" role="dialog" aria-modal="true">
+    <div class="modal-card" style="max-width:620px;max-height:90vh;overflow-y:auto;">
+      <button type="button" id="btnCloseNewTenantModal" class="modal-close" style="color:#cbd5e1;">✕</button>
+      <h3 style="font-size:1.25rem;margin:0 0 4px;color:#fff;">🚀 Alta de Nuevo Cliente (Tenant)</h3>
+      <p style="font-size:0.82rem;color:#94a3b8;margin:0 0 14px;">
+        Crea una instancia aislada con su propia bóveda criptográfica, marca blanca y catálogo inicial en segundos.
+      </p>
+
+      <form id="newTenantForm">
+        <div class="form-row-2" style="gap:10px;">
+          <div class="form-group">
+            <label class="form-label" for="ntIndustry">Plantilla de Giro *</label>
+            <select id="ntIndustry" class="form-control" style="font-weight:700;">
+              <option value="avocado">🥑 Aguacate / Empaque y Fruta</option>
+              <option value="citrus">🍋 Limón y Cítricos</option>
+              <option value="tomato">🍅 Tomate y Hortalizas</option>
+              <option value="groceries">📦 Abarrotes y Distribución General</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="ntSlug">Código / Subdominio (slug) *</label>
+            <input type="text" id="ntSlug" class="form-control" placeholder="ej. limones-garcia" required style="font-weight:800;text-transform:lowercase;">
+          </div>
+        </div>
+
+        <div class="form-row-2" style="gap:10px;">
+          <div class="form-group">
+            <label class="form-label" for="ntBrandName">Nombre Comercial *</label>
+            <input type="text" id="ntBrandName" class="form-control" placeholder="Ej. Cítricos García" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="ntTagline">Giro / Eslogan</label>
+            <input type="text" id="ntTagline" class="form-control" placeholder="Especialistas en Limón Persa">
+          </div>
+        </div>
+
+        <div class="form-row-3" style="gap:10px;">
+          <div class="form-group">
+            <label class="form-label" for="ntPhone">WhatsApp / Teléfono</label>
+            <input type="text" id="ntPhone" class="form-control" placeholder="10 dígitos">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="ntPrimaryColor">Color Marca</label>
+            <input type="color" id="ntPrimaryColor" class="form-control" value="#15803d" style="height:40px;padding:4px;">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="ntMaxDrivers">Máx. Choferes</label>
+            <input type="number" id="ntMaxDrivers" class="form-control" min="1" max="500" value="10" style="font-weight:800;">
+          </div>
+        </div>
+
+        <div class="form-row-2" style="gap:10px;">
+          <div class="form-group">
+            <label class="form-label" for="ntBaseCoords">Coordenadas Base Bodega (lat, lng)</label>
+            <input type="text" id="ntBaseCoords" class="form-control" value="25.407054, -100.954645">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="ntMonthlyFee">Mensualidad Acordada ($ MXN)</label>
+            <input type="number" id="ntMonthlyFee" class="form-control" min="0" step="100" value="2500">
+          </div>
+        </div>
+
+        <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:10px 12px;margin-bottom:12px;">
+          <div style="font-size:0.76rem;font-weight:800;color:#94a3b8;text-transform:uppercase;margin-bottom:6px;">Módulos Incluidos en su Plan</div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:0.82rem;">
+            <label style="display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="ntModOnline" checked> 🛒 Tienda en Línea</label>
+            <label style="display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="ntModCold" checked> ❄️ Lotes QR / Cámaras</label>
+            <label style="display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="ntModRipeness" checked> 🥑 Maduración</label>
+            <label style="display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="ntModFrac" checked> ⚖️ Venta Suelta (Kg/Pza)</label>
+            <label style="display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="ntModNav3d" checked> 🧭 Navegación 3D</label>
+          </div>
+        </div>
+
+        <div class="form-row-2" style="gap:10px;">
+          <div class="form-group">
+            <label class="form-label" for="ntAdminPass">Clave Inicial Admin (Oficina) *</label>
+            <input type="text" id="ntAdminPass" class="form-control" placeholder="Ej. garcia2026" minlength="4" required style="font-weight:800;">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="ntOwnerPass">Clave Inicial Dirección / Finanzas *</label>
+            <input type="text" id="ntOwnerPass" class="form-control" placeholder="Ej. socio9900" minlength="4" required style="font-weight:800;">
+          </div>
+        </div>
+
+        <button type="submit" id="btnCreateTenantSubmit" class="btn btn-primary" style="width:100%;padding:13px;background:#10b981;border:none;font-weight:800;font-size:0.96rem;">
+          ✨ Crear Empresa y Generar Accesos
+        </button>
+      </form>
+
+      <div id="ntWelcomeKitBox" style="display:none;margin-top:16px;background:#022c22;border:1px solid #10b981;border-radius:12px;padding:14px;">
+        <strong style="color:#34d399;display:block;margin-bottom:6px;">✅ ¡Tenant creado con éxito! Copia su Kit de Bienvenida:</strong>
+        <pre id="ntWelcomeKitText" style="white-space:pre-wrap;font-size:0.78rem;color:#ecfdf5;background:#064e3b;padding:10px;border-radius:8px;margin-bottom:10px;"></pre>
+        <button type="button" id="btnCopyWelcomeKit" class="btn btn-primary btn-sm" style="background:#10b981;border:none;font-weight:800;">📋 Copiar para enviar por WhatsApp</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: EDIT TENANT PLAN / MODULES / PASSWORD RESET -->
+  <div id="editTenantModal" class="modal-backdrop saas-dark-modal" role="dialog" aria-modal="true">
+    <div class="modal-card" style="max-width:480px;">
+      <button type="button" id="btnCloseEditTenantModal" class="modal-close" style="color:#cbd5e1;">✕</button>
+      <h3 id="etModalTitle" style="font-size:1.2rem;margin:0 0 12px;color:#fff;">⚙️ Configurar Tenant</h3>
+      <input type="hidden" id="etSlug">
+
+      <div class="form-row-2" style="gap:10px;">
+        <div class="form-group">
+          <label class="form-label" for="etMaxDrivers">Límite de Choferes</label>
+          <input type="number" id="etMaxDrivers" class="form-control" min="1" max="500">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="etMonthlyFee">Mensualidad ($ MXN)</label>
+          <input type="number" id="etMonthlyFee" class="form-control" min="0" step="100">
+        </div>
+      </div>
+
+      <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:10px 12px;margin-bottom:12px;">
+        <div style="font-size:0.75rem;font-weight:800;color:#94a3b8;text-transform:uppercase;margin-bottom:6px;">Módulos Activos</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:0.8rem;">
+          <label style="display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="etModOnline"> 🛒 Tienda Web</label>
+          <label style="display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="etModCold"> ❄️ Lotes QR</label>
+          <label style="display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="etModRipeness"> 🥑 Maduración</label>
+          <label style="display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="etModFrac"> ⚖️ Venta Suelta</label>
+          <label style="display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="etModNav3d"> 🧭 Nav 3D</label>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="etBillingNotes">Notas internas (facturación / socios / corte)</label>
+        <input type="text" id="etBillingNotes" class="form-control" placeholder="Ej. Día de corte 15 de cada mes">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="etResetAdminPass">Asignar nueva Clave Admin (opcional — dejar vacío para no cambiar)</label>
+        <input type="text" id="etResetAdminPass" class="form-control" placeholder="Escribe solo si el cliente olvidó su clave">
+      </div>
+
+      <button type="button" id="btnSaveTenantEdit" class="btn btn-primary" style="width:100%;padding:11px;background:#0284c7;border:none;font-weight:800;">
+        💾 Guardar Cambios del Tenant
+      </button>
+    </div>
+  </div>
+
+  <div id="toastBox" class="toast-box"></div>
+  <script type="module" src="js/saas.js?v=rpd_1"></script>
+</body>
+</html>

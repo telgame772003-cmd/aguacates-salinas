@@ -73,13 +73,13 @@ export const STAFF_MANUALS = {
       {
         num: "6",
         icon: "❄️",
-        heading: "Control de Termos QR, Cuartos Fríos y Perfil Superadmin",
+        heading: "Control de Termos QR, Cuartos Fríos y Dirección / Finanzas",
         bodyHtml:
-          "• En la pestaña <strong>❄️ Termos y Lotes QR</strong> cree cada termo entrante (ej. <code>T01</code>) e imprima los <strong>marbetes QR por tarima</strong> para colocarlos en mica plástica.<br>" +
-          "• Vigile el semáforo de antigüedad en <strong>Cuarto 1 a Cuarto 4</strong> (🟢 0–3 días, 🟡 4–6 días, 🔴 7+ días) y la merma acumulada al seleccionar tarimas de <em>Proceso</em>.<br>" +
-          "• En la pestaña protegida <strong>🔐 Superadmin</strong> (con clave maestra independiente) capture los <strong>precios de compra por termo</strong> y <strong>gastos operativos</strong> para consultar en tiempo real el <strong>Balance Neto y Margen %</strong>.",
+          "• En la pestaña <strong>❄️ Termos y Lotes QR</strong> cree cada lote entrante (ej. <code>T01</code>) e imprima los <strong>marbetes QR por tarima</strong> para colocarlos en mica plástica.<br>" +
+          "• Vigile el semáforo de antigüedad en <strong>Cuarto 1 a Cuarto 4</strong> (🟢 0–3 días, 🟡 4–6 días, 🔴 7+ días) y la merma acumulada.<br>" +
+          "• En la pestaña protegida <strong>🔐 Dirección / Finanzas</strong> (con clave financiera independiente del dueño) capture los <strong>precios de compra</strong> y <strong>gastos operativos</strong> para consultar en tiempo real el <strong>Balance Neto y Margen %</strong>.",
         example:
-          "Solo quien cuente con la clave Superadmin puede visualizar costos de compra de fruta, gastos y utilidad neta."
+          "Solo quien cuente con la clave de Dirección / Finanzas puede visualizar costos de compra, gastos y utilidad neta."
       }
     ],
     whatsappText:

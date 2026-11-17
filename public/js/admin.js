@@ -12,6 +12,20 @@ import {
   onSnapshot,
   serverTimestamp,
   DEFAULT_STORE_SETTINGS,
+  ACTIVE_TENANT_SLUG,
+  getActiveVaultId,
+  clearActiveVaultId,
+  tenantScopedStorageKey,
+  buildSanitizedPublicStorefront,
+  getUnitConfig,
+  getTenantModules,
+  getTenantTerminology,
+  getTenantBranding,
+  getOrderedProducts,
+  getProductCodes,
+  formatDynamicUnits,
+  applyTenantWhiteLabelToDOM,
+  mountTenantSwitcherPill,
   PLACE_CATEGORIES,
   LOT_GRADES,
   normalizeColdRoom,
@@ -25,7 +39,7 @@ import {
   matchesSmartSearch,
   formatCurrency,
   cleanPhoneForWhatsApp
-} from "./firebase-config.js?v=nav3d_9";
+} from "./firebase-config.js?v=rpd_1";
 import {
   optimizeStopsWithOsrm,
   computeOrderedRouteMetrics,
@@ -34,29 +48,29 @@ import {
   attachTouchDragSort,
   formatRouteKm,
   formatRouteMin
-} from "./route-optimizer.js?v=nav3d_14";
-import { STAFF_MANUALS } from "./manuals-data.js?v=nav3d_15";
+} from "./route-optimizer.js?v=rpd_1";
+import { STAFF_MANUALS } from "./manuals-data.js?v=rpd_1";
 
-const SESSION_HASH_KEY = "salinas_admin_hash_v1";
+const SESSION_HASH_KEY = tenantScopedStorageKey("salinas_admin_hash_v1");
+
+mountTenantSwitcherPill(ACTIVE_TENANT_SLUG);
+onSnapshot(doc(db, "settings", "public_storefront"), (snap) => {
+  if (snap.exists() && !currentKeyHash) {
+    applyTenantWhiteLabelToDOM(snap.data(), ACTIVE_TENANT_SLUG);
+  }
+});
 
 function isSaleCancelled(s) {
   return s?.status === "cancelada";
 }
 
 function round1(n) {
-  return Math.round((Number(n) || 0) * 10) / 10;
+  const factor = getUnitConfig(storeSettings).subUnitsPerUnit || 10;
+  return Math.round((Number(n) || 0) * factor) / factor;
 }
 
 function formatBoxesKg(boxesVal) {
-  const rounded = round1(boxesVal);
-  const sign = rounded < 0 ? "-" : "";
-  const absKg = Math.round(Math.abs(rounded) * 10);
-  const fullBoxes = Math.floor(absKg / 10);
-  const extraKg = absKg % 10;
-  if (fullBoxes === 0 && extraKg === 0) return "0 cj";
-  if (fullBoxes === 0) return `${sign}${extraKg} kg`;
-  if (extraKg === 0) return `${sign}${fullBoxes} cj`;
-  return `${sign}${fullBoxes} cj + ${extraKg} kg`;
+  return formatDynamicUnits(boxesVal, storeSettings);
 }
 
 function getLocalDateStr(dateObj = new Date()) {
@@ -73,13 +87,16 @@ function normalizePhone10(raw) {
 
 function mergeCalibers(remoteCalibers = {}) {
   const out = {};
-  for (const code of ["S", "E", "P", "M"]) {
+  const keys = Object.keys(remoteCalibers);
+  const srcCodes = keys.length > 0 ? keys : (ACTIVE_TENANT_SLUG === "salinas" ? ["S", "E", "P", "M"] : []);
+  for (const code of srcCodes) {
+    const def = DEFAULT_STORE_SETTINGS.calibers[code] || { code, name: code, price: 100, minPrice: 1, order: 99 };
     out[code] = {
-      ...DEFAULT_STORE_SETTINGS.calibers[code],
+      ...def,
       ...(remoteCalibers[code] || {})
     };
     if (!out[code].minPrice) {
-      out[code].minPrice = DEFAULT_STORE_SETTINGS.calibers[code].minPrice;
+      out[code].minPrice = def.minPrice || 1;
     }
   }
   return out;
@@ -258,9 +275,11 @@ loginForm.addEventListener("submit", async (e) => {
 
     if (!isSystemInitialized) {
       await executeAdminBatch(hash, (batch, proofId) => {
-        batch.set(doc(db, "admin_keys", hash), { active: true, proofId, createdAt: serverTimestamp() });
+        const vId = getActiveVaultId();
+        batch.set(doc(db, "admin_keys", hash), { active: true, vaultId: vId, tenantSlug: ACTIVE_TENANT_SLUG, proofId, createdAt: serverTimestamp() });
         batch.set(doc(db, "settings", "security_init"), { initialized: true, createdAt: serverTimestamp() });
-        batch.set(doc(db, "settings", "store"), { ...DEFAULT_STORE_SETTINGS, proofId, updatedAt: serverTimestamp() });
+        batch.set(doc(db, "settings", "store"), { ...DEFAULT_STORE_SETTINGS, tenantSlug: ACTIVE_TENANT_SLUG, proofId, updatedAt: serverTimestamp() });
+        batch.set(doc(db, "settings", "public_storefront"), { ...buildSanitizedPublicStorefront(DEFAULT_STORE_SETTINGS), proofId });
       });
       isSystemInitialized = true;
       currentKeyHash = hash;
@@ -415,6 +434,7 @@ document.getElementById("btnAlertJumpOrders")?.addEventListener("click", () => {
 
 btnLogout.addEventListener("click", () => {
   currentKeyHash = null;
+  clearActiveVaultId();
   localStorage.removeItem(SESSION_HASH_KEY);
   sessionStorage.removeItem(SESSION_HASH_KEY);
   if (ordersUnsub) ordersUnsub();
@@ -486,7 +506,9 @@ btnDownloadBackup.addEventListener("click", async () => {
 
     const backupPayload = {
       exportedAt: new Date().toISOString(),
-      project: "Aguacates Salinas",
+      platform: "Ruta Pro Distribution",
+      tenantSlug: ACTIVE_TENANT_SLUG,
+      project: getTenantBranding(storeSettings, ACTIVE_TENANT_SLUG).brandName,
       storeSettings,
       places: placesSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
       placeVisits: visitsSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
@@ -547,6 +569,7 @@ function startRealtimeListeners() {
     } else {
       storeSettings.calibers = mergeCalibers({});
     }
+    applyTenantWhiteLabelToDOM(storeSettings, ACTIVE_TENANT_SLUG);
     populateCatalogForm();
     updateBroadcastPreview();
     renderDriversEditor();
@@ -2365,6 +2388,7 @@ async function sendDriverGpsPing(driverName, driverId = "", triggerBtn = null) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        tenantSlug: ACTIVE_TENANT_SLUG,
         driverId: driverId || undefined,
         driverName,
         adminKeyHash: currentKeyHash
@@ -2800,17 +2824,20 @@ function renderRouteCortesAndSales() {
 
   // Build unified driver set from settings + warehouse trips + route sales
   const driverMap = new Map();
+  const activeCodes = getProductCodes(storeSettings, ACTIVE_TENANT_SLUG === "salinas" ? DEFAULT_STORE_SETTINGS.calibers : {});
   const ensureDriver = (rawName) => {
     const key = String(rawName || "Chofer").trim();
     const norm = key.toLowerCase();
     if (!driverMap.has(norm)) {
+      const zeroMap = {};
+      for (const c of activeCodes) zeroMap[c] = 0;
       driverMap.set(norm, {
         name: key,
         vueltas: 0,
         lastRipeness: "",
-        out: { M: 0, P: 0, E: 0, S: 0 },
-        ret: { M: 0, P: 0, E: 0, S: 0 },
-        sold: { M: 0, P: 0, E: 0, S: 0 },
+        out: { ...zeroMap },
+        ret: { ...zeroMap },
+        sold: { ...zeroMap },
         totalOut: 0,
         totalRet: 0,
         totalSold: 0,
@@ -2832,13 +2859,17 @@ function renderRouteCortesAndSales() {
     const rec = ensureDriver(t.driver);
     rec.vueltas++;
     rec.lastRipeness = t.ripeness || rec.lastRipeness;
-    for (const c of ["M", "P", "E", "S"]) {
+    for (const c of Object.keys(t.out || {})) {
       const o = Number(t.out?.[c]) || 0;
-      const r = Number(t.ret?.[c]) || 0;
-      rec.out[c] += o;
-      rec.ret[c] += r;
+      rec.out[c] = (rec.out[c] || 0) + o;
       rec.totalOut += o;
+      if (!activeCodes.includes(c)) activeCodes.push(c);
+    }
+    for (const c of Object.keys(t.ret || {})) {
+      const r = Number(t.ret?.[c]) || 0;
+      rec.ret[c] = (rec.ret[c] || 0) + r;
       rec.totalRet += r;
+      if (!activeCodes.includes(c)) activeCodes.push(c);
     }
   }
 
@@ -2846,10 +2877,11 @@ function renderRouteCortesAndSales() {
     if (isSaleCancelled(s)) continue;
     const rec = ensureDriver(s.driver);
     rec.notesCount++;
-    for (const c of ["M", "P", "E", "S"]) {
+    for (const c of Object.keys(s.boxesByCaliber || {})) {
       const b = Number(s.boxesByCaliber?.[c]) || 0;
-      rec.sold[c] = round1(rec.sold[c] + b);
+      rec.sold[c] = round1((rec.sold[c] || 0) + b);
       rec.totalSold = round1(rec.totalSold + b);
+      if (!activeCodes.includes(c)) activeCodes.push(c);
     }
     rec.grossMoney += Number(s.totalAmount) || 0;
     rec.cashMoney += Number(s.cashCollected) || 0;
@@ -2869,8 +2901,8 @@ function renderRouteCortesAndSales() {
     corteGrid.innerHTML = allRecords
       .map((r) => {
         const pendingReturn = round1(r.totalOut - r.totalSold - r.totalRet);
-        const pendingByCal = ["M", "P", "E", "S"]
-          .map((c) => `${c}:${formatBoxesKg(r.out[c] - r.sold[c] - r.ret[c])}`)
+        const pendingByCal = activeCodes
+          .map((c) => `${c}:${formatBoxesKg((r.out[c] || 0) - (r.sold[c] || 0) - (r.ret[c] || 0))}`)
           .join(" • ");
 
         return `
@@ -3684,17 +3716,20 @@ function printOrderReceipt(ord) {
 
 // ================= TAB 3: CATALOG & BROADCAST GENERATOR =================
 function buildMorningBroadcastText() {
-  const cals = Object.values(storeSettings.calibers || DEFAULT_STORE_SETTINGS.calibers)
-    .filter((c) => c.available !== false)
-    .sort((a, b) => (a.order || 99) - (b.order || 99));
+  const brand = getTenantBranding(storeSettings, ACTIVE_TENANT_SLUG);
+  const units = getUnitConfig(storeSettings);
+  const cals = getOrderedProducts(storeSettings, ACTIVE_TENANT_SLUG === "salinas" ? DEFAULT_STORE_SETTINGS.calibers : {})
+    .filter((c) => c.available !== false);
 
-  const lines = cals.map((c) => `🥑 *${c.name}:* ${formatCurrency(c.price)} / caja`).join("\n");
-  const siteUrl = window.location.origin;
+  const lines = cals.map((c) => `${brand.pinEmoji} *${c.name}:* ${formatCurrency(c.price)} / ${units.unitSingular}`).join("\n");
+  const siteUrl = ACTIVE_TENANT_SLUG === "salinas"
+    ? window.location.origin
+    : `${window.location.origin}/?t=${encodeURIComponent(ACTIVE_TENANT_SLUG)}`;
 
   return (
-    `¡Buenos días! ☀️ En *Comercializadora Salinas* ya tenemos aguacate fresco seleccionado para tu negocio.\n\n` +
-    `*Precios por caja de hoy:*\n${lines}\n\n` +
-    `👉 *Haz tu pedido rápido en 20 segundos eligiendo calibre y madurez aquí:*\n${siteUrl}\n\n` +
+    `¡Buenos días! ☀️ En *${brand.brandName}* ya tenemos lista nuestra disponibilidad del día para tu negocio.\n\n` +
+    `*Precios por ${units.unitSingular} de hoy:*\n${lines}\n\n` +
+    `👉 *Haz tu pedido rápido en línea aquí:*\n${siteUrl}\n\n` +
     `¡Gracias por tu preferencia!`
   );
 }
@@ -3721,66 +3756,126 @@ function populateCatalogForm() {
   document.getElementById("cfgPhone1").value = storeSettings.phoneDisplayPrimary || "";
   document.getElementById("cfgPhone2").value = storeSettings.phoneDisplaySecondary || "";
 
+  const units = getUnitConfig(storeSettings);
+  const uSingEl = document.getElementById("cfgUnitSingular");
+  const uPlurEl = document.getElementById("cfgUnitPlural");
+  const uSubEl = document.getElementById("cfgSubUnit");
+  const uFacEl = document.getElementById("cfgSubUnitsPerUnit");
+  const uAllowEl = document.getElementById("cfgAllowSubUnit");
+  if (uSingEl) uSingEl.value = units.unitSingular;
+  if (uPlurEl) uPlurEl.value = units.unitPlural;
+  if (uSubEl) uSubEl.value = units.subUnit;
+  if (uFacEl) uFacEl.value = String(units.subUnitsPerUnit);
+  if (uAllowEl) uAllowEl.value = String(units.allowSubUnit !== false);
+
   const baseLoc = storeSettings.baseLocation || DEFAULT_STORE_SETTINGS.baseLocation;
   const baseNameEl = document.getElementById("cfgBaseName");
   const baseAddrEl = document.getElementById("cfgBaseAddress");
   const baseCoordsEl = document.getElementById("cfgBaseCoords");
-  if (baseNameEl) baseNameEl.value = baseLoc?.name || "Base / Bodega Salinas";
+  if (baseNameEl) baseNameEl.value = baseLoc?.name || "Base / Bodega";
   if (baseAddrEl) baseAddrEl.value = baseLoc?.address || "";
   if (baseCoordsEl && Number.isFinite(Number(baseLoc?.lat)) && Number.isFinite(Number(baseLoc?.lng))) {
     baseCoordsEl.value = `${Number(baseLoc.lat).toFixed(6)}, ${Number(baseLoc.lng).toFixed(6)}`;
   }
 
-  const calibers = Object.values(storeSettings.calibers || DEFAULT_STORE_SETTINGS.calibers).sort(
-    (a, b) => (a.order || 99) - (b.order || 99)
-  );
+  const calibers = getOrderedProducts(storeSettings, ACTIVE_TENANT_SLUG === "salinas" ? DEFAULT_STORE_SETTINGS.calibers : {});
 
   document.getElementById("adminCalibersEditor").innerHTML = calibers
     .map(
       (cal) => `
-      <div class="order-admin-card" style="margin-bottom:0;">
+      <div class="order-admin-card" style="margin-bottom:0;" data-prod-card="${escapeHtml(cal.code)}">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
-          <div style="display:flex;align-items:center;gap:10px;">
+          <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:180px;">
             <div class="caliber-letter">${escapeHtml(cal.code)}</div>
-            <div>
-              <strong style="font-size:1.1rem;color:var(--green-950);">${escapeHtml(cal.name)}</strong>
-              <div style="font-size:0.78rem;color:var(--slate-500);">${escapeHtml(cal.subtitle || "")}</div>
+            <div style="flex:1;">
+              <input type="text" class="form-control cal-name-input" data-code="${escapeHtml(cal.code)}" value="${escapeHtml(cal.name)}" style="font-weight:800;font-size:0.98rem;padding:5px 8px;margin-bottom:4px;">
+              <input type="text" class="form-control cal-sub-input" data-code="${escapeHtml(cal.code)}" value="${escapeHtml(cal.subtitle || "")}" placeholder="Subtítulo breve" style="font-size:0.76rem;padding:4px 8px;">
             </div>
           </div>
-          <select class="form-control cal-avail-input" data-code="${cal.code}" style="width:auto;font-weight:700;padding:6px 10px;">
-            <option value="true" ${cal.available !== false ? "selected" : ""}>🟢 Disponible</option>
-            <option value="false" ${cal.available === false ? "selected" : ""}>🔴 Agotado hoy</option>
-          </select>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <select class="form-control cal-avail-input" data-code="${escapeHtml(cal.code)}" style="width:auto;font-weight:700;padding:6px 10px;">
+              <option value="true" ${cal.available !== false ? "selected" : ""}>🟢 Disponible</option>
+              <option value="false" ${cal.available === false ? "selected" : ""}>🔴 Agotado hoy</option>
+            </select>
+            ${calibers.length > 1 ? `<button type="button" class="btn btn-outline btn-sm" data-archive-prod="${escapeHtml(cal.code)}" title="Archivar producto" style="color:#dc2626;border-color:#fecaca;padding:6px 8px;">🗑️</button>` : ""}
+          </div>
         </div>
 
         <div class="form-row-2" style="gap:10px;margin-bottom:10px;">
           <div class="form-group" style="margin-bottom:0;">
-            <label class="form-label">Precio Caja ($)</label>
-            <input type="number" min="1" max="9999" class="form-control cal-price-input" data-code="${cal.code}" value="${Number(cal.price) || 0}" style="font-weight:800;font-size:1.05rem;">
+            <label class="form-label">Precio por ${escapeHtml(units.unitSingular)} ($)</label>
+            <input type="number" min="1" max="99999" class="form-control cal-price-input" data-code="${escapeHtml(cal.code)}" value="${Number(cal.price) || 0}" style="font-weight:800;font-size:1.05rem;">
           </div>
           <div class="form-group" style="margin-bottom:0;">
-            <label class="form-label" title="Precio cuando el chofer vende kilos sueltos">Precio por Kg ($/kg)</label>
-            <input type="number" min="0.5" max="999" step="0.5" class="form-control cal-pkg-input" data-code="${cal.code}" value="${Number(cal.pricePerKg) || Math.round(((Number(cal.price) || 0) / 10) * 100) / 100}" style="font-weight:800;font-size:1.05rem;">
+            <label class="form-label" title="Precio cuando el chofer vende unidades sueltas">Precio por ${escapeHtml(units.subUnit)} ($/${escapeHtml(units.subUnit)})</label>
+            <input type="number" min="0.5" max="9999" step="0.5" class="form-control cal-pkg-input" data-code="${escapeHtml(cal.code)}" value="${Number(cal.pricePerKg) || Math.round(((Number(cal.price) || 0) / units.subUnitsPerUnit) * 100) / 100}" style="font-weight:800;font-size:1.05rem;">
           </div>
           <div class="form-group" style="margin-bottom:0;">
             <label class="form-label" title="El chofer no podrá vender por debajo de este precio">Mínimo Ruta ($)</label>
-            <input type="number" min="1" max="9999" class="form-control cal-minprice-input" data-code="${cal.code}" value="${Number(cal.minPrice) || Number(DEFAULT_STORE_SETTINGS.calibers[cal.code]?.minPrice) || 1}" style="font-weight:800;">
+            <input type="number" min="1" max="99999" class="form-control cal-minprice-input" data-code="${escapeHtml(cal.code)}" value="${Number(cal.minPrice) || 1}" style="font-weight:800;">
           </div>
           <div class="form-group" style="margin-bottom:0;">
             <label class="form-label">Etiqueta</label>
-            <input type="text" class="form-control cal-badge-input" data-code="${cal.code}" value="${escapeHtml(cal.badge || "")}" maxlength="28">
+            <input type="text" class="form-control cal-badge-input" data-code="${escapeHtml(cal.code)}" value="${escapeHtml(cal.badge || "")}" maxlength="28">
           </div>
         </div>
 
         <div class="form-group" style="margin-bottom:0;">
           <label class="form-label">Descripción comercial</label>
-          <textarea class="form-control cal-desc-input" data-code="${cal.code}" maxlength="200">${escapeHtml(cal.description || "")}</textarea>
+          <textarea class="form-control cal-desc-input" data-code="${escapeHtml(cal.code)}" maxlength="200">${escapeHtml(cal.description || "")}</textarea>
         </div>
       </div>
     `
     )
     .join("");
 }
+
+document.getElementById("btnAddCatalogProduct")?.addEventListener("click", () => {
+  const rawCode = prompt("Código corto del nuevo producto o calibre (ej. COM, L3, AZ25):");
+  if (!rawCode) return;
+  const code = rawCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "").slice(0, 8);
+  if (!code) return showToast("Código inválido.");
+  if (storeSettings.calibers?.[code] && !storeSettings.calibers[code].archived) {
+    return showToast(`Ya existe el producto con código "${code}".`);
+  }
+  const name = prompt("Nombre comercial del producto:", code) || code;
+  const order = Object.keys(storeSettings.calibers || {}).length + 1;
+  storeSettings.calibers = {
+    ...(storeSettings.calibers || {}),
+    [code]: {
+      code,
+      name: name.trim(),
+      subtitle: "",
+      description: "",
+      badge: "Disponible",
+      price: 100,
+      pricePerKg: 10,
+      minPrice: 80,
+      available: true,
+      archived: false,
+      order
+    }
+  };
+  populateCatalogForm();
+  showToast(`Producto "${code}" agregado al formulario. Toca "Guardar" abajo para publicarlo.`);
+});
+
+document.getElementById("adminCalibersEditor")?.addEventListener("click", async (e) => {
+  const archBtn = e.target.closest("button[data-archive-prod]");
+  if (!archBtn) return;
+  const code = archBtn.dataset.archiveProd;
+  const ok = await showConfirmDialog({
+    title: `¿Archivar producto "${code}"?`,
+    message: "Dejará de mostrarse en el catálogo y ventas nuevas (sin afectar notas históricas). Recuerda pulsar Guardar después.",
+    confirmText: "Sí, archivar"
+  });
+  if (!ok) return;
+  if (storeSettings.calibers?.[code]) {
+    storeSettings.calibers[code].archived = true;
+    storeSettings.calibers[code].available = false;
+    populateCatalogForm();
+  }
+});
 
 document.getElementById("catalogForm").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -3791,6 +3886,14 @@ document.getElementById("catalogForm").addEventListener("submit", async (e) => {
   try {
     const updatedCalibers = structuredClone(storeSettings.calibers || DEFAULT_STORE_SETTINGS.calibers);
 
+    document.querySelectorAll(".cal-name-input").forEach((inp) => {
+      const code = inp.dataset.code;
+      if (updatedCalibers[code]) updatedCalibers[code].name = inp.value.trim() || code;
+    });
+    document.querySelectorAll(".cal-sub-input").forEach((inp) => {
+      const code = inp.dataset.code;
+      if (updatedCalibers[code]) updatedCalibers[code].subtitle = inp.value.trim();
+    });
     document.querySelectorAll(".cal-price-input").forEach((inp) => {
       const code = inp.dataset.code;
       if (updatedCalibers[code]) updatedCalibers[code].price = Math.max(1, Math.round(Number(inp.value) || 0));
@@ -3833,7 +3936,17 @@ document.getElementById("catalogForm").addEventListener("submit", async (e) => {
       lng: parsedBaseCoords ? parsedBaseCoords.lng : prevBase.lng
     };
 
+    const unitConfig = {
+      unitSingular: document.getElementById("cfgUnitSingular")?.value.trim() || "caja",
+      unitPlural: document.getElementById("cfgUnitPlural")?.value.trim() || "cajas",
+      subUnit: document.getElementById("cfgSubUnit")?.value.trim() || "kg",
+      subUnitsPerUnit: Math.max(1, Math.round(Number(document.getElementById("cfgSubUnitsPerUnit")?.value) || 10)),
+      allowSubUnit: document.getElementById("cfgAllowSubUnit")?.value !== "false"
+    };
+
     const newSettings = {
+      ...storeSettings,
+      tenantSlug: ACTIVE_TENANT_SLUG,
       storeOpen: document.getElementById("cfgStoreOpen").value === "true",
       scheduleText: document.getElementById("cfgSchedule").value.trim(),
       bannerMessage: document.getElementById("cfgBanner").value.trim(),
@@ -3841,6 +3954,7 @@ document.getElementById("catalogForm").addEventListener("submit", async (e) => {
       phoneDisplaySecondary: phone2Display,
       whatsappPrimary: cleanPhoneForWhatsApp(phone1Display),
       whatsappSecondary: cleanPhoneForWhatsApp(phone2Display),
+      unitConfig,
       baseLocation,
       drivers: storeSettings.drivers || DEFAULT_STORE_SETTINGS.drivers,
       warehouseStaff: Array.isArray(storeSettings.warehouseStaff) ? storeSettings.warehouseStaff : [],
@@ -3851,6 +3965,11 @@ document.getElementById("catalogForm").addEventListener("submit", async (e) => {
       batch.set(
         doc(db, "settings", "store"),
         { ...newSettings, proofId, updatedAt: serverTimestamp() },
+        { merge: true }
+      );
+      batch.set(
+        doc(db, "settings", "public_storefront"),
+        { ...buildSanitizedPublicStorefront(newSettings), proofId },
         { merge: true }
       );
     });
@@ -3869,14 +3988,17 @@ document.getElementById("catalogForm").addEventListener("submit", async (e) => {
 const sessionDriverPins = new Map();
 
 function buildDriverInviteText(drv, typedPin = "") {
-  const appUrl = `${window.location.origin}/chofer.html?chofer=${encodeURIComponent(drv.name)}`;
+  const brand = getTenantBranding(storeSettings, ACTIVE_TENANT_SLUG);
+  const tQuery = ACTIVE_TENANT_SLUG === "salinas" ? "" : `t=${encodeURIComponent(ACTIVE_TENANT_SLUG)}&`;
+  const appUrl = `${window.location.origin}/chofer.html?${tQuery}chofer=${encodeURIComponent(drv.name)}`;
   const effectivePin = typedPin || sessionDriverPins.get(drv.name) || "";
   const pinLine = effectivePin
     ? `*Tu PIN de acceso:* ${effectivePin}\n`
     : `*Ingresa con tu PIN de 4 digitos asignado en oficina.*\n`;
 
   return (
-    `Hola *${drv.name}*, aqui tienes el enlace de tu *App de Ruta - Comercializadora Salinas*:\n\n` +
+    `Hola *${drv.name}*, aqui tienes el enlace de tu *App de Ruta - ${brand.brandName}*:\n` +
+    `*Codigo de Empresa:* ${ACTIVE_TENANT_SLUG}\n\n` +
     `${appUrl}\n\n` +
     pinLine +
     `Ahi veras tus cajas cargadas, pedidos asignados, registro de ventas y tu corte automatico.`
@@ -4056,6 +4178,8 @@ document.getElementById("driversListEditor").addEventListener("click", async (e)
           batch.set(doc(db, "driver_keys", pinHashToSave), {
             driverName: newName,
             active: true,
+            vaultId: getActiveVaultId(),
+            tenantSlug: ACTIVE_TENANT_SLUG,
             proofId,
             updatedAt: serverTimestamp()
           });
@@ -4164,6 +4288,11 @@ document.getElementById("btnAddDriver").addEventListener("click", async () => {
   const pinHash = await computeDriverPinHash(name, pin);
 
   const updatedDrivers = [...(storeSettings.drivers || [])];
+  const maxDriversAllowed = Number(storeSettings.plan?.maxDrivers) || 50;
+  if (updatedDrivers.length >= maxDriversAllowed) {
+    showToast(`Límite de plan alcanzado (${maxDriversAllowed} choferes máx.). Contacta a Ruta Pro Technologies para ampliar tu plan.`);
+    return;
+  }
   updatedDrivers.push({
     id: name.toLowerCase().replace(/\s+/g, "_") + "_" + Date.now().toString(36),
     name,
@@ -4185,6 +4314,8 @@ document.getElementById("btnAddDriver").addEventListener("click", async () => {
       batch.set(doc(db, "driver_keys", pinHash), {
         driverName: name,
         active: true,
+        vaultId: getActiveVaultId(),
+        tenantSlug: ACTIVE_TENANT_SLUG,
         proofId,
         createdAt: serverTimestamp()
       });
@@ -4451,6 +4582,8 @@ function renderWhStaffEditor() {
           batch.set(doc(db, "warehouse_keys", hash), {
             staffName: staff.name,
             active: true,
+            vaultId: getActiveVaultId(),
+            tenantSlug: ACTIVE_TENANT_SLUG,
             createdAtIso: new Date().toISOString(),
             proofId
           });
@@ -4490,6 +4623,8 @@ document.getElementById("btnAddWhStaff")?.addEventListener("click", async (e) =>
       batch.set(doc(db, "warehouse_keys", hash), {
         staffName: name,
         active: true,
+        vaultId: getActiveVaultId(),
+        tenantSlug: ACTIVE_TENANT_SLUG,
         createdAtIso: new Date().toISOString(),
         proofId
       });
@@ -4748,7 +4883,7 @@ document.getElementById("btnPrintThermoQrs")?.addEventListener("click", () => {
   targetLots.forEach((l) => {
     const el = document.getElementById(`qr_print_${l.id}`);
     if (el) {
-      new window.QRCode(el, { text: `SALINAS_LOT:${l.id}`, width: 112, height: 112, correctLevel: window.QRCode.CorrectLevel.M });
+      new window.QRCode(el, { text: `RPD_LOT:${ACTIVE_TENANT_SLUG}:${l.id}`, width: 112, height: 112, correctLevel: window.QRCode.CorrectLevel.M });
     }
   });
 
@@ -4792,14 +4927,14 @@ document.getElementById("superadminAuthForm")?.addEventListener("submit", async 
     if (!isSuperadminInitialized) {
       const batch = writeBatch(db);
       batch.set(doc(db, "settings", "superadmin_init"), { initialized: true, createdAtIso: new Date().toISOString() });
-      batch.set(doc(db, "superadmin_keys", hash), { active: true, label: "Superadmin Principal", createdAtIso: new Date().toISOString() });
+      batch.set(doc(db, "superadmin_keys", hash), { active: true, vaultId: getActiveVaultId(), tenantSlug: ACTIVE_TENANT_SLUG, label: "Dirección / Finanzas", createdAtIso: new Date().toISOString() });
       await batch.commit();
       isSuperadminInitialized = true;
-      showToast("✅ Clave Superadmin configurada.");
+      showToast("✅ Clave de Dirección / Finanzas configurada.");
     } else {
       const snap = await getDoc(doc(db, "superadmin_keys", hash));
       if (!snap.exists() || snap.data().active !== true) {
-        return showToast("Clave Superadmin incorrecta.");
+        return showToast("Clave de Dirección / Finanzas incorrecta.");
       }
     }
     superadminKeyHash = hash;
