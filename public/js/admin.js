@@ -4276,11 +4276,14 @@ function renderRoutePreviewOnAdminMap() {
   const base = getStoreBaseLocation();
   const baseIcon = window.L.divIcon({
     className: "salinas-div-icon",
-    html: `<div style="padding:2px 7px;border-radius:999px;background:#132615;color:#fff;border:2px solid #34d399;font-size:11px;font-weight:900;white-space:nowrap;box-shadow:0 3px 10px rgba(0,0,0,0.4);">🏠 Base</div>`,
-    iconSize: [64, 24],
-    iconAnchor: [32, 12]
+    html: `<div title="${escapeHtml(base.name || "Base / Bodega")}" style="width:24px;height:24px;border-radius:50%;background:#132615;color:#fff;border:2px solid #34d399;font-size:13px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.45);">🏭</div>`,
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+    popupAnchor: [0, -12]
   });
-  window.L.marker([base.lat, base.lng], { icon: baseIcon, zIndexOffset: 850 }).addTo(mapLayerGroup);
+  window.L.marker([base.lat, base.lng], { icon: baseIcon, zIndexOffset: 850 })
+    .addTo(mapLayerGroup)
+    .bindPopup(`<div style="font-family:sans-serif;"><strong>🏭 ${escapeHtml(base.name || "Base / Bodega")}</strong>${base.address ? `<div style="font-size:0.78rem;color:#475569;margin-top:2px;">📍 ${escapeHtml(base.address)}</div>` : ""}</div>`);
 }
 
 async function recalculateAdminBuilderMetrics() {

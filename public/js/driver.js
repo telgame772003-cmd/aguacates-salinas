@@ -2551,27 +2551,27 @@ function getDriverBaseLocation() {
     return {
       id: "__base__",
       kind: "base",
-      name: `🏠 ${b.name || "Base / Bodega Salinas"}`,
+      name: `🏭 ${b.name || "Base / Bodega Salinas"}`,
       address: b.address || "",
       subtitle: "Regreso a Base / Bodega",
       lat: Number(b.lat),
       lng: Number(b.lng),
-      pinEmoji: "🏠",
-      actionLabel: "🏠 Llegué a Base",
-      arrivalActionLabel: "🏠 Fin en Base"
+      pinEmoji: "🏭",
+      actionLabel: "🏭 Llegué a Base",
+      arrivalActionLabel: "🏭 Fin en Base"
     };
   }
   return {
     id: "__base__",
     kind: "base",
-    name: "🏠 Base / Bodega Salinas",
+    name: "🏭 Base / Bodega Salinas",
     address: "",
     subtitle: "Regreso a Base / Bodega",
     lat: 25.407054,
     lng: -100.954645,
-    pinEmoji: "🏠",
-    actionLabel: "🏠 Llegué a Base",
-    arrivalActionLabel: "🏠 Fin en Base"
+    pinEmoji: "🏭",
+    actionLabel: "🏭 Llegué a Base",
+    arrivalActionLabel: "🏭 Fin en Base"
   };
 }
 
