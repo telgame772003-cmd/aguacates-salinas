@@ -1202,11 +1202,10 @@ function ensureLeafletMap() {
   // Default center: Saltillo / Región comercial
   leafletMap = window.L.map("adminLiveMap", { zoomControl: false }).setView([25.4267, -100.9954], 12);
   window.L.control.zoom({ position: "bottomright" }).addTo(leafletMap);
-  // Mapa base Carto Positron (limpio: muestra calles y colonias sin iconos de negocios ajenos)
-  window.L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-    maxZoom: 20,
-    subdomains: "abcd",
-    attribution: "&copy; OpenStreetMap &copy; CARTO"
+  // Mapa base Esri World Street Map (100% gratuito sin API key y sin saturación de iconos comerciales de OSM)
+  window.L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", {
+    maxZoom: 19,
+    attribution: "Tiles &copy; Esri"
   }).addTo(leafletMap);
 
   mapLayerGroup = window.L.layerGroup().addTo(leafletMap);
