@@ -25,7 +25,7 @@ for (const folder of ["assets", "css"]) {
 // 2. Copiar únicamente los módulos JS requeridos por el Chofer
 const jsOut = path.join(OUT_DIR, "js");
 fs.mkdirSync(jsOut, { recursive: true });
-for (const jsFile of ["firebase-config.js", "manuals-data.js", "driver.js", "native-bg-gps.js", "salinas-debug-logger.js"]) {
+for (const jsFile of ["firebase-config.js", "manuals-data.js", "driver.js", "native-bg-gps.js", "salinas-debug-logger.js", "route-optimizer.js"]) {
   const srcJs = path.join(PUBLIC_DIR, "js", jsFile);
   if (fs.existsSync(srcJs)) {
     fs.copyFileSync(srcJs, path.join(jsOut, jsFile));

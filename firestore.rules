@@ -167,6 +167,13 @@ service cloud.firestore {
       allow write: if hasValidDriverProof() || hasValidAdminProof();
     }
 
+    // Rutas activas armadas por Admin o Chofer (con secuencia OSRM y regreso a Base)
+    match /driver_routes/{routeId} {
+      allow read: if true;
+      allow create, update: if hasValidAdminProof() || hasValidDriverProof();
+      allow delete: if false;
+    }
+
     // Tokens Web Push (FCM) de choferes: solo escritura del chofer, lectura bloqueada al público
     match /driver_push_tokens/{driverId} {
       allow read: if false;

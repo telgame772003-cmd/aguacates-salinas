@@ -314,6 +314,59 @@
         </div>
       </div>
 
+      <!-- Constructor Inteligente de Rutas (Admin Tablet/PC -> Chofer) -->
+      <details id="adminRouteBuilderDetails" class="order-admin-card route-builder-card" style="margin-bottom:18px;" open>
+        <summary class="wh-details-summary">
+          <span>🧭 Constructor Inteligente de Rutas (Admin → Chofer)</span>
+          <span id="rbSummaryBadge" class="wh-chevron-pill">0 paradas ▾</span>
+        </summary>
+
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--slate-200);">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1;min-width:220px;">
+              <label for="rbDriverSelect" style="font-size:0.82rem;font-weight:800;color:var(--green-950);">Chofer:</label>
+              <select id="rbDriverSelect" class="form-control" style="width:auto;min-width:160px;padding:7px 10px;font-weight:700;"></select>
+              <span id="rbTruckStockBadge" style="font-size:0.76rem;color:var(--slate-600);background:var(--slate-100);padding:4px 9px;border-radius:999px;font-weight:700;">Carro: --</span>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+              <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.8rem;font-weight:700;color:var(--slate-700);cursor:pointer;">
+                <input type="checkbox" id="rbReturnToBaseChk" checked>
+                <span>🏠 Regresar a Base</span>
+              </label>
+              <span id="rbMetricsPill" class="route-metrics-pill">0 paradas • 0 km • 0 min</span>
+            </div>
+          </div>
+
+          <!-- Buscador para agregar pedidos o tiendas + nota de selección en mapa -->
+          <div style="background:var(--slate-100);border-radius:12px;padding:10px;margin-bottom:12px;">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">
+              <input type="text" id="rbAddSearch" class="form-control" placeholder="🔍 Buscar pedido o tienda por nombre, giro o dirección (o toca pines en el mapa)..." style="flex:1;min-width:210px;padding:8px 11px;font-size:0.84rem;background:#fff;">
+              <button type="button" id="rbBtnLoadAssigned" class="btn btn-outline btn-sm" style="white-space:nowrap;">📦 Cargar Pedidos del Chofer</button>
+            </div>
+            <div id="rbSearchResults" style="max-height:175px;overflow-y:auto;background:#fff;border-radius:8px;border:1px solid var(--slate-200);display:none;"></div>
+          </div>
+
+          <!-- Lista reordenable Drag & Drop -->
+          <div id="rbStopsList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;"></div>
+
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <button type="button" id="rbBtnOptimize" class="btn btn-nav-3d btn-sm" style="padding:10px 14px;font-size:0.84rem;">
+              ⚡ Calcular Mejor Ruta (OSRM)
+            </button>
+            <button type="button" id="rbBtnSaveSend" class="btn btn-primary btn-sm" style="padding:10px 16px;font-size:0.84rem;">
+              📤 Enviar Ruta al Chofer
+            </button>
+            <button type="button" id="rbBtnLastMinuteMenu" class="btn btn-outline btn-sm" style="padding:10px 12px;font-size:0.8rem;border-color:#d97706;color:#92400e;background:#fef3c7;">
+              ⚡ Sumar Último Minuto
+            </button>
+            <button type="button" id="rbBtnClear" class="btn btn-outline btn-sm" style="padding:10px 12px;font-size:0.8rem;color:var(--red-600);border-color:#fca5a5;">
+              🗑️ Limpiar
+            </button>
+          </div>
+        </div>
+      </details>
+
       <!-- Collapsible Directory of Saved Places -->
       <details class="order-admin-card" style="margin-bottom:18px;">
         <summary class="wh-details-summary">

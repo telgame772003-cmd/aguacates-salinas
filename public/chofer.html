@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Modo Chofer en Ruta | Comercializadora Salinas</title>
   <link rel="icon" type="image/png" href="assets/favicon.png">
-  <link rel="stylesheet" href="css/styles.css?v=nav3d_6">
+  <link rel="stylesheet" href="css/styles.css?v=nav3d_9">
   <script src="js/salinas-debug-logger.js?v=nav3d_6"></script>
 </head>
 <body class="driver-app-body">
@@ -92,6 +92,37 @@
           <div class="trunk-cal-box"><div class="code">P · Primera</div><div class="num" id="trunkP">0</div></div>
           <div class="trunk-cal-box"><div class="code">E · Extra</div><div class="num" id="trunkE">0</div></div>
           <div class="trunk-cal-box"><div class="code">S · Super</div><div class="num" id="trunkS">0</div></div>
+        </div>
+      </div>
+
+      <!-- Tarjeta de Ruta Activa del Día (Armada por Admin o por el Chofer) -->
+      <div id="driverActiveRouteCard" class="corte-summary-box route-builder-card" style="margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+          <div>
+            <h3 style="font-size:1.05rem;color:var(--green-950);margin:0;">🗺️ Mi Ruta del Día</h3>
+            <div id="drvRouteMetaText" style="font-size:0.76rem;color:var(--slate-500);margin-top:2px;">Sin ruta armada aún</div>
+          </div>
+          <button type="button" id="btnOpenDriverRouteBuilder" class="btn btn-outline btn-sm" style="padding:7px 11px;font-size:0.78rem;">
+            🗺️ Armar / Editar
+          </button>
+        </div>
+
+        <div id="driverLastMinuteBanner" style="display:none;background:#fef3c7;border:1.5px solid #f59e0b;border-radius:12px;padding:10px;margin-bottom:10px;">
+          <div style="font-size:0.8rem;font-weight:800;color:#92400e;margin-bottom:6px;" id="driverLastMinuteText">⚡ ¡Nueva entrega agregada a tu ruta!</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button type="button" id="btnDismissLastMinute" class="btn btn-primary btn-sm" style="padding:6px 10px;font-size:0.74rem;">✅ Enterado</button>
+          </div>
+        </div>
+
+        <div id="driverActiveRouteList" style="display:flex;flex-direction:column;gap:7px;margin-bottom:10px;"></div>
+
+        <div id="driverActiveRouteFooter" style="display:none;gap:8px;flex-wrap:wrap;">
+          <button type="button" id="btnStartActiveRoute3D" class="btn btn-nav-3d btn-sm" style="flex:1;padding:11px 14px;font-size:0.86rem;">
+            🧭 Iniciar Ruta 3D
+          </button>
+          <button type="button" id="btnReoptimizeActiveRoute" class="btn btn-outline btn-sm" style="padding:11px 12px;font-size:0.8rem;">
+            ⚡ Reordenar
+          </button>
         </div>
       </div>
 
@@ -380,6 +411,42 @@
     </div>
   </div>
 
+  <!-- Modal: Armar / Editar Mi Ruta (Chofer) -->
+  <div id="driverRouteBuilderModal" class="modal-backdrop" role="dialog" aria-modal="true">
+    <div class="modal-card" style="max-width:540px;">
+      <button type="button" id="btnCloseDriverRouteBuilder" class="modal-close">✕</button>
+      <h3 class="serif-title" style="font-size:1.22rem;color:var(--green-950);margin-bottom:4px;padding-right:32px;">🗺️ Armar Mi Ruta</h3>
+      <p style="font-size:0.8rem;color:var(--slate-500);margin-bottom:10px;">
+        Palomea los lugares a los que vas a pasar hoy y toca <strong>⚡ Ordenar Mejor Ruta</strong>.
+      </p>
+
+      <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
+        <input type="search" id="drvRbSearch" class="form-control" placeholder="🔍 Buscar tienda, giro o dirección..." style="flex:1;min-width:180px;padding:8px 10px;font-size:0.84rem;">
+        <button type="button" id="drvRbFilterPending" class="btn btn-primary btn-sm" style="font-size:0.74rem;padding:6px 10px;">⚪ Pendientes hoy</button>
+        <button type="button" id="drvRbFilterAll" class="btn btn-outline btn-sm" style="font-size:0.74rem;padding:6px 10px;">Todas</button>
+      </div>
+
+      <div id="drvRbPlacesChecklist" style="max-height:240px;overflow-y:auto;border:1px solid var(--slate-200);border-radius:10px;padding:4px;margin-bottom:10px;background:#fff;"></div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+        <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.8rem;font-weight:700;color:var(--slate-700);">
+          <input type="checkbox" id="drvRbReturnBaseChk" checked>
+          <span>🏠 Terminar regresando a Base</span>
+        </label>
+        <span id="drvRbSelectedMetrics" class="route-metrics-pill">0 seleccionadas</span>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <button type="button" id="btnDrvRbOptimize" class="btn btn-outline btn-sm" style="padding:11px 8px;font-size:0.82rem;">
+          ⚡ Ordenar Mejor Ruta
+        </button>
+        <button type="button" id="btnDrvRbSaveAndNav" class="btn btn-nav-3d btn-sm" style="padding:11px 8px;font-size:0.82rem;">
+          🧭 Guardar y Navegar 3D
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal Pantalla Completa: Cabina de Navegación 3D (Ruta Pro Nav Embed) -->
   <div id="rpNavEmbedOverlay" class="rp-nav-embed-overlay" role="dialog" aria-modal="true" aria-label="Navegación 3D en Ruta">
     <button type="button" id="btnFallbackCloseNav3D" class="rp-nav-fallback-close">✕ Cerrar Mapa</button>
@@ -394,6 +461,6 @@
 
   <div id="toastBox" class="toast-box"></div>
 
-  <script type="module" src="js/driver.js?v=nav3d_8"></script>
+  <script type="module" src="js/driver.js?v=nav3d_9"></script>
 </body>
 </html>

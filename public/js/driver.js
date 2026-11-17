@@ -22,14 +22,21 @@ import {
   matchesSmartSearch,
   formatCurrency,
   cleanPhoneForWhatsApp
-} from "./firebase-config.js?v=nav3d_8";
+} from "./firebase-config.js?v=nav3d_9";
 import {
   isNativeCapacitorApp,
   startNativeBackgroundGps,
   stopNativeBackgroundGps,
   commitDriverDocNativeRest,
   commitDriverLocationNativeRest
-} from "./native-bg-gps.js?v=nav3d_8";
+} from "./native-bg-gps.js?v=nav3d_9";
+import {
+  optimizeStopsWithOsrm,
+  computeOrderedRouteMetrics,
+  attachTouchDragSort,
+  formatRouteKm,
+  formatRouteMin
+} from "./route-optimizer.js?v=nav3d_9";
 import { STAFF_MANUALS } from "./manuals-data.js";
 
 const DRIVER_SESSION_KEY = "salinas_driver_session_v1";
@@ -317,6 +324,7 @@ document.getElementById("btnDriverLogout").addEventListener("click", async () =>
   if (salesUnsub) salesUnsub();
   if (placesUnsub) placesUnsub();
   if (visitsUnsub) visitsUnsub();
+  if (routeDocUnsub) routeDocUnsub();
 
   currentDriverName = null;
   currentDriverKeyHash = null;
@@ -996,11 +1004,13 @@ function getOneShotGpsPosition() {
 // ================= REALTIME OPERATIONAL LISTENERS =================
 function startDriverListeners() {
   todayStr = getLocalDateStr();
+  subscribeDriverRouteListener();
   if (whUnsub) whUnsub();
   if (ordersUnsub) ordersUnsub();
   if (salesUnsub) salesUnsub();
   if (placesUnsub) placesUnsub();
   if (visitsUnsub) visitsUnsub();
+  if (routeDocUnsub) routeDocUnsub();
 
   // 1. Today's warehouse car trips for this driver
   whUnsub = onSnapshot(doc(db, "warehouse_days", todayStr), (snap) => {
@@ -2075,6 +2085,7 @@ document.getElementById("deliverOrderForm").addEventListener("submit", async (e)
     });
 
     deliverOrderModal.classList.remove("open");
+    markStopDoneInActiveRoute(ord.id);
     openSaleSuccessModal(saleRecord, "¡Pedido Entregado!");
   } catch (err) {
     console.error(err);
@@ -2399,7 +2410,7 @@ document.getElementById("streetSaleForm").addEventListener("submit", async (e) =
     document.getElementById("saleNotes").value = "";
     document.getElementById("saleAdvanceInput").value = "0";
     renderStreetSaleCalibers();
-
+    if (matchedPlace?.id) markStopDoneInActiveRoute(matchedPlace.id);
     openSaleSuccessModal(saleRecord, "¡Venta Registrada!");
   } catch (err) {
     console.error("Error guardando venta en ruta:", err);
@@ -2524,4 +2535,402 @@ document.getElementById("btnCloseDriverHelp")?.addEventListener("click", () => {
   if (driverHelpModal) driverHelpModal.classList.remove("open");
 });
 
+let activeRouteDoc = null;
+let activeRouteStops = [];
+let routeDocUnsub = null;
+let lastSeenRouteUpdatedIso = "";
+let drvRbSelectedIds = new Set();
+let drvRbFilterMode = "pending";
+
 restoreDriverSession();
+
+// ================= RUTA ACTIVA DEL DÍA & CONSTRUCTOR DEL CHOFER =================
+function getDriverBaseLocation() {
+  const b = storeSettings?.baseLocation || DEFAULT_STORE_SETTINGS.baseLocation;
+  if (b && Number.isFinite(Number(b.lat)) && Number.isFinite(Number(b.lng))) {
+    return {
+      id: "__base__",
+      kind: "base",
+      name: `🏠 ${b.name || "Base / Bodega Salinas"}`,
+      address: b.address || "",
+      subtitle: "Regreso a Base / Bodega",
+      lat: Number(b.lat),
+      lng: Number(b.lng),
+      pinEmoji: "🏠",
+      actionLabel: "🏠 Llegué a Base",
+      arrivalActionLabel: "🏠 Fin en Base"
+    };
+  }
+  return {
+    id: "__base__",
+    kind: "base",
+    name: "🏠 Base / Bodega Salinas",
+    address: "",
+    subtitle: "Regreso a Base / Bodega",
+    lat: 25.407054,
+    lng: -100.954645,
+    pinEmoji: "🏠",
+    actionLabel: "🏠 Llegué a Base",
+    arrivalActionLabel: "🏠 Fin en Base"
+  };
+}
+
+function buildNavStopsFromActiveRoute() {
+  const pending = activeRouteStops.filter((s) => s.status !== "done");
+  const list = [...pending];
+  if (activeRouteDoc?.includeReturnToBase !== false && list.length > 0) {
+    list.push(getDriverBaseLocation());
+  }
+  return list;
+}
+
+function subscribeDriverRouteListener() {
+  if (routeDocUnsub) {
+    routeDocUnsub();
+    routeDocUnsub = null;
+  }
+  if (!currentDriverName) return;
+  const docId = `${getLocalDateStr()}_${driverSlug(currentDriverName)}`;
+  routeDocUnsub = onSnapshot(doc(db, "driver_routes", docId), (snap) => {
+    if (!snap.exists()) {
+      activeRouteDoc = null;
+      activeRouteStops = [];
+      renderDriverActiveRouteCard();
+      return;
+    }
+    const data = snap.data();
+    const prevCount = activeRouteStops.length;
+    activeRouteDoc = data;
+    activeRouteStops = Array.isArray(data.stops) ? data.stops : [];
+    renderDriverActiveRouteCard();
+
+    const updatedIso = data.updatedAtIso || "";
+    const isAdminUpdate = data.createdBy === "admin" && updatedIso && updatedIso !== lastSeenRouteUpdatedIso;
+    if (lastSeenRouteUpdatedIso && isAdminUpdate && activeRouteStops.length >= prevCount) {
+      const banner = document.getElementById("driverLastMinuteBanner");
+      const txt = document.getElementById("driverLastMinuteText");
+      if (banner && txt) {
+        txt.textContent = data.lastMinuteAddedAtIso
+          ? `⚡ ¡Parada de último minuto agregada por Admin! (${activeRouteStops.filter((s) => s.status !== "done").length} pendientes)`
+          : `🗺️ Admin actualizó tu ruta (${activeRouteStops.filter((s) => s.status !== "done").length} paradas).`;
+        banner.style.display = "block";
+      }
+      try { navigator.vibrate?.([160, 80, 160]); } catch (_) {}
+      showToast("🗺️ Tu ruta fue actualizada por Admin.");
+
+      // Si el navegador 3D ya está abierto, actualizar las paradas en caliente sin cerrar el mapa
+      if (isNav3DOpen) {
+        const frame = document.getElementById("rpNavEmbedFrame");
+        const navStops = buildNavStopsFromActiveRoute();
+        if (frame?.contentWindow && navStops.length > 0) {
+          pendingNav3DPayload = { stops: navStops, activeStopIndex: 0 };
+          frame.contentWindow.postMessage(
+            {
+              type: "RP_NAV_UPDATE_STOPS",
+              stops: navStops,
+              destination: navStops[0],
+              activeStopIndex: 0
+            },
+            RP_NAV_EMBED_ORIGIN
+          );
+        }
+      }
+    }
+    lastSeenRouteUpdatedIso = updatedIso;
+  });
+}
+
+function renderDriverActiveRouteCard() {
+  const metaEl = document.getElementById("drvRouteMetaText");
+  const listEl = document.getElementById("driverActiveRouteList");
+  const footerEl = document.getElementById("driverActiveRouteFooter");
+  if (!metaEl || !listEl || !footerEl) return;
+
+  if (activeRouteStops.length === 0) {
+    metaEl.textContent = "Sin ruta armada aún • Toca 'Armar / Editar' o pide a Admin";
+    listEl.innerHTML = "";
+    footerEl.style.display = "none";
+    return;
+  }
+
+  const pending = activeRouteStops.filter((s) => s.status !== "done");
+  const distStr = activeRouteDoc?.totalDistanceMeters ? ` • ${formatRouteKm(activeRouteDoc.totalDistanceMeters)}` : "";
+  const durStr = activeRouteDoc?.totalDurationSec ? ` • ~${formatRouteMin(activeRouteDoc.totalDurationSec)}` : "";
+  const baseStr = activeRouteDoc?.includeReturnToBase !== false ? " • 🏠 +Base" : "";
+  metaEl.textContent = `${pending.length} pendiente${pending.length === 1 ? "" : "s"} de ${activeRouteStops.length}${distStr}${durStr}${baseStr}`;
+
+  listEl.innerHTML = activeRouteStops
+    .map((st, idx) => {
+      const isDone = st.status === "done";
+      return `
+        <div class="route-stop-row ${isDone ? "is-done" : ""}" data-stop-idx="${idx}">
+          <span class="route-drag-handle" title="Arrastrar">⋮⋮</span>
+          <span class="route-stop-num">${isDone ? "✓" : idx + 1}</span>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:0.84rem;font-weight:800;color:var(--green-950);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+              ${escapeHtml(st.name || "Parada")}
+            </div>
+            <div style="font-size:0.71rem;color:var(--slate-500);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+              ${escapeHtml(st.subtitle || st.address || "")}
+            </div>
+          </div>
+          <div style="display:flex;gap:3px;flex-shrink:0;">
+            <button type="button" class="route-mini-btn" data-drv-rt-move="-1" data-drv-rt-idx="${idx}">▲</button>
+            <button type="button" class="route-mini-btn" data-drv-rt-move="1" data-drv-rt-idx="${idx}">▼</button>
+            <button type="button" class="route-mini-btn" data-drv-rt-toggle="${idx}" title="Marcar listo / pendiente">${isDone ? "↩️" : "✓"}</button>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+
+  footerEl.style.display = pending.length > 0 ? "flex" : "none";
+
+  attachTouchDragSort(listEl, ".route-stop-row", ".route-drag-handle", async (newOrder) => {
+    activeRouteStops = newOrder.map((i) => activeRouteStops[i]).filter(Boolean);
+    renderDriverActiveRouteCard();
+    await persistDriverActiveRoute("driver");
+  });
+}
+
+async function persistDriverActiveRoute(createdBy = "driver", includeReturnOverride = null) {
+  if (!currentDriverKeyHash || !currentDriverName) return;
+  const incBase =
+    includeReturnOverride !== null
+      ? includeReturnOverride
+      : activeRouteDoc?.includeReturnToBase !== false;
+  const startCoord = lastGpsCoords || getDriverBaseLocation();
+  const endCoord = incBase ? getDriverBaseLocation() : null;
+  const metrics = await computeOrderedRouteMetrics({
+    startCoord,
+    stops: activeRouteStops.filter((s) => s.status !== "done"),
+    endCoord
+  });
+
+  const docId = `${getLocalDateStr()}_${driverSlug(currentDriverName)}`;
+  const payload = {
+    driverName: currentDriverName,
+    driverSlug: driverSlug(currentDriverName),
+    date: getLocalDateStr(),
+    includeReturnToBase: incBase,
+    baseLocation: getDriverBaseLocation(),
+    stops: activeRouteStops,
+    totalDistanceMeters: metrics.distanceMeters,
+    totalDurationSec: metrics.durationSec,
+    createdBy,
+    updatedAtIso: new Date().toISOString()
+  };
+
+  await executeDriverBatch(currentDriverKeyHash, (batch, proofId) => {
+    batch.set(doc(db, "driver_routes", docId), { ...payload, proofId, updatedAt: serverTimestamp() }, { merge: true });
+  });
+}
+
+async function markStopDoneInActiveRoute(targetId) {
+  if (!targetId || activeRouteStops.length === 0) return;
+  let changed = false;
+  activeRouteStops = activeRouteStops.map((s) => {
+    if (s.id === targetId && s.status !== "done") {
+      changed = true;
+      return { ...s, status: "done", doneAtIso: new Date().toISOString() };
+    }
+    return s;
+  });
+  if (changed) {
+    renderDriverActiveRouteCard();
+    await persistDriverActiveRoute("driver").catch(() => {});
+  }
+}
+
+document.getElementById("btnDismissLastMinute")?.addEventListener("click", () => {
+  const b = document.getElementById("driverLastMinuteBanner");
+  if (b) b.style.display = "none";
+});
+
+document.getElementById("driverActiveRouteList")?.addEventListener("click", async (e) => {
+  const mv = e.target.closest("button[data-drv-rt-move]");
+  if (mv) {
+    const idx = Number(mv.dataset.drvRtIdx);
+    const next = idx + Number(mv.dataset.drvRtMove);
+    if (next < 0 || next >= activeRouteStops.length) return;
+    const tmp = activeRouteStops[idx];
+    activeRouteStops[idx] = activeRouteStops[next];
+    activeRouteStops[next] = tmp;
+    renderDriverActiveRouteCard();
+    await persistDriverActiveRoute("driver");
+    return;
+  }
+  const tog = e.target.closest("button[data-drv-rt-toggle]");
+  if (tog) {
+    const idx = Number(tog.dataset.drvRtToggle);
+    if (!activeRouteStops[idx]) return;
+    activeRouteStops[idx].status = activeRouteStops[idx].status === "done" ? "pending" : "done";
+    renderDriverActiveRouteCard();
+    await persistDriverActiveRoute("driver");
+  }
+});
+
+document.getElementById("btnStartActiveRoute3D")?.addEventListener("click", () => {
+  const navStops = buildNavStopsFromActiveRoute();
+  if (navStops.length === 0) {
+    showToast("No quedan paradas pendientes en tu ruta.");
+    return;
+  }
+  openNav3DModal(navStops, 0);
+});
+
+document.getElementById("btnReoptimizeActiveRoute")?.addEventListener("click", async () => {
+  const done = activeRouteStops.filter((s) => s.status === "done");
+  const pending = activeRouteStops.filter((s) => s.status !== "done");
+  if (pending.length < 2) {
+    showToast("Se necesitan al menos 2 paradas pendientes para reordenar.");
+    return;
+  }
+  const btn = document.getElementById("btnReoptimizeActiveRoute");
+  btn.disabled = true;
+  btn.textContent = "⏳...";
+  try {
+    const startCoord = lastGpsCoords || getDriverBaseLocation();
+    const incBase = activeRouteDoc?.includeReturnToBase !== false;
+    const endCoord = incBase ? getDriverBaseLocation() : null;
+    const res = await optimizeStopsWithOsrm({ startCoord, stops: pending, endCoord });
+    activeRouteStops = [...done, ...res.orderedStops];
+    renderDriverActiveRouteCard();
+    await persistDriverActiveRoute("driver");
+    showToast(`⚡ Ruta reordenada (${formatRouteKm(res.distanceMeters)} • ${formatRouteMin(res.durationSec)}).`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "⚡ Reordenar";
+  }
+});
+
+// Modal Constructor del Chofer
+const drvRbModal = document.getElementById("driverRouteBuilderModal");
+
+function renderDriverRouteBuilderChecklist() {
+  const box = document.getElementById("drvRbPlacesChecklist");
+  const metricsEl = document.getElementById("drvRbSelectedMetrics");
+  if (!box) return;
+  const q = document.getElementById("drvRbSearch")?.value.trim() || "";
+
+  const valid = allPlaces
+    .filter((p) => typeof p.lat === "number" && typeof p.lng === "number")
+    .filter((p) => {
+      if (drvRbFilterMode === "pending" && getPlaceStatusToday(p).code !== "pending") return false;
+      const cat = PLACE_CATEGORIES[p.category] || PLACE_CATEGORIES.tienda;
+      return matchesSmartSearch(`${p.name || ""} ${p.address || ""} ${p.phone || ""} ${cat.label || ""}`, q);
+    })
+    .map((p) => ({
+      ...p,
+      dist: lastGpsCoords ? haversineMeters(lastGpsCoords.lat, lastGpsCoords.lng, p.lat, p.lng) : null
+    }))
+    .sort((a, b) => (a.dist ?? 999999) - (b.dist ?? 999999));
+
+  if (metricsEl) {
+    metricsEl.textContent = `${drvRbSelectedIds.size} seleccionada${drvRbSelectedIds.size === 1 ? "" : "s"}`;
+  }
+
+  box.innerHTML = valid.length
+    ? valid
+        .map((p) => {
+          const cat = PLACE_CATEGORIES[p.category] || PLACE_CATEGORIES.tienda;
+          const checked = drvRbSelectedIds.has(p.id) ? "checked" : "";
+          const dTxt = p.dist !== null ? (p.dist < 1000 ? `${p.dist} m` : `${(p.dist / 1000).toFixed(1)} km`) : "";
+          return `
+            <label class="route-pick-result-item" style="cursor:pointer;">
+              <div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1;">
+                <input type="checkbox" data-drv-rb-chk="${escapeHtml(p.id)}" ${checked}>
+                <div style="min-width:0;">
+                  <strong style="display:block;font-size:0.84rem;color:var(--green-950);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${cat.emoji} ${escapeHtml(p.name)}</strong>
+                  <span style="font-size:0.72rem;color:var(--slate-500);">${escapeHtml(cat.label)}${dTxt ? ` • ${dTxt}` : ""}</span>
+                </div>
+              </div>
+            </label>
+          `;
+        })
+        .join("")
+    : `<div style="padding:14px;text-align:center;font-size:0.82rem;color:var(--slate-500);">Sin tiendas para mostrar con ese filtro.</div>`;
+}
+
+document.getElementById("btnOpenDriverRouteBuilder")?.addEventListener("click", () => {
+  drvRbSelectedIds = new Set(activeRouteStops.filter((s) => s.kind === "place" && s.status !== "done").map((s) => s.id));
+  renderDriverRouteBuilderChecklist();
+  if (drvRbModal) drvRbModal.classList.add("open");
+});
+
+document.getElementById("btnCloseDriverRouteBuilder")?.addEventListener("click", () => {
+  if (drvRbModal) drvRbModal.classList.remove("open");
+});
+
+document.getElementById("drvRbSearch")?.addEventListener("input", renderDriverRouteBuilderChecklist);
+
+document.getElementById("drvRbFilterPending")?.addEventListener("click", () => {
+  drvRbFilterMode = "pending";
+  document.getElementById("drvRbFilterPending").className = "btn btn-primary btn-sm";
+  document.getElementById("drvRbFilterAll").className = "btn btn-outline btn-sm";
+  renderDriverRouteBuilderChecklist();
+});
+
+document.getElementById("drvRbFilterAll")?.addEventListener("click", () => {
+  drvRbFilterMode = "all";
+  document.getElementById("drvRbFilterAll").className = "btn btn-primary btn-sm";
+  document.getElementById("drvRbFilterPending").className = "btn btn-outline btn-sm";
+  renderDriverRouteBuilderChecklist();
+});
+
+document.getElementById("drvRbPlacesChecklist")?.addEventListener("change", (e) => {
+  const chk = e.target.closest("input[data-drv-rb-chk]");
+  if (!chk) return;
+  const id = chk.dataset.drvRbChk;
+  if (chk.checked) drvRbSelectedIds.add(id);
+  else drvRbSelectedIds.delete(id);
+  const metricsEl = document.getElementById("drvRbSelectedMetrics");
+  if (metricsEl) metricsEl.textContent = `${drvRbSelectedIds.size} seleccionada${drvRbSelectedIds.size === 1 ? "" : "s"}`;
+});
+
+async function buildAndSaveDriverCustomRoute(openNavAfter = false) {
+  if (drvRbSelectedIds.size === 0) {
+    showToast("Palomea al menos 1 tienda primero.");
+    return;
+  }
+  const chosenPlaces = allPlaces.filter((p) => drvRbSelectedIds.has(p.id) && typeof p.lat === "number" && typeof p.lng === "number");
+  const rawStops = chosenPlaces.map((p) => {
+    const cat = PLACE_CATEGORIES[p.category] || PLACE_CATEGORIES.tienda;
+    return {
+      id: p.id,
+      kind: "place",
+      name: `${cat.emoji} ${p.name}`,
+      address: p.address || "",
+      subtitle: `${cat.label}${p.address ? ` • ${p.address}` : ""}`,
+      lat: p.lat,
+      lng: p.lng,
+      status: "pending",
+      pinEmoji: "🥑",
+      actionLabel: "➕ Vender / Cobrar",
+      arrivalActionLabel: "➕ Vender Aquí"
+    };
+  });
+
+  const startCoord = lastGpsCoords || getDriverBaseLocation();
+  const incBase = document.getElementById("drvRbReturnBaseChk")?.checked !== false;
+  const endCoord = incBase ? getDriverBaseLocation() : null;
+  const res = await optimizeStopsWithOsrm({ startCoord, stops: rawStops, endCoord });
+
+  const donePrev = activeRouteStops.filter((s) => s.status === "done");
+  activeRouteStops = [...donePrev, ...res.orderedStops];
+  renderDriverActiveRouteCard();
+  await persistDriverActiveRoute("driver", incBase);
+
+  const metricsEl = document.getElementById("drvRbSelectedMetrics");
+  if (metricsEl) metricsEl.textContent = `${res.orderedStops.length} • ${formatRouteKm(res.distanceMeters)} • ${formatRouteMin(res.durationSec)}`;
+  showToast(`⚡ Ruta optimizada (${formatRouteKm(res.distanceMeters)} • ${formatRouteMin(res.durationSec)}).`);
+
+  if (openNavAfter) {
+    if (drvRbModal) drvRbModal.classList.remove("open");
+    const navStops = buildNavStopsFromActiveRoute();
+    if (navStops.length > 0) openNav3DModal(navStops, 0);
+  }
+}
+
+document.getElementById("btnDrvRbOptimize")?.addEventListener("click", () => buildAndSaveDriverCustomRoute(false));
+document.getElementById("btnDrvRbSaveAndNav")?.addEventListener("click", () => buildAndSaveDriverCustomRoute(true));
