@@ -209,6 +209,23 @@ export function getLocalDateStr(dateObj = new Date()) {
   return `${y}-${m}-${d}`;
 }
 
+export function normalizeSearchText(str) {
+  return String(str || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function matchesSmartSearch(haystack, rawQuery) {
+  const qNorm = normalizeSearchText(rawQuery);
+  if (!qNorm) return true;
+  const hayNorm = normalizeSearchText(haystack);
+  const tokens = qNorm.split(" ").filter(Boolean);
+  return tokens.every((tok) => hayNorm.includes(tok));
+}
+
 export function formatCurrency(amount) {
   const num = Number(amount) || 0;
   return new Intl.NumberFormat("es-MX", {

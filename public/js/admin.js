@@ -22,6 +22,7 @@ import {
   computeWarehousePinHash,
   executeAdminBatch,
   executeSuperadminBatch,
+  matchesSmartSearch,
   formatCurrency,
   cleanPhoneForWhatsApp
 } from "./firebase-config.js";
@@ -2471,8 +2472,8 @@ function renderOrdersList() {
     if (statusFilter !== "todos" && ord.status !== statusFilter) return false;
     if (dateFilter === "today" && !isSameLocalDay(ord.createdAtIso)) return false;
     if (searchQuery) {
-      const hay = `${ord.folio || ""} ${ord.customerName || ""} ${ord.phone || ""} ${ord.address || ""} ${ord.assignedDriver || ""}`.toLowerCase();
-      if (!hay.includes(searchQuery)) return false;
+      const hay = `${ord.folio || ""} ${ord.customerName || ""} ${ord.phone || ""} ${ord.address || ""} ${ord.assignedDriver || ""}`;
+      if (!matchesSmartSearch(hay, searchQuery)) return false;
     }
     return true;
   });

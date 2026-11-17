@@ -19,16 +19,17 @@ import {
   computeDriverPinHash,
   executeDriverBatch,
   getLocalDateStr,
+  matchesSmartSearch,
   formatCurrency,
   cleanPhoneForWhatsApp
-} from "./firebase-config.js?v=nav3d_7";
+} from "./firebase-config.js?v=nav3d_8";
 import {
   isNativeCapacitorApp,
   startNativeBackgroundGps,
   stopNativeBackgroundGps,
   commitDriverDocNativeRest,
   commitDriverLocationNativeRest
-} from "./native-bg-gps.js?v=nav3d_7";
+} from "./native-bg-gps.js?v=nav3d_8";
 import { STAFF_MANUALS } from "./manuals-data.js";
 
 const DRIVER_SESSION_KEY = "salinas_driver_session_v1";
@@ -1171,8 +1172,9 @@ function renderPlacesList() {
   const enriched = allPlaces
     .filter((p) => {
       if (!placeSearchQuery) return true;
-      const hay = `${p.name || ""} ${p.address || ""} ${p.phone || ""} ${p.category || ""}`.toLowerCase();
-      return hay.includes(placeSearchQuery);
+      const cat = PLACE_CATEGORIES[p.category] || PLACE_CATEGORIES.tienda;
+      const hay = `${p.name || ""} ${p.address || ""} ${p.phone || ""} ${p.category || ""} ${cat.label || ""}`;
+      return matchesSmartSearch(hay, placeSearchQuery);
     })
     .map((p) => {
       const dist = lastGpsCoords ? haversineMeters(lastGpsCoords.lat, lastGpsCoords.lng, p.lat, p.lng) : null;
