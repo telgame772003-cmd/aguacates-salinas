@@ -16,16 +16,16 @@ export const STAFF_MANUALS = {
       {
         num: "1",
         icon: "🗺️",
-        heading: "Supervisión de unidades en tiempo real y auditoría de visitas",
+        heading: "Monitor en Vivo, historial 30d y vista Plan vs. Recorrido Real",
         bodyHtml:
-          "Ingrese a la pestaña <strong>🗺️ Ruta, GPS y Cortes</strong> para visualizar el mapa operativo de la ciudad (dispone del botón <strong>⛶ Pantalla Completa</strong> para monitoreo continuo):<br>" +
-          "• <strong>🚗 Unidades y trayectoria:</strong> Muestra la ubicación actual de cada unidad, las cajas disponibles a bordo y el <strong>trazo en mapa</strong> del recorrido realizado durante la jornada.<br>" +
-          "• <strong>Indicadores de estatus por punto de venta:</strong><br>" +
-          "&nbsp;&nbsp;🟢 <strong>Verde:</strong> Cliente con compra registrada hoy (indica cajas e importe).<br>" +
-          "&nbsp;&nbsp;🟡 <strong>Amarillo:</strong> Punto visitado sin venta (registra mediante GPS la distancia en metros desde el establecimiento para validar presencialmente la visita).<br>" +
-          "&nbsp;&nbsp;⚪ <strong>Gris:</strong> Establecimientos pendientes de visita en la fecha actual.",
+          "Al entrar al panel se abre directo la pestaña prioritaria <strong>🗺️ Ruta, GPS y Cortes</strong> (con botón <strong>⛶ Completa</strong> y buscador rápido de negocios):<br>" +
+          "• <strong>🚗 Carros en vivo y rutas (OSRM):</strong> Los chips muestran únicamente las unidades conectadas (los desconectados quedan en <strong>👥 Offline (X)</strong>). Active <strong>🛣️ Rutas (N)</strong> para comparar la ruta planeada (punteada) vs. el recorrido GPS real <em>highlighted</em> ajustado a calles.<br>" +
+          "• <strong>Indicadores de estatus e historial (30 días):</strong><br>" +
+          "&nbsp;&nbsp;🟢 <strong>Verde:</strong> Compró hoy. &nbsp;|&nbsp; 🟡 <strong>Amarillo:</strong> Visitado hoy sin venta (manual o por geocerca GPS). &nbsp;|&nbsp; ⚪ <strong>Gris:</strong> Sin visita hoy.<br>" +
+          "&nbsp;&nbsp;Al pasar el cursor o tocar un pin verá su <strong>última compra</strong> (fecha, cajas, monto), <strong>última visita</strong> y total de 30 días. Los compradores frecuentes (3+ compras/mes) lucen <strong>aro dorado ⭐</strong>.<br>" +
+          "• <strong>Filtros de abandono y frecuencia:</strong> Use <strong>⏳ +3d s/visita</strong>, <strong>🚨 +7d s/compra</strong> y <strong>🔥 Frecuentes</strong> en la barra del mapa.",
         example:
-          "Si un ejecutivo de ventas reporta que el cliente aún contaba con inventario, el indicador aparecerá en color amarillo detallando la hora y la distancia GPS exacta al momento del registro."
+          "Active 🛣️ Rutas y toque el ícono de cualquier carro para ver su estela ajustada a calles sobre su ruta planeada."
       },
       {
         num: "2",
@@ -84,9 +84,10 @@ export const STAFF_MANUALS = {
     ],
     whatsappText:
       `👑 *MANUAL OPERATIVO: DIRECCIÓN GENERAL — COMERCIALIZADORA SALINAS*\n\n` +
-      `1️⃣ *Supervisión en tiempo real:* En el Panel Administrativo -> pestaña *🗺️ Ruta, GPS y Cortes* (*⛶ Pantalla Completa*):\n` +
-      `   • Visualización de unidades en movimiento, inventario a bordo y recorrido diario.\n` +
-      `   • Estatus de puntos de venta: 🟢 Con compra hoy | 🟡 Visitado sin venta (validado con distancia GPS) | ⚪ Pendiente.\n\n` +
+      `1️⃣ *Supervisión en tiempo real:* El panel abre directo en *🗺️ Ruta, GPS y Cortes* (*⛶ Completa*):\n` +
+      `   • Active *🛣️ Rutas (N)* para comparar ruta planeada vs. recorrido GPS real ajustado a calles.\n` +
+      `   • Estatus e historial 30d: 🟢 Compró hoy | 🟡 Visitado | ⚪ Pendiente | ⭐ Aro dorado (3+ compras/mes).\n` +
+      `   • Filtros rápidos: *⏳ +3d s/visita*, *🚨 +7d s/compra* y *🔥 Frecuentes*.\n\n` +
       `2️⃣ *Alertas de pedidos nuevos:* Active *🔔 Sonido* en la barra superior. Cada pedido entrante emite alerta sonora y muestra un *🔴 Indicador Rojo* en el mapa para asignación directa a la unidad más cercana.\n\n` +
       `3️⃣ *Control de precios:* En *🏷️ Precios y Difusión* se establece el Precio Público y el *Mínimo Ruta ($)* autorizado para proteger el margen comercial.\n\n` +
       `4️⃣ *Conciliación de cortes:* En *Pre-Corte Automático* se cruzan automáticamente los registros de Almacén contra las Ventas en Ruta (inventario a devolver y efectivo exacto a liquidar).\n\n` +
@@ -143,15 +144,16 @@ export const STAFF_MANUALS = {
       },
       {
         num: "4",
-        icon: "🏪",
-        heading: "Alta de establecimientos en el directorio del mapa",
+        icon: "🧭",
+        heading: "Constructor Inteligente de Rutas (Admin → Chofer) y alta de tiendas",
         bodyHtml:
-          "Además de los registros realizados por los vendedores en campo, Administración puede dar de alta clientes en el mapa:<br>" +
-          "1. En <strong>🗺️ Ruta, GPS y Cortes</strong> presione <strong>➕ Punto / Tienda</strong>.<br>" +
-          "2. Seleccione el giro comercial (Tienda, Carnicería, Restaurante o Frutería), indique el nombre del negocio y pegue el enlace de Google Maps o pulse <strong>👆 Elegir en Mapa</strong>.<br>" +
-          "3. Presione <strong>💾 Guardar Negocio en el Mapa</strong>.",
+          "En <strong>🗺️ Ruta, GPS y Cortes</strong> puede armar y enviar rutas en vivo al celular del chofer:<br>" +
+          "1. En <strong>🧭 Constructor Inteligente de Rutas</strong> elija al <strong>Chofer</strong>.<br>" +
+          "2. Sume paradas buscando por nombre/dirección, tocando un pin del mapa → <strong>➕ Sumar a Ruta</strong>, o pulsando <strong>📦 Cargar Pedidos del Chofer</strong>.<br>" +
+          "3. Si la tienda aún no existe en la base de datos, toque <strong>+ Nuevo</strong> ahí mismo (o <strong>+ Punto</strong> arriba del mapa), capture giro, nombre y ubicación (link de Maps o <strong>👆 Elegir en Mapa</strong>) y al guardar se suma directo a la ruta.<br>" +
+          "4. Pulse <strong>⚡ Calcular Mejor Ruta (OSRM)</strong> para optimizar el orden (con regreso a Base opcional) y luego <strong>📤 Enviar Ruta al Chofer</strong>. Para agregados urgentes use <strong>⚡ Sumar Último Minuto</strong>; para vaciarla use <strong>🗑️ Limpiar</strong>.",
         example:
-          "Todos los establecimientos dados de alta quedan integrados en el monitoreo diario de cobertura comercial."
+          "Al enviar la ruta, aparece al instante en el teléfono del chofer (e incluso actualiza su navegador 3D si ya lo lleva abierto)."
       },
       {
         num: "5",
@@ -173,7 +175,7 @@ export const STAFF_MANUALS = {
       `1️⃣ *Difusión matutina de precios:* En *🏷️ Precios y Difusión*, actualice tarifas, pulse *📋 Copiar Mensaje de Hoy* y envíelo mediante las Listas de Difusión de WhatsApp Business.\n\n` +
       `2️⃣ *Recepción de pedidos:* Active *🔔 Sonido* al abrir el panel. Cada pedido nuevo emite alerta sonora, muestra aviso superior y coloca un *🔴 Indicador de Pedido Nuevo* en el mapa.\n\n` +
       `3️⃣ *Asignación de entregas:* Seleccione el pedido en el mapa, verifique qué unidad cercana cuenta con el calibre y maduración requeridos, y asígnelo para sincronizarlo en el teléfono del vendedor.\n\n` +
-      `4️⃣ *Registro de puntos de venta:* En *🗺️ Ruta, GPS y Cortes* utilice *➕ Punto / Tienda* para incorporar ubicaciones mediante enlace de Google Maps o selección directa en mapa.\n\n` +
+      `4️⃣ *Constructor de Rutas y Alta de Tiendas:* En *🧭 Constructor Inteligente de Rutas* elija chofer, sume tiendas/pedidos (o cree una tienda nueva con *+ Nuevo*), pulse *⚡ Calcular Mejor Ruta (OSRM)* y *📤 Enviar Ruta al Chofer*.\n\n` +
       `5️⃣ *Liquidación vespertina:* Una vez capturada la devolución física por el Área de Almacén, verifique en *Pre-Corte Automático* el cuadre al 100% de cajas y reciba el monto exacto indicado en *💵 Efectivo a Entregar*.`
   },
 
@@ -264,29 +266,27 @@ export const STAFF_MANUALS = {
       {
         num: "1",
         icon: "🛰️",
-        heading: "Inicio de recorrido: Activación de ubicación GPS y Avisos Push",
+        heading: "App Nativa Salinas Reparto: GPS en segundo plano y Geocercas",
         bodyHtml:
-          "Al iniciar su ruta, presione en la barra superior el botón <strong>⚪ Activar GPS</strong> hasta visualizar el estado <strong>🟢 GPS Activo</strong>.<br>" +
-          "• Mantenga la aplicación abierta durante sus traslados (el sistema conserva activa la pantalla automáticamente).<br>" +
-          "• <strong>Activar Avisos Push (para reportar GPS con 1 toque si la app pasa a segundo plano):</strong><br>" +
-          "&nbsp;&nbsp;• <strong>Android (Chrome):</strong> Inicie sesión, toque el botón amarillo <strong>🔔 Avisos</strong> arriba y elija <strong>Permitir</strong> (recomendado: menú ⋮ → <em>Instalar app</em>).<br>" +
-          "&nbsp;&nbsp;• <strong>iPhone (iOS 16.4+):</strong> Abra la liga en <strong>Safari</strong> → toque <strong>Compartir</strong> (cuadro con flecha) → <strong>Agregar a inicio</strong> → abra la app desde el ícono nuevo, inicie sesión, toque <strong>🔔 Avisos</strong> y elija <strong>Permitir</strong>.<br>" +
-          "• Si oficina solicita su ubicación, solo toque la notificación que llega a su celular para enviarla automáticamente.",
+          "La aplicación nativa (Android APK o iPhone TestFlight) mantiene su ubicación activa incluso con la pantalla apagada o usando otra app:<br>" +
+          "• Al entrar con su usuario y PIN, el botón <strong>🟢 GPS</strong> se activa automáticamente. En la barra superior también tiene <strong>🧭 3D</strong>, <strong>❓ Guía</strong> y <strong>Salir</strong>.<br>" +
+          "• <strong>Permisos recomendados (una sola vez):</strong> Acepte ubicación en <strong>«Permitir todo el tiempo»</strong> y desactive el ahorro de batería para <em>Salinas Reparto</em>.<br>" +
+          "• <strong>Visitas automáticas por geocerca:</strong> Al permanecer ~1 minuto dentro de 55 metros de una tienda registrada (sin venta), el sistema registra la visita automáticamente sin que tenga que capturar nada.",
         example:
-          "Al concluir la jornada laboral en bodega, presione nuevamente el botón de GPS para finalizar la transmisión de ubicación."
+          "Al concluir la jornada laboral en bodega, toque el botón GPS para pausar el rastreo o toque Salir."
       },
       {
         num: "2",
-        icon: "🚗",
-        heading: "Sección 1 — 'Mi Ruta': Inventario a bordo y entregas asignadas",
+        icon: "🧭",
+        heading: "Sección 1 — 'Mi Ruta': Inventario, Mi Ruta del Día y Navegación 3D",
         bodyHtml:
-          "• <strong>Indicador superior de carga:</strong> Muestra el total de cajas despachadas por Almacén y la disponibilidad actual en su unidad por calibre (<strong>M, P, E y S</strong>).<br>" +
-          "• <strong>Pedidos Asignados por Oficina:</strong> Cada orden asignada muestra domicilio, detalle de cajas y maduración solicitada:<br>" +
-          "&nbsp;&nbsp;1. Pulse <strong>📍 Abrir Mapa</strong> para iniciar la navegación o <strong>📞 Llamar</strong> para contactar al cliente.<br>" +
-          "&nbsp;&nbsp;2. Presione <strong>🚗 Voy en Camino</strong> al dirigirse al establecimiento.<br>" +
-          "&nbsp;&nbsp;3. Al efectuar la entrega, pulse <strong>✅ Entregar y Cobrar</strong> para registrar la forma de pago recibida.",
+          "• <strong>Indicador superior de carga:</strong> Muestra las cajas despachadas por Almacén y su disponibilidad actual por calibre (<strong>M, P, E y S</strong>).<br>" +
+          "• <strong>🗺️ Mi Ruta del Día:</strong> Aquí recibe en vivo la ruta armada por Administración, o puede armar/editar la suya con <strong>🗺️ Armar / Editar</strong>.<br>" +
+          "&nbsp;&nbsp;• Para reordenar paradas, mantenga presionado el ícono <strong>⋮⋮</strong> (~0.3 s hasta sentir vibración) o use <strong>▲ / ▼</strong>; toque <strong>✓</strong> para marcar lista, <strong>✕</strong> para quitar una parada o <strong>🗑️ Limpiar</strong> para vaciar la lista (con confirmación).<br>" +
+          "&nbsp;&nbsp;• Pulse <strong>🧭 Iniciar Ruta 3D</strong> para abrir la cabina de navegación giro a giro con alertas de llegada y botón rápido de venta.<br>" +
+          "• <strong>Pedidos Asignados por Oficina:</strong> Use <strong>📍 Abrir Mapa</strong>, <strong>🚗 Voy en Camino</strong> y <strong>✅ Entregar y Cobrar</strong>.",
         example:
-          "Al confirmar la entrega, el sistema descuenta automáticamente las cajas del inventario de su unidad y las integra a su corte diario."
+          "Si Admin agrega una parada de último minuto mientras navega en 3D, la ruta se actualiza en vivo sin cerrar su mapa."
       },
       {
         num: "3",
@@ -332,12 +332,13 @@ export const STAFF_MANUALS = {
       `🚗 *MANUAL OPERATIVO: VENTAS Y REPARTO EN RUTA — COMERCIALIZADORA SALINAS*\n\n` +
       `👉 *Acceso móvil:* https://aguacates-salinas.web.app/chofer.html\n` +
       `*(Seleccione su usuario e ingrese su PIN personal de 4 dígitos)*\n\n` +
-      `1️⃣ *Inicio de ruta y Avisos GPS:*\n` +
-      `• Presione *⚪ Activar GPS* (*🟢 GPS Activo*) para habilitar el monitoreo.\n` +
-      `• *Android (Chrome):* Toque *🔔 Avisos* arriba -> *Permitir* (recomendado: menú ⋮ -> *Instalar app*).\n` +
-      `• *iPhone (Safari):* Botón *Compartir* -> *Agregar a inicio* -> abra desde el ícono nuevo -> toque *🔔 Avisos* -> *Permitir*.\n` +
-      `• Si recibe una notificación de ubicación, solo tóquela para enviar su GPS en automático.\n\n` +
-      `2️⃣ *🚗 Mi Ruta:* Consulte su inventario disponible a bordo y gestione los pedidos asignados por Administración (*📍 Abrir Mapa* -> *🚗 Voy en Camino* -> *✅ Entregar y Cobrar*).\n\n` +
+      `1️⃣ *App Nativa y GPS en segundo plano:*\n` +
+      `• Al iniciar sesión, *🟢 GPS* se activa solo (acepte ubicación *"Permitir todo el tiempo"* y sin ahorro de batería).\n` +
+      `• Al permanecer ~1 min cerca de una tienda registrada, la visita se marca en automático por geocerca.\n\n` +
+      `2️⃣ *🗺️ Mi Ruta del Día y Navegación 3D:*\n` +
+      `• Reciba la ruta de Oficina o ármela con *🗺️ Armar / Editar*.\n` +
+      `• Reordene manteniendo presionado *⋮⋮* (o *▲ / ▼*), marque *✓*, quite con *✕* o vacíe con *🗑️ Limpiar*.\n` +
+      `• Toque *🧭 Iniciar Ruta 3D* para navegar giro a giro con aviso de llegada.\n\n` +
       `3️⃣ *🏪 Clientes:*\n` +
       `• *Establecimiento nuevo:* Regístrelo frente al local pulsando *📍 Guardar Nuevo Negocio Aquí (GPS)*.\n` +
       `• *Visita sin venta:* Seleccione *📍 Pasé (Sin venta)* para dejar constancia GPS de su visita.\n\n` +

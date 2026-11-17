@@ -35,7 +35,7 @@ import {
   formatRouteKm,
   formatRouteMin
 } from "./route-optimizer.js?v=nav3d_14";
-import { STAFF_MANUALS } from "./manuals-data.js";
+import { STAFF_MANUALS } from "./manuals-data.js?v=nav3d_15";
 
 const SESSION_HASH_KEY = "salinas_admin_hash_v1";
 
@@ -2566,7 +2566,17 @@ document.getElementById("adminPlacesList")?.addEventListener("click", async (e) 
 });
 
 const adminPlaceModal = document.getElementById("adminPlaceModal");
+let pendingAddPlaceToRouteAfterSave = false;
+
 document.getElementById("btnAdminOpenPlaceModal")?.addEventListener("click", () => {
+  pendingAddPlaceToRouteAfterSave = false;
+  document.getElementById("adminPlaceForm")?.reset();
+  if (adminPlaceModal) adminPlaceModal.classList.add("open");
+});
+
+document.getElementById("btnRbAddNewPlace")?.addEventListener("click", () => {
+  pendingAddPlaceToRouteAfterSave = true;
+  document.getElementById("adminPlaceForm")?.reset();
   if (adminPlaceModal) adminPlaceModal.classList.add("open");
 });
 document.getElementById("btnCloseAdminPlaceModal")?.addEventListener("click", () => {
@@ -2631,7 +2641,28 @@ document.getElementById("adminPlaceForm")?.addEventListener("submit", async (e) 
     if (adminPlaceModal) adminPlaceModal.classList.remove("open");
     ensureLeafletMap();
     if (leafletMap) leafletMap.flyTo([parsed.lat, parsed.lng], 15, { duration: 0.6 });
-    showToast(`🏪 "${name}" guardado en el mapa.`);
+    if (pendingAddPlaceToRouteAfterSave) {
+      pendingAddPlaceToRouteAfterSave = false;
+      const cat = PLACE_CATEGORIES[category] || PLACE_CATEGORIES.tienda;
+      rbStops.push({
+        id: placeId,
+        kind: "place",
+        name: `${cat.emoji} ${name}`,
+        address,
+        subtitle: `${cat.label}${address ? ` • ${address}` : ""}`,
+        lat: parsed.lat,
+        lng: parsed.lng,
+        status: "pending",
+        pinEmoji: "🥑",
+        actionLabel: "➕ Vender / Cobrar",
+        arrivalActionLabel: "➕ Vender Aquí"
+      });
+      renderRouteBuilderUI();
+      recalculateAdminBuilderMetrics();
+      showToast(`🏪 "${name}" guardado y sumado a la ruta.`);
+    } else {
+      showToast(`🏪 "${name}" guardado en el mapa.`);
+    }
   } catch (err) {
     console.error(err);
     showToast("Error al guardar el negocio.");
