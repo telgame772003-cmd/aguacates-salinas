@@ -4224,10 +4224,10 @@ function renderRouteBuilderUI() {
           <span class="route-drag-handle" title="Arrastrar para reordenar">⋮⋮</span>
           <span class="route-stop-num">${isDone ? "✓" : idx + 1}</span>
           <div style="flex:1;min-width:0;">
-            <div style="font-size:0.85rem;font-weight:800;color:var(--green-950);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+            <div style="font-size:0.86rem;font-weight:800;color:var(--green-950);line-height:1.25;word-break:break-word;">
               ${escapeHtml(st.name || "Parada")}
             </div>
-            <div style="font-size:0.72rem;color:var(--slate-500);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+            <div style="font-size:0.73rem;color:var(--slate-500);line-height:1.25;margin-top:2px;word-break:break-word;">
               ${escapeHtml(st.subtitle || st.address || "")}
             </div>
           </div>
@@ -4449,7 +4449,7 @@ document.getElementById("rbAddSearch")?.addEventListener("input", (e) => {
               <strong style="display:block;color:var(--green-950);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(item.title)}</strong>
               <span style="font-size:0.74rem;color:var(--slate-500);">${escapeHtml(item.sub)}</span>
             </div>
-            <button type="button" class="btn btn-primary btn-sm" data-rb-pick-type="${item.type}" data-rb-pick-id="${escapeHtml(item.id)}" style="padding:5px 10px;font-size:0.74rem;">➕</button>
+            <button type="button" class="btn btn-primary btn-sm" data-rb-pick-type="${item.type}" data-rb-pick-id="${escapeHtml(item.id)}" style="padding:6px 12px;font-size:0.78rem;font-weight:900;color:#ffffff;flex-shrink:0;">+ Sumar</button>
           </div>`
         )
         .join("")

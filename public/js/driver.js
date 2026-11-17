@@ -2667,10 +2667,10 @@ function renderDriverActiveRouteCard() {
           <span class="route-drag-handle" title="Arrastrar">⋮⋮</span>
           <span class="route-stop-num">${isDone ? "✓" : idx + 1}</span>
           <div style="flex:1;min-width:0;">
-            <div style="font-size:0.84rem;font-weight:800;color:var(--green-950);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+            <div style="font-size:0.85rem;font-weight:800;color:var(--green-950);line-height:1.25;word-break:break-word;">
               ${escapeHtml(st.name || "Parada")}
             </div>
-            <div style="font-size:0.71rem;color:var(--slate-500);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+            <div style="font-size:0.72rem;color:var(--slate-500);line-height:1.25;margin-top:2px;word-break:break-word;">
               ${escapeHtml(st.subtitle || st.address || "")}
             </div>
           </div>
@@ -2837,12 +2837,12 @@ function renderDriverRouteBuilderChecklist() {
           const checked = drvRbSelectedIds.has(p.id) ? "checked" : "";
           const dTxt = p.dist !== null ? (p.dist < 1000 ? `${p.dist} m` : `${(p.dist / 1000).toFixed(1)} km`) : "";
           return `
-            <label class="route-pick-result-item" style="cursor:pointer;">
-              <div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1;">
-                <input type="checkbox" data-drv-rb-chk="${escapeHtml(p.id)}" ${checked}>
-                <div style="min-width:0;">
-                  <strong style="display:block;font-size:0.84rem;color:var(--green-950);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${cat.emoji} ${escapeHtml(p.name)}</strong>
-                  <span style="font-size:0.72rem;color:var(--slate-500);">${escapeHtml(cat.label)}${dTxt ? ` • ${dTxt}` : ""}</span>
+            <label class="route-pick-result-item" style="cursor:pointer;padding:10px 8px;">
+              <div style="display:flex;align-items:center;gap:10px;min-width:0;flex:1;">
+                <input type="checkbox" data-drv-rb-chk="${escapeHtml(p.id)}" ${checked} style="width:19px;height:19px;accent-color:#15803d;flex-shrink:0;margin:0;">
+                <div style="min-width:0;flex:1;">
+                  <strong style="display:block;font-size:0.86rem;color:var(--green-950);line-height:1.25;word-break:break-word;">${cat.emoji} ${escapeHtml(p.name)}</strong>
+                  <span style="font-size:0.74rem;color:var(--slate-500);display:block;margin-top:2px;">${escapeHtml(cat.label)}${dTxt ? ` • ${dTxt}` : ""}</span>
                 </div>
               </div>
             </label>
