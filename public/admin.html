@@ -908,6 +908,28 @@
     </div>
   </div>
 
+  <!-- Modal: Cancelar / Anular Nota de Ruta -->
+  <div id="cancelSaleModal" class="modal-backdrop" role="dialog" aria-modal="true" style="z-index:10055;">
+    <div class="modal-card" style="max-width:420px;padding:22px 20px;">
+      <button type="button" id="btnCloseCancelSaleModal" class="modal-close" aria-label="Cerrar">✕</button>
+      <h3 class="serif-title" style="font-size:1.22rem;color:#991b1b;margin-bottom:4px;padding-right:28px;">❌ Cancelar / Anular Nota</h3>
+      <p id="cancelSaleSummary" style="font-size:0.84rem;color:#475569;margin-bottom:10px;"></p>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
+        <button type="button" class="btn btn-outline btn-sm cancel-reason-pill" data-cancel-reason="Prueba del sistema">🧪 Prueba del sistema</button>
+        <button type="button" class="btn btn-outline btn-sm cancel-reason-pill" data-cancel-reason="Error de captura">✏️ Error de captura</button>
+        <button type="button" class="btn btn-outline btn-sm cancel-reason-pill" data-cancel-reason="Cliente canceló / rechazó">🚫 Cliente canceló</button>
+      </div>
+      <div class="form-group" style="margin-bottom:14px;">
+        <label class="form-label" for="cancelSaleReasonInput">Motivo de cancelación *</label>
+        <input type="text" id="cancelSaleReasonInput" class="form-control" placeholder="Escribe o elige un motivo..." required>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <button type="button" id="btnCancelSaleAbort" class="btn btn-outline" style="padding:10px;font-weight:700;">Volver</button>
+        <button type="button" id="btnCancelSaleConfirm" class="btn" style="padding:10px;font-weight:800;background:#dc2626;color:#fff;border:none;">Sí, anular nota</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Printable Receipt / Warehouse Sheet Container -->
   <div id="printReceiptArea"></div>
 
@@ -918,6 +940,6 @@
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <script type="module" src="js/admin.js?v=nav3d_15"></script>
+  <script type="module" src="js/admin.js?v=nav3d_16"></script>
 </body>
 </html>

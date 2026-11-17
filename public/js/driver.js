@@ -93,8 +93,29 @@ let placeSearchQuery = "";
 
 // Street sale form state
 let saleQtys = { S: 0, E: 0, P: 0, M: 0 };
+let saleKgs = { S: 0, E: 0, P: 0, M: 0 };
 let salePrices = { S: 400, E: 360, P: 320, M: 250 };
 let salePayMethod = "Efectivo";
+
+function isSaleCancelled(s) {
+  return s?.status === "cancelada";
+}
+
+function round1(n) {
+  return Math.round((Number(n) || 0) * 10) / 10;
+}
+
+function formatBoxesKg(boxesVal) {
+  const rounded = round1(boxesVal);
+  const sign = rounded < 0 ? "-" : "";
+  const absKg = Math.round(Math.abs(rounded) * 10);
+  const fullBoxes = Math.floor(absKg / 10);
+  const extraKg = absKg % 10;
+  if (fullBoxes === 0 && extraKg === 0) return "0 cj";
+  if (fullBoxes === 0) return `${sign}${extraKg} kg`;
+  if (extraKg === 0) return `${sign}${fullBoxes} cj`;
+  return `${sign}${fullBoxes} cj + ${extraKg} kg`;
+}
 
 // Listeners & GPS state
 let whUnsub = null;
@@ -1029,14 +1050,15 @@ function getPlaceStatusToday(place) {
 
   const saleMatch = allSalesToday.find(
     (s) =>
-      s.placeId === place.id ||
-      namesMatchPlace(place.name, s.customerName) ||
-      (pNormPhone && pNormPhone.length === 10 && normalizePhone10(s.phone) === pNormPhone)
+      !isSaleCancelled(s) &&
+      (s.placeId === place.id ||
+        namesMatchPlace(place.name, s.customerName) ||
+        (pNormPhone && pNormPhone.length === 10 && normalizePhone10(s.phone) === pNormPhone))
   );
   if (saleMatch) {
     return {
       code: "sold",
-      badge: `🟢 Vendido hoy (${saleMatch.totalBoxes} cj)`,
+      badge: `🟢 Vendido hoy (${formatBoxesKg(saleMatch.totalBoxes)})`,
       style: "background:var(--green-100);color:var(--green-800);"
     };
   }
@@ -1361,8 +1383,9 @@ function computeMyTrunkAndCorte() {
   let creditMoney = 0;
 
   for (const s of mySalesToday) {
+    if (isSaleCancelled(s)) continue;
     for (const c of cals) {
-      sold[c] += Number(s.boxesByCaliber?.[c]) || 0;
+      sold[c] = round1(sold[c] + (Number(s.boxesByCaliber?.[c]) || 0));
     }
     grossMoney += Number(s.totalAmount) || 0;
     cashMoney += Number(s.cashCollected) || 0;
@@ -1996,30 +2019,40 @@ function renderStreetSaleCalibers() {
     .map((code) => {
       const cal = storeSettings.calibers[code] || DEFAULT_STORE_SETTINGS.calibers[code];
       const qty = saleQtys[code] || 0;
+      const kg = saleKgs[code] || 0;
+      const isActiveRow = qty > 0 || kg > 0;
       const unitPrice = salePrices[code] || cal.price;
       const minPrice = Number(cal.minPrice) || 1;
+      const kgPrice = Math.round((unitPrice / 10) * 100) / 100;
 
       return `
-        <div class="driver-sale-cal-row ${qty > 0 ? "active-row" : ""}" data-cal-row="${code}">
+        <div class="driver-sale-cal-row ${isActiveRow ? "active-row" : ""}" data-cal-row="${code}">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
             <div>
               <strong style="font-size:0.98rem;color:var(--green-950);">${escapeHtml(code)} · ${escapeHtml(cal.name)}</strong>
               <span style="display:block;font-size:0.73rem;color:var(--slate-500);">
-                Lista: ${formatCurrency(cal.price)} • Mín: ${formatCurrency(minPrice)}
+                Lista: ${formatCurrency(cal.price)}/cj (${formatCurrency(cal.price / 10)}/kg) • Mín: ${formatCurrency(minPrice)}
               </span>
             </div>
-            <span class="ripeness-badge" data-avail-badge="${code}">En carro: ${stats.avail[code] ?? 0}</span>
+            <span class="ripeness-badge" data-avail-badge="${code}">En carro: ${formatBoxesKg(stats.avail[code] ?? 0)}</span>
           </div>
 
-          <div class="driver-cal-controls">
+          <div class="driver-cal-controls" style="flex-wrap:wrap;gap:8px;">
             <div class="stepper">
               <button type="button" data-step-code="${code}" data-delta="-1">−</button>
-              <input type="number" min="0" max="500" inputmode="numeric" data-qty-code="${code}" value="${qty}">
+              <input type="number" min="0" max="500" inputmode="numeric" data-qty-code="${code}" value="${qty}" title="Cajas (10 kg c/u)">
               <button type="button" data-step-code="${code}" data-delta="1">+</button>
             </div>
 
+            <div class="stepper" style="border-color:#cbd5e1;" title="Kilos sueltos adicionales">
+              <button type="button" data-kg-step-code="${code}" data-delta="-1">−</button>
+              <input type="number" min="0" max="99" inputmode="numeric" data-kg-code="${code}" value="${kg}" style="width:36px;">
+              <button type="button" data-kg-step-code="${code}" data-delta="1">+</button>
+              <span style="font-size:0.72rem;font-weight:800;color:var(--slate-500);padding:0 6px 0 2px;">kg</span>
+            </div>
+
             <div class="driver-price-box">
-              <span class="lbl">$/caja</span>
+              <span class="lbl">$/caja <small style="color:var(--slate-500);font-weight:600;" data-kg-price-lbl="${code}">(${formatCurrency(kgPrice)}/kg)</small></span>
               <input type="number" min="${minPrice}" max="9999" inputmode="numeric" class="form-control" data-price-code="${code}" value="${unitPrice}">
             </div>
           </div>
@@ -2032,6 +2065,19 @@ function renderStreetSaleCalibers() {
 }
 
 document.getElementById("streetSaleCalibersContainer").addEventListener("click", (e) => {
+  const kgBtn = e.target.closest("button[data-kg-step-code]");
+  if (kgBtn) {
+    const code = kgBtn.dataset.kgStepCode;
+    const delta = Number(kgBtn.dataset.delta) || 0;
+    saleKgs[code] = Math.max(0, Math.min(99, (saleKgs[code] || 0) + delta));
+    const kgInput = document.querySelector(`input[data-kg-code="${code}"]`);
+    if (kgInput) kgInput.value = String(saleKgs[code]);
+    const row = document.querySelector(`[data-cal-row="${code}"]`);
+    if (row) row.classList.toggle("active-row", (saleQtys[code] || 0) > 0 || saleKgs[code] > 0);
+    recalcStreetSaleTotals();
+    return;
+  }
+
   const btn = e.target.closest("button[data-step-code]");
   if (!btn) return;
   const code = btn.dataset.stepCode;
@@ -2042,7 +2088,7 @@ document.getElementById("streetSaleCalibersContainer").addEventListener("click",
   if (qtyInput) qtyInput.value = String(saleQtys[code]);
 
   const row = document.querySelector(`[data-cal-row="${code}"]`);
-  if (row) row.classList.toggle("active-row", saleQtys[code] > 0);
+  if (row) row.classList.toggle("active-row", saleQtys[code] > 0 || (saleKgs[code] || 0) > 0);
 
   recalcStreetSaleTotals();
 });
@@ -2053,7 +2099,17 @@ document.getElementById("streetSaleCalibersContainer").addEventListener("input",
     const code = qtyInp.dataset.qtyCode;
     saleQtys[code] = Math.max(0, Math.floor(Number(qtyInp.value) || 0));
     const row = document.querySelector(`[data-cal-row="${code}"]`);
-    if (row) row.classList.toggle("active-row", saleQtys[code] > 0);
+    if (row) row.classList.toggle("active-row", saleQtys[code] > 0 || (saleKgs[code] || 0) > 0);
+    recalcStreetSaleTotals();
+    return;
+  }
+
+  const kgInp = e.target.closest("input[data-kg-code]");
+  if (kgInp) {
+    const code = kgInp.dataset.kgCode;
+    saleKgs[code] = Math.max(0, Math.min(99, Math.floor(Number(kgInp.value) || 0)));
+    const row = document.querySelector(`[data-cal-row="${code}"]`);
+    if (row) row.classList.toggle("active-row", (saleQtys[code] || 0) > 0 || saleKgs[code] > 0);
     recalcStreetSaleTotals();
     return;
   }
@@ -2062,6 +2118,8 @@ document.getElementById("streetSaleCalibersContainer").addEventListener("input",
   if (priceInp) {
     const code = priceInp.dataset.priceCode;
     salePrices[code] = Math.max(0, Math.round(Number(priceInp.value) || 0));
+    const kgLbl = document.querySelector(`[data-kg-price-lbl="${code}"]`);
+    if (kgLbl) kgLbl.textContent = `(${formatCurrency(salePrices[code] / 10)}/kg)`;
     recalcStreetSaleTotals();
   }
 });
@@ -2094,13 +2152,15 @@ function recalcStreetSaleTotals() {
   let totalAmount = 0;
 
   for (const code of ["S", "E", "P", "M"]) {
-    const q = saleQtys[code] || 0;
+    const boxes = saleQtys[code] || 0;
+    const kgs = saleKgs[code] || 0;
     const p = salePrices[code] || 0;
-    totalBoxes += q;
-    totalAmount += q * p;
+    const equivBoxes = round1(boxes + kgs / 10);
+    totalBoxes = round1(totalBoxes + equivBoxes);
+    totalAmount += Math.round(boxes * p + kgs * (p / 10));
   }
 
-  document.getElementById("saleBoxesSummary").textContent = `${totalBoxes} caja${totalBoxes === 1 ? "" : "s"}`;
+  document.getElementById("saleBoxesSummary").textContent = formatBoxesKg(totalBoxes);
   document.getElementById("saleTotalSummary").textContent = formatCurrency(totalAmount);
 
   if (salePayMethod === "Credito") {
@@ -2215,8 +2275,10 @@ document.getElementById("streetSaleForm").addEventListener("submit", async (e) =
   let totalAmount = 0;
 
   for (const code of ["S", "E", "P", "M"]) {
-    const qty = saleQtys[code] || 0;
-    if (qty <= 0) continue;
+    const boxes = saleQtys[code] || 0;
+    const extraKg = saleKgs[code] || 0;
+    const equivBoxes = round1(boxes + extraKg / 10);
+    if (equivBoxes <= 0) continue;
 
     const cal = storeSettings.calibers[code] || DEFAULT_STORE_SETTINGS.calibers[code];
     const minPrice = Number(cal.minPrice) || 1;
@@ -2227,15 +2289,16 @@ document.getElementById("streetSaleForm").addEventListener("submit", async (e) =
       return;
     }
 
-    const subtotal = qty * unitPrice;
-    items.push({ code, name: cal.name, qty, unitPrice, subtotal });
-    boxesByCaliber[code] = qty;
-    totalBoxes += qty;
+    const subtotal = Math.round(boxes * unitPrice + extraKg * (unitPrice / 10));
+    const totalKg = Math.round(equivBoxes * 10);
+    items.push({ code, name: cal.name, qty: equivBoxes, boxes, extraKg, totalKg, unitPrice, subtotal });
+    boxesByCaliber[code] = equivBoxes;
+    totalBoxes = round1(totalBoxes + equivBoxes);
     totalAmount += subtotal;
   }
 
   if (totalBoxes <= 0) {
-    showToast("Agrega al menos 1 caja.");
+    showToast("Agrega al menos 1 caja o 1 kg.");
     return;
   }
 
@@ -2293,6 +2356,7 @@ document.getElementById("streetSaleForm").addEventListener("submit", async (e) =
     rememberClient(customerName, phone);
 
     saleQtys = { S: 0, E: 0, P: 0, M: 0 };
+    saleKgs = { S: 0, E: 0, P: 0, M: 0 };
     syncDefaultSalePrices();
     document.getElementById("saleSelectedPlaceId").value = "";
     document.getElementById("saleLinkedPlaceBadge").style.display = "none";
@@ -2370,26 +2434,29 @@ function renderTodaySalesList() {
       const timeStr = s.createdAtIso
         ? new Date(s.createdAtIso).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })
         : "";
-      const summaryItems = (s.items || []).map((i) => `${i.qty}${i.code}`).join(" + ");
+      const summaryItems = (s.items || []).map((i) => `${formatBoxesKg(i.qty)} ${i.code}`).join(" + ");
+      const cancelled = isSaleCancelled(s);
 
       return `
-        <div class="corte-summary-box" style="padding:13px;margin-bottom:10px;">
+        <div class="corte-summary-box" style="padding:13px;margin-bottom:10px;${cancelled ? "opacity:0.65;background:#f8fafc;border-color:#cbd5e1;" : ""}">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
             <div>
-              <strong style="color:var(--green-950);font-size:0.96rem;">${escapeHtml(s.customerName)}</strong>
+              <strong style="color:var(--green-950);font-size:0.96rem;${cancelled ? "text-decoration:line-through;" : ""}">${escapeHtml(s.customerName)}</strong>
+              ${cancelled ? `<span style="display:inline-block;margin-left:6px;background:#fee2e2;color:#b91c1c;padding:1px 7px;border-radius:999px;font-size:0.7rem;font-weight:800;">❌ CANCELADA</span>` : ""}
               <div style="font-size:0.76rem;color:var(--slate-500);">${escapeHtml(s.folio)} • ${escapeHtml(timeStr)} • ${escapeHtml(s.paymentMethod)}</div>
+              ${cancelled && s.cancelReason ? `<div style="font-size:0.74rem;color:#b91c1c;margin-top:2px;">Motivo: ${escapeHtml(s.cancelReason)}</div>` : ""}
             </div>
-            <strong style="font-size:1.05rem;color:var(--green-900);">${formatCurrency(s.totalAmount)}</strong>
+            <strong style="font-size:1.05rem;color:${cancelled ? "#94a3b8" : "var(--green-900)"};${cancelled ? "text-decoration:line-through;" : ""}">${formatCurrency(s.totalAmount)}</strong>
           </div>
 
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:8px;padding-top:8px;border-top:1px dashed var(--slate-200);flex-wrap:wrap;">
             <div style="font-size:0.8rem;color:var(--slate-700);">
-              📦 <strong>${s.totalBoxes} cajas</strong> (${escapeHtml(summaryItems)})
-              ${s.creditBalance > 0 ? `<span style="display:block;color:var(--red-600);font-weight:800;">Resta crédito: ${formatCurrency(s.creditBalance)}</span>` : ""}
+              📦 <strong>${formatBoxesKg(s.totalBoxes)}</strong> (${escapeHtml(summaryItems)})
+              ${!cancelled && s.creditBalance > 0 ? `<span style="display:block;color:var(--red-600);font-weight:800;">Resta crédito: ${formatCurrency(s.creditBalance)}</span>` : ""}
             </div>
-            <a href="${buildDigitalReceiptWhatsAppUrl(s)}" target="_blank" rel="noopener" class="btn btn-whatsapp btn-sm" style="padding:6px 10px;font-size:0.76rem;">
+            ${cancelled ? "" : `<a href="${buildDigitalReceiptWhatsAppUrl(s)}" target="_blank" rel="noopener" class="btn btn-whatsapp btn-sm" style="padding:6px 10px;font-size:0.76rem;">
               📲 Nota WhatsApp
-            </a>
+            </a>`}
           </div>
         </div>
       `;

@@ -39,6 +39,26 @@ import { STAFF_MANUALS } from "./manuals-data.js?v=nav3d_15";
 
 const SESSION_HASH_KEY = "salinas_admin_hash_v1";
 
+function isSaleCancelled(s) {
+  return s?.status === "cancelada";
+}
+
+function round1(n) {
+  return Math.round((Number(n) || 0) * 10) / 10;
+}
+
+function formatBoxesKg(boxesVal) {
+  const rounded = round1(boxesVal);
+  const sign = rounded < 0 ? "-" : "";
+  const absKg = Math.round(Math.abs(rounded) * 10);
+  const fullBoxes = Math.floor(absKg / 10);
+  const extraKg = absKg % 10;
+  if (fullBoxes === 0 && extraKg === 0) return "0 cj";
+  if (fullBoxes === 0) return `${sign}${extraKg} kg`;
+  if (extraKg === 0) return `${sign}${fullBoxes} cj`;
+  return `${sign}${fullBoxes} cj + ${extraKg} kg`;
+}
+
 function getLocalDateStr(dateObj = new Date()) {
   const y = dateObj.getFullYear();
   const m = String(dateObj.getMonth() + 1).padStart(2, "0");
@@ -1493,13 +1513,14 @@ function getPlaceDailyStatus(place) {
   const pPhone10 = normalizePhone10(place.phone);
 
   const matchingSales = routeSalesList.filter((s) => {
+    if (isSaleCancelled(s)) return false;
     if (s.placeId && s.placeId === place.id) return true;
     const sPhone10 = normalizePhone10(s.phone);
     return (pPhone10 && sPhone10 && pPhone10 === sPhone10) || namesMatchPlace(place.name, s.customerName);
   });
 
   if (matchingSales.length > 0) {
-    const boxes = matchingSales.reduce((acc, s) => acc + (Number(s.totalBoxes) || 0), 0);
+    const boxes = round1(matchingSales.reduce((acc, s) => acc + (Number(s.totalBoxes) || 0), 0));
     const amount = matchingSales.reduce((acc, s) => acc + (Number(s.totalAmount) || 0), 0);
     const lastSale = matchingSales[0];
     return {
@@ -1599,6 +1620,7 @@ function buildHistory30dIndex() {
   const salesByPhone10 = new Map();
   const unindexedSales = [];
   for (const s of salesMap.values()) {
+    if (isSaleCancelled(s)) continue;
     if (s.placeId) {
       if (!salesByPlaceId.has(s.placeId)) salesByPlaceId.set(s.placeId, []);
       salesByPlaceId.get(s.placeId).push(s);
@@ -2799,12 +2821,13 @@ function renderRouteCortesAndSales() {
   }
 
   for (const s of routeSalesList) {
+    if (isSaleCancelled(s)) continue;
     const rec = ensureDriver(s.driver);
     rec.notesCount++;
     for (const c of ["M", "P", "E", "S"]) {
       const b = Number(s.boxesByCaliber?.[c]) || 0;
-      rec.sold[c] += b;
-      rec.totalSold += b;
+      rec.sold[c] = round1(rec.sold[c] + b);
+      rec.totalSold = round1(rec.totalSold + b);
     }
     rec.grossMoney += Number(s.totalAmount) || 0;
     rec.cashMoney += Number(s.cashCollected) || 0;
@@ -2823,9 +2846,9 @@ function renderRouteCortesAndSales() {
   } else {
     corteGrid.innerHTML = allRecords
       .map((r) => {
-        const pendingReturn = r.totalOut - r.totalSold - r.totalRet;
+        const pendingReturn = round1(r.totalOut - r.totalSold - r.totalRet);
         const pendingByCal = ["M", "P", "E", "S"]
-          .map((c) => `${c}:${r.out[c] - r.sold[c] - r.ret[c]}`)
+          .map((c) => `${c}:${formatBoxesKg(r.out[c] - r.sold[c] - r.ret[c])}`)
           .join(" • ");
 
         return `
@@ -2836,12 +2859,12 @@ function renderRouteCortesAndSales() {
             </div>
 
             <div style="background:var(--green-50);border:1px solid var(--slate-200);border-radius:10px;padding:9px 11px;font-size:0.82rem;margin-bottom:10px;">
-              <div style="display:flex;justify-content:space-between;"><span>Salidas Almacén:</span><strong>${r.totalOut} cajas</strong></div>
-              <div style="display:flex;justify-content:space-between;"><span>(−) Ventas en Ruta:</span><strong>${r.totalSold} cajas</strong></div>
-              <div style="display:flex;justify-content:space-between;"><span>(−) Ya devueltas a Almacén:</span><strong>${r.totalRet} cajas</strong></div>
+              <div style="display:flex;justify-content:space-between;"><span>Salidas Almacén:</span><strong>${formatBoxesKg(r.totalOut)}</strong></div>
+              <div style="display:flex;justify-content:space-between;"><span>(−) Ventas en Ruta:</span><strong>${formatBoxesKg(r.totalSold)}</strong></div>
+              <div style="display:flex;justify-content:space-between;"><span>(−) Ya devueltas a Almacén:</span><strong>${formatBoxesKg(r.totalRet)}</strong></div>
               <div style="display:flex;justify-content:space-between;border-top:1px dashed var(--slate-300);margin-top:5px;padding-top:5px;color:var(--green-950);font-weight:800;">
                 <span>= Trae en carro / Por devolver:</span>
-                <span>${pendingReturn} cajas</span>
+                <span>${formatBoxesKg(pendingReturn)}</span>
               </div>
               <div style="font-size:0.73rem;color:var(--slate-500);margin-top:2px;">Por calibre: ${pendingByCal}</div>
             </div>
@@ -2884,31 +2907,35 @@ function renderRouteCortesAndSales() {
       const timeStr = s.createdAtIso
         ? new Date(s.createdAtIso).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })
         : "";
+      const cancelled = isSaleCancelled(s);
       const chipsHtml = (s.items || [])
         .map(
           (i) =>
-            `<span class="cal-chip">${i.qty} × ${escapeHtml(i.name)} (${formatCurrency(i.unitPrice)})</span>`
+            `<span class="cal-chip">${formatBoxesKg(i.qty)} × ${escapeHtml(i.name)} (${formatCurrency(i.unitPrice)})</span>`
         )
         .join("");
 
       return `
-        <article class="order-admin-card" style="padding:14px 16px;">
+        <article class="order-admin-card" style="padding:14px 16px;${cancelled ? "opacity:0.65;background:#f8fafc;border-color:#cbd5e1;" : ""}">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;">
             <div>
-              <strong style="font-size:1rem;color:var(--green-950);">${escapeHtml(s.customerName)}</strong>
+              <strong style="font-size:1rem;color:var(--green-950);${cancelled ? "text-decoration:line-through;" : ""}">${escapeHtml(s.customerName)}</strong>
+              ${cancelled ? `<span style="display:inline-block;margin-left:6px;background:#fee2e2;color:#b91c1c;padding:2px 8px;border-radius:999px;font-size:0.72rem;font-weight:800;">❌ CANCELADA</span>` : ""}
               <span style="font-size:0.8rem;color:var(--slate-500);margin-left:6px;">${escapeHtml(s.folio)} • 🕒 ${escapeHtml(timeStr)}</span>
               <div style="font-size:0.82rem;color:var(--slate-700);margin-top:3px;">
                 🚗 Chofer: <strong>${escapeHtml(s.driver)}</strong>
                 &nbsp;•&nbsp; 💳 <strong>${escapeHtml(s.paymentMethod)}</strong>
                 ${s.phone ? `&nbsp;•&nbsp; 📞 <a href="tel:${escapeHtml(s.phone)}" style="text-decoration:underline;">${escapeHtml(s.phone)}</a>` : ""}
               </div>
-              ${s.creditBalance > 0 ? `<div style="margin-top:4px;color:var(--red-600);font-weight:800;font-size:0.84rem;">⚠️ Crédito pendiente: ${formatCurrency(s.creditBalance)} (Anticipo: ${formatCurrency(s.cashCollected)})</div>` : ""}
+              ${cancelled && s.cancelReason ? `<div style="margin-top:4px;color:#b91c1c;font-weight:700;font-size:0.8rem;">Motivo anulación: ${escapeHtml(s.cancelReason)}</div>` : ""}
+              ${!cancelled && s.creditBalance > 0 ? `<div style="margin-top:4px;color:var(--red-600);font-weight:800;font-size:0.84rem;">⚠️ Crédito pendiente: ${formatCurrency(s.creditBalance)} (Anticipo: ${formatCurrency(s.cashCollected)})</div>` : ""}
               ${s.notes ? `<div style="font-size:0.78rem;color:var(--slate-500);margin-top:3px;">📝 ${escapeHtml(s.notes)}</div>` : ""}
             </div>
 
-            <div style="display:flex;align-items:center;gap:8px;">
-              <strong style="font-size:1.18rem;color:var(--green-900);">${formatCurrency(s.totalAmount)}</strong>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+              <strong style="font-size:1.18rem;color:${cancelled ? "#94a3b8" : "var(--green-900)"};${cancelled ? "text-decoration:line-through;" : ""}">${formatCurrency(s.totalAmount)}</strong>
               <button type="button" class="btn btn-outline btn-sm" data-print-route-sale="${escapeHtml(s.id)}">🖨️ Nota</button>
+              ${cancelled ? "" : `<button type="button" class="btn btn-outline btn-sm" data-cancel-route-sale="${escapeHtml(s.id)}" style="color:#dc2626;border-color:#fca5a5;">❌ Cancelar</button>`}
             </div>
           </div>
           <div class="caliber-breakdown-chips" style="margin-top:8px;">${chipsHtml}</div>
@@ -2918,7 +2945,80 @@ function renderRouteCortesAndSales() {
     .join("");
 }
 
-document.getElementById("routeSalesAdminList").addEventListener("click", (e) => {
+function openCancelSaleModal(sale) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("cancelSaleModal");
+    const summaryEl = document.getElementById("cancelSaleSummary");
+    const inputEl = document.getElementById("cancelSaleReasonInput");
+    const okBtn = document.getElementById("btnCancelSaleConfirm");
+    const abortBtn = document.getElementById("btnCancelSaleAbort");
+    const closeBtn = document.getElementById("btnCloseCancelSaleModal");
+    if (!modal || !okBtn || !inputEl) {
+      resolve(null);
+      return;
+    }
+    if (summaryEl) {
+      summaryEl.textContent = `${sale.folio || ""} • ${sale.customerName || "Cliente"} (${formatCurrency(sale.totalAmount)} • ${sale.driver || ""})`;
+    }
+    inputEl.value = /prueba/i.test(sale.driver || "") ? "Prueba del sistema" : "";
+
+    const pillHandler = (ev) => {
+      const pill = ev.target.closest(".cancel-reason-pill");
+      if (pill) inputEl.value = pill.dataset.cancelReason || "";
+    };
+    modal.addEventListener("click", pillHandler);
+
+    const cleanup = (val) => {
+      modal.classList.remove("open");
+      modal.removeEventListener("click", pillHandler);
+      okBtn.removeEventListener("click", onOk);
+      abortBtn?.removeEventListener("click", onCancel);
+      closeBtn?.removeEventListener("click", onCancel);
+      resolve(val);
+    };
+    const onOk = () => {
+      const reason = inputEl.value.trim();
+      if (!reason) {
+        showToast("Escribe o elige el motivo de cancelación.");
+        inputEl.focus();
+        return;
+      }
+      cleanup(reason);
+    };
+    const onCancel = () => cleanup(null);
+    okBtn.addEventListener("click", onOk);
+    abortBtn?.addEventListener("click", onCancel);
+    closeBtn?.addEventListener("click", onCancel);
+    modal.classList.add("open");
+  });
+}
+
+document.getElementById("routeSalesAdminList").addEventListener("click", async (e) => {
+  const cancelBtn = e.target.closest("button[data-cancel-route-sale]");
+  if (cancelBtn) {
+    const sale = routeSalesList.find((s) => s.id === cancelBtn.dataset.cancelRouteSale);
+    if (!sale || isSaleCancelled(sale)) return;
+    const reason = await openCancelSaleModal(sale);
+    if (!reason) return;
+    try {
+      await executeAdminBatch(currentKeyHash, (batch, proofId) => {
+        batch.update(doc(db, "route_sales", sale.id), {
+          status: "cancelada",
+          cancelReason: reason,
+          cancelledAtIso: new Date().toISOString(),
+          cancelledBy: "Admin",
+          proofId,
+          updatedAt: serverTimestamp()
+        });
+      });
+      showToast(`❌ Nota ${sale.folio || ""} anulada. Pre-corte y mapa actualizados.`);
+    } catch (err) {
+      console.error("Error anulando nota:", err);
+      showToast("No se pudo anular la nota.");
+    }
+    return;
+  }
+
   const btn = e.target.closest("button[data-print-route-sale]");
   if (!btn) return;
   const sale = routeSalesList.find((s) => s.id === btn.dataset.printRouteSale);
@@ -2975,9 +3075,10 @@ function updateKPIs() {
   let streetBoxesToday = 0;
   if (selectedRouteDate === getLocalDateStr()) {
     for (const s of routeSalesList) {
+      if (isSaleCancelled(s)) continue;
       if (s.saleType !== "pedido_web") {
         streetRevToday += Number(s.totalAmount) || 0;
-        streetBoxesToday += Number(s.totalBoxes) || 0;
+        streetBoxesToday = round1(streetBoxesToday + (Number(s.totalBoxes) || 0));
       }
     }
   }
