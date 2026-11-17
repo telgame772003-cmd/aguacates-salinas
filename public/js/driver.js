@@ -21,13 +21,14 @@ import {
   getLocalDateStr,
   formatCurrency,
   cleanPhoneForWhatsApp
-} from "./firebase-config.js?v=nav3d_6";
+} from "./firebase-config.js?v=nav3d_7";
 import {
   isNativeCapacitorApp,
   startNativeBackgroundGps,
   stopNativeBackgroundGps,
+  commitDriverDocNativeRest,
   commitDriverLocationNativeRest
-} from "./native-bg-gps.js?v=nav3d_6";
+} from "./native-bg-gps.js?v=nav3d_7";
 import { STAFF_MANUALS } from "./manuals-data.js";
 
 const DRIVER_SESSION_KEY = "salinas_driver_session_v1";
@@ -108,6 +109,12 @@ let pendingNewPlaceCoords = null;
 let isNav3DOpen = false;
 let pendingNav3DPayload = null;
 const geocodedOrderCoordsCache = new Map();
+
+// Geocerca automática por tienda (entrada <= 55m, salida > 75m, permanencia mínima 60s)
+const GEOFENCE_ENTER_METERS = 55;
+const GEOFENCE_EXIT_METERS = 75;
+const GEOFENCE_MIN_DWELL_MS = 60 * 1000;
+const activeGeofenceDwells = new Map();
 
 // DOM Elements
 const driverLoginView = document.getElementById("driverLoginView");
@@ -584,6 +591,113 @@ function postGpsToNav3DEmbed({ lat, lng, speedKmh, accuracy, heading }) {
   } catch (_) {}
 }
 
+async function persistAutoGeofenceVisit(place, distMeters, arrivedAtMs, dwellSeconds) {
+  if (!currentDriverKeyHash || !currentDriverName || !place?.id) return;
+  const dateStr = getLocalDateStr();
+  const visitDocId = `${dateStr}_${place.id}_${driverSlug(currentDriverName)}`;
+  const visitPayload = {
+    date: dateStr,
+    placeId: place.id,
+    placeName: place.name || "Tienda",
+    driver: currentDriverName,
+    autoGeofence: true,
+    reason: `Visita automática por geocerca (${Math.max(1, Math.round(dwellSeconds / 60))} min)`,
+    driverLat: lastGpsCoords?.lat ?? null,
+    driverLng: lastGpsCoords?.lng ?? null,
+    distanceMeters: Math.round(distMeters),
+    dwellSeconds: Math.round(dwellSeconds),
+    arrivedAtIso: new Date(arrivedAtMs).toISOString(),
+    createdAtIso: new Date().toISOString()
+  };
+
+  const useBgRest = isNativeCapacitorApp() || document.visibilityState === "hidden";
+  if (useBgRest) {
+    try {
+      await commitDriverDocNativeRest({
+        apiKey: firebaseConfig.apiKey,
+        projectId: firebaseConfig.projectId,
+        driverKeyHash: currentDriverKeyHash,
+        collectionName: "place_visits",
+        docId: visitDocId,
+        payloadData: visitPayload,
+        timestampField: "createdAt"
+      });
+      return;
+    } catch (err) {
+      window.salinasLog?.("GEOFENCE-REST-ERR", err?.message || err);
+    }
+  }
+
+  try {
+    await executeDriverBatch(currentDriverKeyHash, (batch, proofId) => {
+      batch.set(
+        doc(db, "place_visits", visitDocId),
+        { ...visitPayload, createdAt: serverTimestamp(), proofId },
+        { merge: true }
+      );
+    });
+  } catch (err) {
+    window.salinasLog?.("GEOFENCE-SDK-ERR", err?.message || err);
+  }
+}
+
+function evaluatePlaceGeofences({ lat, lng, speedKmh = 0 }) {
+  if (!currentDriverKeyHash || !currentDriverName || !Array.isArray(allPlaces) || allPlaces.length === 0) {
+    return;
+  }
+  const now = Date.now();
+  const today = getLocalDateStr();
+
+  for (const place of allPlaces) {
+    if (!place?.id || typeof place.lat !== "number" || typeof place.lng !== "number") continue;
+    const dist = haversineMeters(lat, lng, place.lat, place.lng);
+    if (dist === null) continue;
+
+    const dwell = activeGeofenceDwells.get(place.id);
+
+    if (dist <= GEOFENCE_ENTER_METERS) {
+      if (!dwell) {
+        activeGeofenceDwells.set(place.id, {
+          enteredAt: now,
+          confirmed: false,
+          lastSyncAt: 0
+        });
+        window.salinasLog?.("GEOFENCE-ENTER", `${place.name} (dist=${Math.round(dist)}m, spd=${Math.round(speedKmh)}km/h)`);
+        continue;
+      }
+
+      const dwellMs = now - dwell.enteredAt;
+      if (dwellMs >= GEOFENCE_MIN_DWELL_MS) {
+        const alreadyManualOrConfirmedToday = visitsToday.some(
+          (v) =>
+            v.placeId === place.id &&
+            v.date === today &&
+            String(v.driver || "").toLowerCase() === String(currentDriverName || "").toLowerCase() &&
+            !v.autoGeofence
+        );
+        if (alreadyManualOrConfirmedToday) {
+          dwell.confirmed = true;
+          continue;
+        }
+
+        const shouldSync = !dwell.confirmed || now - dwell.lastSyncAt >= 60000;
+        if (shouldSync) {
+          dwell.confirmed = true;
+          dwell.lastSyncAt = now;
+          const dwellSec = Math.round(dwellMs / 1000);
+          window.salinasLog?.("GEOFENCE-VISIT-OK", `${place.name} confirmada (${dwellSec}s, dist=${Math.round(dist)}m)`);
+          persistAutoGeofenceVisit(place, dist, dwell.enteredAt, dwellSec);
+        }
+      }
+    } else if (dwell && dist > GEOFENCE_EXIT_METERS) {
+      if (!dwell.confirmed) {
+        window.salinasLog?.("GEOFENCE-SKIP", `${place.name} descartada (salió en ${Math.round((now - dwell.enteredAt) / 1000)}s < 60s)`);
+      }
+      activeGeofenceDwells.delete(place.id);
+    }
+  }
+}
+
 async function publishDriverLocationUpdate({
   lat,
   lng,
@@ -605,6 +719,8 @@ async function publishDriverLocationUpdate({
     accuracy: Math.round(accuracy || 0),
     heading: Number.isFinite(heading) ? Math.round(heading) : null
   };
+
+  evaluatePlaceGeofences({ lat: cleanLat, lng: cleanLng, speedKmh });
 
   if (!isNav3DOpen) {
     renderPlacesList();

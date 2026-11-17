@@ -1429,12 +1429,16 @@ function getPlaceDailyStatus(place) {
 
   if (matchingVisits.length > 0) {
     const v = matchingVisits[0];
+    const autoLabel = v.autoGeofence
+      ? `Visita automática GPS (${Math.max(1, Math.round((Number(v.dwellSeconds) || 60) / 60))} min)`
+      : (v.reason || "Visitado sin venta");
     return {
       state: "visited",
-      reason: v.reason || "Visitado sin venta",
+      reason: autoLabel,
+      autoGeofence: Boolean(v.autoGeofence),
       driver: v.driver || "",
       distanceMeters: typeof v.distanceMeters === "number" ? v.distanceMeters : null,
-      timeIso: v.createdAtIso || ""
+      timeIso: v.arrivedAtIso || v.createdAtIso || ""
     };
   }
 

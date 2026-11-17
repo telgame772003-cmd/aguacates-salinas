@@ -177,21 +177,23 @@ function toFirestoreValue(val) {
 }
 
 /**
- * Envía el lote atómico `driver_proofs` + `driver_locations` mediante el motor
- * HTTP nativo de Capacitor (Java HttpURLConnection / iOS URLSession) o fetch keepalive,
+ * Envía un lote atómico `driver_proofs` + documento destino (`driver_locations` o `place_visits`)
+ * mediante el motor HTTP nativo de Capacitor o fetch keepalive,
  * evitando el estrangulamiento de red del WebView tras 5+ minutos con pantalla apagada.
  */
-export async function commitDriverLocationNativeRest({
+export async function commitDriverDocNativeRest({
   apiKey,
   projectId,
   driverKeyHash,
-  driverDocId,
-  payloadData
+  collectionName,
+  docId,
+  payloadData,
+  timestampField = "updatedAt"
 }) {
   const proofId = `dprf_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
   const dbRoot = `projects/${projectId}/databases/(default)/documents`;
   const proofDocName = `${dbRoot}/driver_proofs/${proofId}`;
-  const locDocName = `${dbRoot}/driver_locations/${driverDocId}`;
+  const targetDocName = `${dbRoot}/${collectionName}/${docId}`;
 
   const docFields = {};
   for (const [k, v] of Object.entries({ ...payloadData, proofId })) {
@@ -216,11 +218,11 @@ export async function commitDriverLocationNativeRest({
       },
       {
         update: {
-          name: locDocName,
+          name: targetDocName,
           fields: docFields
         },
         updateTransforms: [
-          { fieldPath: "updatedAt", setToServerValue: "REQUEST_TIME" }
+          { fieldPath: timestampField, setToServerValue: "REQUEST_TIME" }
         ]
       }
     ]
@@ -236,10 +238,10 @@ export async function commitDriverLocationNativeRest({
       data: commitBody
     });
     if (!res || res.status < 200 || res.status >= 300) {
-      window.salinasLog?.("SalinasBgGPS-ERR", `CapacitorHttp status=${res?.status}`);
+      window.salinasLog?.("SalinasBgGPS-ERR", `CapacitorHttp (${collectionName}) status=${res?.status}`);
       throw new Error(`Native HTTP Firestore commit status ${res?.status}`);
     }
-    window.salinasLog?.("SalinasBgGPS-REST", `Commit nativo OK (${payloadData.lat},${payloadData.lng})`);
+    window.salinasLog?.("SalinasBgGPS-REST", `Commit nativo ${collectionName} OK`);
     return true;
   }
 
@@ -250,9 +252,27 @@ export async function commitDriverLocationNativeRest({
     keepalive: true
   });
   if (!fetchRes.ok) {
-    window.salinasLog?.("SalinasBgGPS-ERR", `Fetch keepalive status=${fetchRes.status}`);
+    window.salinasLog?.("SalinasBgGPS-ERR", `Fetch keepalive (${collectionName}) status=${fetchRes.status}`);
     throw new Error(`Keepalive REST commit HTTP ${fetchRes.status}`);
   }
-  window.salinasLog?.("SalinasBgGPS-REST", `Commit keepalive OK (${payloadData.lat},${payloadData.lng})`);
+  window.salinasLog?.("SalinasBgGPS-REST", `Commit keepalive ${collectionName} OK`);
   return true;
+}
+
+export async function commitDriverLocationNativeRest({
+  apiKey,
+  projectId,
+  driverKeyHash,
+  driverDocId,
+  payloadData
+}) {
+  return commitDriverDocNativeRest({
+    apiKey,
+    projectId,
+    driverKeyHash,
+    collectionName: "driver_locations",
+    docId: driverDocId,
+    payloadData,
+    timestampField: "updatedAt"
+  });
 }
