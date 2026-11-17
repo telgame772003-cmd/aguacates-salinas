@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="assets/favicon.png">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
-  <link rel="stylesheet" href="css/styles.css?v=nav3d_11">
+  <link rel="stylesheet" href="css/styles.css?v=nav3d_13">
 </head>
 <body class="admin-body">
 
@@ -365,6 +365,9 @@
             </button>
             <button type="button" id="rbBtnLastMinuteMenu" class="btn btn-outline btn-sm" style="padding:10px 12px;font-size:0.8rem;border-color:#d97706;color:#92400e;background:#fef3c7;">
               ⚡ Sumar Último Minuto
+            </button>
+            <button type="button" id="rbBtnTransferPending" class="btn btn-outline btn-sm" style="padding:10px 12px;font-size:0.8rem;border-color:#0284c7;color:#0369a1;">
+              🔁 Pasar pendientes
             </button>
             <button type="button" id="rbBtnClear" class="btn btn-outline btn-sm" style="padding:10px 12px;font-size:0.8rem;color:var(--red-600);border-color:#fca5a5;">
               🗑️ Limpiar
@@ -930,6 +933,73 @@
     </div>
   </div>
 
+  <!-- Modal: Devolución o Cambio de Producto en Nota -->
+  <div id="returnSaleModal" class="modal-backdrop" role="dialog" aria-modal="true" style="z-index:10056;">
+    <div class="modal-card" style="max-width:440px;padding:22px 20px;">
+      <button type="button" id="btnCloseReturnSaleModal" class="modal-close" aria-label="Cerrar">✕</button>
+      <h3 class="serif-title" style="font-size:1.22rem;color:#0f172a;margin-bottom:4px;padding-right:28px;">🔄 Devolución o Cambio</h3>
+      <p id="returnSaleSummary" style="font-size:0.82rem;color:#475569;margin-bottom:10px;"></p>
+
+      <div class="form-group" style="margin-bottom:10px;">
+        <label class="form-label" for="returnSaleMode">Tipo de movimiento</label>
+        <select id="returnSaleMode" class="form-control" style="font-weight:700;">
+          <option value="devolucion">📦 Devolución (regresa cajas/kg y descuenta cobro)</option>
+          <option value="cambio">🔄 Cambio físico (reposición por calidad, sin cambiar cobro)</option>
+        </select>
+      </div>
+
+      <div id="returnSaleMoneyBox" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px;margin-bottom:10px;">
+        <div class="form-row-2" style="gap:8px;margin-bottom:8px;">
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label" for="returnSaleBoxesInput">Cajas devueltas</label>
+            <input type="number" id="returnSaleBoxesInput" class="form-control" min="0" step="1" value="0">
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label" for="returnSaleKgInput">+ Kg sueltos</label>
+            <input type="number" id="returnSaleKgInput" class="form-control" min="0" max="99" step="1" value="0">
+          </div>
+        </div>
+        <div class="form-row-2" style="gap:8px;">
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label" for="returnSaleCalSelect">Calibre</label>
+            <select id="returnSaleCalSelect" class="form-control"></select>
+          </div>
+          <div class="form-group" style="margin-bottom:0;" id="returnSaleRefundWrap">
+            <label class="form-label" for="returnSaleRefundInput">Monto a descontar ($)</label>
+            <input type="number" id="returnSaleRefundInput" class="form-control" min="0" step="1" value="0" style="font-weight:800;">
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-bottom:14px;">
+        <label class="form-label" for="returnSaleReasonInput">Motivo *</label>
+        <input type="text" id="returnSaleReasonInput" class="form-control" placeholder="Ej. Patrón canceló, cambio por madurez..." required>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <button type="button" id="btnReturnSaleCancel" class="btn btn-outline" style="padding:10px;font-weight:700;">Volver</button>
+        <button type="button" id="btnReturnSaleConfirm" class="btn btn-primary" style="padding:10px;font-weight:800;">✅ Aplicar movimiento</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Traspasar Paradas Pendientes a Otro Chofer -->
+  <div id="transferRouteModal" class="modal-backdrop" role="dialog" aria-modal="true" style="z-index:10056;">
+    <div class="modal-card" style="max-width:410px;padding:22px 20px;">
+      <button type="button" id="btnCloseTransferRouteModal" class="modal-close" aria-label="Cerrar">✕</button>
+      <h3 class="serif-title" style="font-size:1.2rem;color:#0f172a;margin-bottom:4px;padding-right:28px;">🔁 Pasar Paradas Pendientes</h3>
+      <p id="transferRouteSummary" style="font-size:0.83rem;color:#475569;margin-bottom:12px;"></p>
+      <div class="form-group" style="margin-bottom:14px;">
+        <label class="form-label" for="transferTargetDriverSelect">Chofer destino *</label>
+        <select id="transferTargetDriverSelect" class="form-control" style="font-weight:700;"></select>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <button type="button" id="btnTransferRouteCancel" class="btn btn-outline" style="padding:10px;font-weight:700;">Cancelar</button>
+        <button type="button" id="btnTransferRouteConfirm" class="btn btn-primary" style="padding:10px;font-weight:800;">🔁 Transferir y Optimizar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Printable Receipt / Warehouse Sheet Container -->
   <div id="printReceiptArea"></div>
 
@@ -940,6 +1010,6 @@
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <script type="module" src="js/admin.js?v=nav3d_16"></script>
+  <script type="module" src="js/admin.js?v=nav3d_17"></script>
 </body>
 </html>

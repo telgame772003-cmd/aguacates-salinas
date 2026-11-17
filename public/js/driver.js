@@ -95,6 +95,7 @@ let placeSearchQuery = "";
 let saleQtys = { S: 0, E: 0, P: 0, M: 0 };
 let saleKgs = { S: 0, E: 0, P: 0, M: 0 };
 let salePrices = { S: 400, E: 360, P: 320, M: 250 };
+let saleKgPrices = { S: 40, E: 36, P: 32, M: 25 };
 let salePayMethod = "Efectivo";
 
 function isSaleCancelled(s) {
@@ -259,8 +260,13 @@ function populateLoginDrivers() {
 function syncDefaultSalePrices() {
   for (const code of ["S", "E", "P", "M"]) {
     const cal = storeSettings.calibers[code];
+    const boxPrice = Number(cal?.price) || DEFAULT_STORE_SETTINGS.calibers[code].price;
+    const kgPrice = Number(cal?.pricePerKg) || Math.round((boxPrice / 10) * 100) / 100;
     if (cal && saleQtys[code] === 0) {
-      salePrices[code] = Number(cal.price) || DEFAULT_STORE_SETTINGS.calibers[code].price;
+      salePrices[code] = boxPrice;
+    }
+    if (cal && saleKgs[code] === 0) {
+      saleKgPrices[code] = kgPrice;
     }
   }
 }
@@ -2023,7 +2029,7 @@ function renderStreetSaleCalibers() {
       const isActiveRow = qty > 0 || kg > 0;
       const unitPrice = salePrices[code] || cal.price;
       const minPrice = Number(cal.minPrice) || 1;
-      const kgPrice = Math.round((unitPrice / 10) * 100) / 100;
+      const kgPrice = saleKgPrices[code] || Number(cal.pricePerKg) || Math.round((unitPrice / 10) * 100) / 100;
 
       return `
         <div class="driver-sale-cal-row ${isActiveRow ? "active-row" : ""}" data-cal-row="${code}">
@@ -2031,7 +2037,7 @@ function renderStreetSaleCalibers() {
             <div>
               <strong style="font-size:0.98rem;color:var(--green-950);">${escapeHtml(code)} · ${escapeHtml(cal.name)}</strong>
               <span style="display:block;font-size:0.73rem;color:var(--slate-500);">
-                Lista: ${formatCurrency(cal.price)}/cj (${formatCurrency(cal.price / 10)}/kg) • Mín: ${formatCurrency(minPrice)}
+                Lista: ${formatCurrency(cal.price)}/cj (${formatCurrency(Number(cal.pricePerKg) || cal.price / 10)}/kg) • Mín: ${formatCurrency(minPrice)}
               </span>
             </div>
             <span class="ripeness-badge" data-avail-badge="${code}">En carro: ${formatBoxesKg(stats.avail[code] ?? 0)}</span>
@@ -2155,9 +2161,10 @@ function recalcStreetSaleTotals() {
     const boxes = saleQtys[code] || 0;
     const kgs = saleKgs[code] || 0;
     const p = salePrices[code] || 0;
+    const kp = saleKgPrices[code] || p / 10;
     const equivBoxes = round1(boxes + kgs / 10);
     totalBoxes = round1(totalBoxes + equivBoxes);
-    totalAmount += Math.round(boxes * p + kgs * (p / 10));
+    totalAmount += Math.round(boxes * p + kgs * kp);
   }
 
   document.getElementById("saleBoxesSummary").textContent = formatBoxesKg(totalBoxes);
@@ -2283,15 +2290,16 @@ document.getElementById("streetSaleForm").addEventListener("submit", async (e) =
     const cal = storeSettings.calibers[code] || DEFAULT_STORE_SETTINGS.calibers[code];
     const minPrice = Number(cal.minPrice) || 1;
     const unitPrice = salePrices[code] || 0;
+    const kgPrice = saleKgPrices[code] || unitPrice / 10;
 
     if (unitPrice < minPrice) {
       showToast(`El precio mínimo autorizado para ${cal.name} es ${formatCurrency(minPrice)}.`);
       return;
     }
 
-    const subtotal = Math.round(boxes * unitPrice + extraKg * (unitPrice / 10));
+    const subtotal = Math.round(boxes * unitPrice + extraKg * kgPrice);
     const totalKg = Math.round(equivBoxes * 10);
-    items.push({ code, name: cal.name, qty: equivBoxes, boxes, extraKg, totalKg, unitPrice, subtotal });
+    items.push({ code, name: cal.name, qty: equivBoxes, boxes, extraKg, totalKg, unitPrice, kgPrice, subtotal });
     boxesByCaliber[code] = equivBoxes;
     totalBoxes = round1(totalBoxes + equivBoxes);
     totalAmount += subtotal;

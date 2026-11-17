@@ -2051,6 +2051,20 @@ function renderGpsMapAndChips() {
   mapFocusMarkers.clear();
 
   const boundsPoints = [];
+  const trailColors = ["#15803d", "#0284c7", "#7c3aed", "#b45309"];
+  const placeAssignedMap = new Map();
+  let assignColorIdx = 0;
+  for (const rDoc of allDriverRoutesTodayMap.values()) {
+    const dName = rDoc.driverName || rDoc.id;
+    const dColor = trailColors[assignColorIdx % trailColors.length];
+    assignColorIdx++;
+    const dInitials = getDriverInitials(dName);
+    for (const st of rDoc.stops || []) {
+      if (st.status === "done" || st.kind !== "place" || !st.id) continue;
+      if (!placeAssignedMap.has(st.id)) placeAssignedMap.set(st.id, []);
+      placeAssignedMap.get(st.id).push({ driverName: dName, color: dColor, initials: dInitials });
+    }
+  }
 
   // 1. Registered Places (Tiendas, Carnicerías, Restaurantes, Fruterías)
   for (const { place, status, stats30d } of placeEvaluations) {
@@ -2060,6 +2074,13 @@ function renderGpsMapAndChips() {
     const stClass =
       status.state === "sold" ? "st-sold" : status.state === "visited" ? "st-visited" : "st-pending";
     const isGoldFrequent = stats30d.salesCount30d >= 3;
+    const assignedDrivers = placeAssignedMap.get(place.id) || [];
+    const assignedTagHtml = assignedDrivers.length > 0
+      ? `<span class="pin-assigned-tag" style="background:${assignedDrivers[0].color};">${escapeHtml(assignedDrivers[0].initials)}</span>`
+      : "";
+    const assignedLineHtml = assignedDrivers.length > 0
+      ? `<div style="margin-top:3px;color:#0369a1;font-weight:800;font-size:0.74rem;">🧭 En ruta hoy: ${escapeHtml(assignedDrivers.map((a) => a.driverName).join(", "))}</div>`
+      : "";
     const stBadge =
       status.state === "sold"
         ? `<div style="margin-top:5px;background:#dcfce7;color:#14532d;padding:4px 7px;border-radius:6px;font-size:0.78rem;font-weight:700;">🟢 Compró hoy: ${status.boxes} caja(s) (${formatCurrency(status.amount)}) • ${escapeHtml(status.driver)}</div>`
@@ -2099,6 +2120,7 @@ function renderGpsMapAndChips() {
           ${isGoldFrequent ? `<span class="salinas-tt-gold">⭐ Frecuente</span>` : ""}
         </div>
         ${todayHoverBadge}
+        ${assignedLineHtml}
         ${historical30dLoaded ? `
           <div class="salinas-tt-meta">${lastSaleLine}</div>
           ${!stats30d.lastVisitWasSale || !stats30d.lastSaleDate ? `<div class="salinas-tt-meta">${lastVisitLine}</div>` : ""}
@@ -2109,7 +2131,7 @@ function renderGpsMapAndChips() {
 
     const icon = window.L.divIcon({
       className: "salinas-div-icon",
-      html: `<div class="pin-place-dot ${stClass}${isGoldFrequent ? " is-frequent" : ""}"><span class="pin-emoji">${cat.emoji}</span></div>`,
+      html: `<div class="pin-place-dot ${stClass}${isGoldFrequent ? " is-frequent" : ""}" style="position:relative;"><span class="pin-emoji">${cat.emoji}</span>${assignedTagHtml}</div>`,
       iconSize: [24, 24],
       iconAnchor: [12, 12],
       popupAnchor: [0, -10]
@@ -2121,6 +2143,7 @@ function renderGpsMapAndChips() {
         <strong style="font-size:0.95rem;color:#132615;">${escapeHtml(place.name)}</strong>
         ${place.address ? `<div style="font-size:0.78rem;color:#475569;margin-top:2px;">📍 ${escapeHtml(place.address)}</div>` : ""}
         ${place.phone ? `<div style="font-size:0.78rem;color:#475569;margin-top:2px;">📞 ${escapeHtml(place.phone)}</div>` : ""}
+        ${assignedLineHtml}
         ${stBadge}
         ${historyBoxHtml}
         <div style="margin-top:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
@@ -2145,7 +2168,6 @@ function renderGpsMapAndChips() {
   }
 
   // 2. Driver Daily Trajectory Trails + Live Car Markers (only when GPS is active/online)
-  const trailColors = ["#15803d", "#0284c7", "#7c3aed", "#b45309"];
   const allRoutesCntEl = document.getElementById("allRoutesCnt");
   if (allRoutesCntEl) allRoutesCntEl.textContent = String(allDriverRoutesTodayMap.size);
 
@@ -2928,6 +2950,7 @@ function renderRouteCortesAndSales() {
                 ${s.phone ? `&nbsp;•&nbsp; 📞 <a href="tel:${escapeHtml(s.phone)}" style="text-decoration:underline;">${escapeHtml(s.phone)}</a>` : ""}
               </div>
               ${cancelled && s.cancelReason ? `<div style="margin-top:4px;color:#b91c1c;font-weight:700;font-size:0.8rem;">Motivo anulación: ${escapeHtml(s.cancelReason)}</div>` : ""}
+              ${Array.isArray(s.returnsLog) && s.returnsLog.length > 0 ? `<div style="margin-top:4px;color:#b45309;font-weight:700;font-size:0.78rem;">🔄 ${s.returnsLog.map((r) => `${r.mode === "cambio" ? "Cambio" : "Devolución"} ${formatBoxesKg(r.boxes)}: ${escapeHtml(r.reason)}`).join(" • ")}</div>` : ""}
               ${!cancelled && s.creditBalance > 0 ? `<div style="margin-top:4px;color:var(--red-600);font-weight:800;font-size:0.84rem;">⚠️ Crédito pendiente: ${formatCurrency(s.creditBalance)} (Anticipo: ${formatCurrency(s.cashCollected)})</div>` : ""}
               ${s.notes ? `<div style="font-size:0.78rem;color:var(--slate-500);margin-top:3px;">📝 ${escapeHtml(s.notes)}</div>` : ""}
             </div>
@@ -2935,6 +2958,7 @@ function renderRouteCortesAndSales() {
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
               <strong style="font-size:1.18rem;color:${cancelled ? "#94a3b8" : "var(--green-900)"};${cancelled ? "text-decoration:line-through;" : ""}">${formatCurrency(s.totalAmount)}</strong>
               <button type="button" class="btn btn-outline btn-sm" data-print-route-sale="${escapeHtml(s.id)}">🖨️ Nota</button>
+              ${cancelled ? "" : `<button type="button" class="btn btn-outline btn-sm" data-return-route-sale="${escapeHtml(s.id)}" style="color:#b45309;border-color:#fcd34d;">🔄 Devolución</button>`}
               ${cancelled ? "" : `<button type="button" class="btn btn-outline btn-sm" data-cancel-route-sale="${escapeHtml(s.id)}" style="color:#dc2626;border-color:#fca5a5;">❌ Cancelar</button>`}
             </div>
           </div>
@@ -2993,7 +3017,160 @@ function openCancelSaleModal(sale) {
   });
 }
 
+function openReturnSaleModal(sale) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("returnSaleModal");
+    const summaryEl = document.getElementById("returnSaleSummary");
+    const modeEl = document.getElementById("returnSaleMode");
+    const boxesEl = document.getElementById("returnSaleBoxesInput");
+    const kgEl = document.getElementById("returnSaleKgInput");
+    const calEl = document.getElementById("returnSaleCalSelect");
+    const refundWrap = document.getElementById("returnSaleRefundWrap");
+    const refundEl = document.getElementById("returnSaleRefundInput");
+    const reasonEl = document.getElementById("returnSaleReasonInput");
+    const okBtn = document.getElementById("btnReturnSaleConfirm");
+    const cancelBtn = document.getElementById("btnReturnSaleCancel");
+    const closeBtn = document.getElementById("btnCloseReturnSaleModal");
+    if (!modal || !okBtn || !calEl) {
+      resolve(null);
+      return;
+    }
+
+    if (summaryEl) {
+      summaryEl.textContent = `${sale.folio || ""} • ${sale.customerName || ""} • ${formatBoxesKg(sale.totalBoxes)} (${formatCurrency(sale.totalAmount)})`;
+    }
+    const items = Array.isArray(sale.items) && sale.items.length > 0
+      ? sale.items
+      : [{ code: "P", name: "Primera", qty: Number(sale.totalBoxes) || 1, unitPrice: 0 }];
+    calEl.innerHTML = items
+      .map((it) => `<option value="${escapeHtml(it.code)}">${escapeHtml(it.code)} · ${escapeHtml(it.name)} (${formatBoxesKg(it.qty)})</option>`)
+      .join("");
+    modeEl.value = "devolucion";
+    boxesEl.value = "0";
+    kgEl.value = "0";
+    refundEl.value = "0";
+    reasonEl.value = "";
+    refundWrap.style.display = "block";
+
+    const syncRefundEstimate = () => {
+      const isCambio = modeEl.value === "cambio";
+      refundWrap.style.display = isCambio ? "none" : "block";
+      if (isCambio) {
+        refundEl.value = "0";
+        return;
+      }
+      const selCode = calEl.value;
+      const it = items.find((i) => i.code === selCode) || items[0];
+      const uPrice = Number(it?.unitPrice) || 0;
+      const kPrice = Number(it?.kgPrice) || uPrice / 10;
+      const b = Math.max(0, Number(boxesEl.value) || 0);
+      const k = Math.max(0, Number(kgEl.value) || 0);
+      refundEl.value = String(Math.min(Number(sale.totalAmount) || 0, Math.round(b * uPrice + k * kPrice)));
+    };
+    modeEl.addEventListener("change", syncRefundEstimate);
+    calEl.addEventListener("change", syncRefundEstimate);
+    boxesEl.addEventListener("input", syncRefundEstimate);
+    kgEl.addEventListener("input", syncRefundEstimate);
+
+    const cleanup = (val) => {
+      modal.classList.remove("open");
+      modeEl.removeEventListener("change", syncRefundEstimate);
+      calEl.removeEventListener("change", syncRefundEstimate);
+      boxesEl.removeEventListener("input", syncRefundEstimate);
+      kgEl.removeEventListener("input", syncRefundEstimate);
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn?.removeEventListener("click", onCancel);
+      closeBtn?.removeEventListener("click", onCancel);
+      resolve(val);
+    };
+    const onOk = () => {
+      const b = Math.max(0, Math.floor(Number(boxesEl.value) || 0));
+      const k = Math.max(0, Math.floor(Number(kgEl.value) || 0));
+      const equivBoxes = round1(b + k / 10);
+      const reason = reasonEl.value.trim();
+      if (equivBoxes <= 0) {
+        showToast("Indica cuántas cajas o kilos se devuelven/cambian.");
+        return;
+      }
+      if (!reason) {
+        showToast("Escribe el motivo del movimiento.");
+        reasonEl.focus();
+        return;
+      }
+      cleanup({
+        mode: modeEl.value,
+        code: calEl.value,
+        equivBoxes,
+        refundAmount: modeEl.value === "cambio" ? 0 : Math.max(0, Math.round(Number(refundEl.value) || 0)),
+        reason
+      });
+    };
+    const onCancel = () => cleanup(null);
+    okBtn.addEventListener("click", onOk);
+    cancelBtn?.addEventListener("click", onCancel);
+    closeBtn?.addEventListener("click", onCancel);
+    modal.classList.add("open");
+  });
+}
+
 document.getElementById("routeSalesAdminList").addEventListener("click", async (e) => {
+  const retBtn = e.target.closest("button[data-return-route-sale]");
+  if (retBtn) {
+    const sale = routeSalesList.find((s) => s.id === retBtn.dataset.returnRouteSale);
+    if (!sale || isSaleCancelled(sale)) return;
+    const res = await openReturnSaleModal(sale);
+    if (!res) return;
+    try {
+      const nextLogs = [
+        ...(Array.isArray(sale.returnsLog) ? sale.returnsLog : []),
+        {
+          mode: res.mode,
+          code: res.code,
+          boxes: res.equivBoxes,
+          refundAmount: res.refundAmount,
+          reason: res.reason,
+          atIso: new Date().toISOString()
+        }
+      ];
+      const updateFields = { returnsLog: nextLogs, updatedAt: serverTimestamp() };
+      if (res.mode === "devolucion") {
+        const curCal = Number(sale.boxesByCaliber?.[res.code]) || 0;
+        const deducted = Math.min(curCal, res.equivBoxes);
+        const nextBoxesByCal = { ...(sale.boxesByCaliber || {}), [res.code]: round1(curCal - deducted) };
+        const nextTotalBoxes = round1(Math.max(0, (Number(sale.totalBoxes) || 0) - res.equivBoxes));
+        const nextTotalAmount = Math.max(0, (Number(sale.totalAmount) || 0) - res.refundAmount);
+        let remRefund = res.refundAmount;
+        let nextCredit = Number(sale.creditBalance) || 0;
+        let nextCash = Number(sale.cashCollected) || 0;
+        let nextTransf = Number(sale.transferCollected) || 0;
+        const credCut = Math.min(nextCredit, remRefund);
+        nextCredit -= credCut;
+        remRefund -= credCut;
+        const cashCut = Math.min(nextCash, remRefund);
+        nextCash -= cashCut;
+        remRefund -= cashCut;
+        const trCut = Math.min(nextTransf, remRefund);
+        nextTransf -= trCut;
+        Object.assign(updateFields, {
+          boxesByCaliber: nextBoxesByCal,
+          totalBoxes: nextTotalBoxes,
+          totalAmount: nextTotalAmount,
+          creditBalance: nextCredit,
+          cashCollected: nextCash,
+          transferCollected: nextTransf
+        });
+      }
+      await executeAdminBatch(currentKeyHash, (batch, proofId) => {
+        batch.update(doc(db, "route_sales", sale.id), { ...updateFields, proofId });
+      });
+      showToast(res.mode === "cambio" ? "🔄 Cambio físico registrado en la nota." : "📦 Devolución aplicada al corte y a la nota.");
+    } catch (err) {
+      console.error("Error aplicando devolución:", err);
+      showToast("No se pudo registrar la devolución.");
+    }
+    return;
+  }
+
   const cancelBtn = e.target.closest("button[data-cancel-route-sale]");
   if (cancelBtn) {
     const sale = routeSalesList.find((s) => s.id === cancelBtn.dataset.cancelRouteSale);
@@ -3576,16 +3753,20 @@ function populateCatalogForm() {
           </select>
         </div>
 
-        <div class="form-row-3">
-          <div class="form-group">
-            <label class="form-label">Precio Lista / Web ($)</label>
+        <div class="form-row-2" style="gap:10px;margin-bottom:10px;">
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">Precio Caja ($)</label>
             <input type="number" min="1" max="9999" class="form-control cal-price-input" data-code="${cal.code}" value="${Number(cal.price) || 0}" style="font-weight:800;font-size:1.05rem;">
           </div>
-          <div class="form-group">
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label" title="Precio cuando el chofer vende kilos sueltos">Precio por Kg ($/kg)</label>
+            <input type="number" min="0.5" max="999" step="0.5" class="form-control cal-pkg-input" data-code="${cal.code}" value="${Number(cal.pricePerKg) || Math.round(((Number(cal.price) || 0) / 10) * 100) / 100}" style="font-weight:800;font-size:1.05rem;">
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
             <label class="form-label" title="El chofer no podrá vender por debajo de este precio">Mínimo Ruta ($)</label>
             <input type="number" min="1" max="9999" class="form-control cal-minprice-input" data-code="${cal.code}" value="${Number(cal.minPrice) || Number(DEFAULT_STORE_SETTINGS.calibers[cal.code]?.minPrice) || 1}" style="font-weight:800;">
           </div>
-          <div class="form-group">
+          <div class="form-group" style="margin-bottom:0;">
             <label class="form-label">Etiqueta</label>
             <input type="text" class="form-control cal-badge-input" data-code="${cal.code}" value="${escapeHtml(cal.badge || "")}" maxlength="28">
           </div>
@@ -3613,6 +3794,10 @@ document.getElementById("catalogForm").addEventListener("submit", async (e) => {
     document.querySelectorAll(".cal-price-input").forEach((inp) => {
       const code = inp.dataset.code;
       if (updatedCalibers[code]) updatedCalibers[code].price = Math.max(1, Math.round(Number(inp.value) || 0));
+    });
+    document.querySelectorAll(".cal-pkg-input").forEach((inp) => {
+      const code = inp.dataset.code;
+      if (updatedCalibers[code]) updatedCalibers[code].pricePerKg = Math.max(0.5, Math.round((Number(inp.value) || 0) * 100) / 100);
     });
     document.querySelectorAll(".cal-minprice-input").forEach((inp) => {
       const code = inp.dataset.code;
@@ -4998,7 +5183,7 @@ async function recalculateAdminBuilderMetrics() {
   renderRouteBuilderUI();
 }
 
-function addStopToAdminBuilder(stopObj, mode = "append") {
+async function addStopToAdminBuilder(stopObj, mode = "append") {
   if (!stopObj || !Number.isFinite(stopObj.lat) || !Number.isFinite(stopObj.lng)) {
     showToast("Este punto no tiene coordenadas GPS.");
     return;
@@ -5007,6 +5192,47 @@ function addStopToAdminBuilder(stopObj, mode = "append") {
   if (exists) {
     showToast(`"${stopObj.name}" ya está en la ruta.`);
     return;
+  }
+
+  const currentDriverName = document.getElementById("rbDriverSelect")?.value || "";
+  const currentSlug = rbDriverSlug(currentDriverName);
+  if (stopObj.kind === "place" && stopObj.id) {
+    let conflictDoc = null;
+    for (const rDoc of allDriverRoutesTodayMap.values()) {
+      const rSlug = String(rDoc.driverSlug || rbDriverSlug(rDoc.driverName || ""));
+      if (!rSlug || rSlug === currentSlug) continue;
+      if ((rDoc.stops || []).some((s) => s.kind === "place" && s.id === stopObj.id && s.status !== "done")) {
+        conflictDoc = rDoc;
+        break;
+      }
+    }
+    if (conflictDoc) {
+      const moveIt = await showConfirmDialog({
+        title: "⚠️ Tienda ya asignada a otro chofer",
+        message: `"${stopObj.name}" ya está en la ruta de ${conflictDoc.driverName}. ¿Quieres moverla a ${currentDriverName} y quitarla de ${conflictDoc.driverName}?`,
+        confirmText: "Sí, mover aquí"
+      });
+      if (!moveIt) return;
+      const filteredOtherStops = (conflictDoc.stops || []).filter(
+        (s) => !(s.kind === "place" && s.id === stopObj.id && s.status !== "done")
+      );
+      try {
+        await executeAdminBatch(currentKeyHash, (batch, proofId) => {
+          batch.set(
+            doc(db, "driver_routes", conflictDoc.id),
+            {
+              stops: filteredOtherStops,
+              updatedAtIso: new Date().toISOString(),
+              proofId,
+              updatedAt: serverTimestamp()
+            },
+            { merge: true }
+          );
+        });
+      } catch (err) {
+        console.warn("No se pudo quitar de la ruta previa:", err);
+      }
+    }
   }
   if (mode === "optimal" || mode === "next") {
     const done = rbStops.filter((s) => s.status === "done");
@@ -5294,6 +5520,134 @@ document.getElementById("rbBtnLastMinuteMenu")?.addEventListener("click", async 
   const btn = document.getElementById("rbBtnOptimize");
   btn?.click();
   setTimeout(() => saveAdminRouteToFirestore(true), 900);
+});
+
+document.getElementById("rbBtnTransferPending")?.addEventListener("click", async () => {
+  const fromDriver = document.getElementById("rbDriverSelect")?.value || "";
+  const pending = rbStops.filter((s) => s.status !== "done");
+  if (!fromDriver || pending.length === 0) {
+    showToast("No hay paradas pendientes en esta ruta para transferir.");
+    return;
+  }
+  const drivers = (storeSettings.drivers || []).filter(
+    (d) => d.name && d.name.toLowerCase() !== fromDriver.toLowerCase()
+  );
+  if (drivers.length === 0) {
+    showToast("No hay otro chofer disponible.");
+    return;
+  }
+
+  const modal = document.getElementById("transferRouteModal");
+  const summaryEl = document.getElementById("transferRouteSummary");
+  const targetSel = document.getElementById("transferTargetDriverSelect");
+  const okBtn = document.getElementById("btnTransferRouteConfirm");
+  const cancelBtn = document.getElementById("btnTransferRouteCancel");
+  const closeBtn = document.getElementById("btnCloseTransferRouteModal");
+  if (!modal || !targetSel || !okBtn) return;
+
+  if (summaryEl) {
+    summaryEl.textContent = `Se pasarán ${pending.length} parada${pending.length === 1 ? "" : "s"} pendiente${pending.length === 1 ? "" : "s"} de ${fromDriver} al chofer elegido (las completadas se conservan en ${fromDriver}).`;
+  }
+  targetSel.innerHTML = drivers.map((d) => `<option value="${escapeHtml(d.name)}">${escapeHtml(d.name)}</option>`).join("");
+
+  const toDriver = await new Promise((resolve) => {
+    const cleanup = (val) => {
+      modal.classList.remove("open");
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn?.removeEventListener("click", onCancel);
+      closeBtn?.removeEventListener("click", onCancel);
+      resolve(val);
+    };
+    const onOk = () => cleanup(targetSel.value || null);
+    const onCancel = () => cleanup(null);
+    okBtn.addEventListener("click", onOk);
+    cancelBtn?.addEventListener("click", onCancel);
+    closeBtn?.addEventListener("click", onCancel);
+    modal.classList.add("open");
+  });
+
+  if (!toDriver) return;
+
+  const today = getLocalDateStr();
+  const fromDocId = `${today}_${rbDriverSlug(fromDriver)}`;
+  const toDocId = `${today}_${rbDriverSlug(toDriver)}`;
+  const doneFrom = rbStops.filter((s) => s.status === "done");
+  const existingToDoc = allDriverRoutesTodayMap.get(toDocId);
+  const existingToStops = Array.isArray(existingToDoc?.stops) ? existingToDoc.stops : [];
+  const toDone = existingToStops.filter((s) => s.status === "done");
+  const toPending = existingToStops.filter((s) => s.status !== "done");
+
+  const mergedPending = [...toPending];
+  for (const st of pending) {
+    if (!mergedPending.some((x) => x.id === st.id && x.kind === st.kind)) {
+      mergedPending.push({ ...st });
+    }
+  }
+
+  const startCoord = getDriverCurrentOrBaseOrigin(toDriver);
+  const incBase = existingToDoc ? existingToDoc.includeReturnToBase !== false : true;
+  const endCoord = incBase ? getStoreBaseLocation() : null;
+  const optRes = await optimizeStopsWithOsrm({ startCoord, stops: mergedPending, endCoord });
+  const finalToStops = [...toDone, ...optRes.orderedStops];
+
+  try {
+    await executeAdminBatch(currentKeyHash, (batch, proofId) => {
+      batch.set(
+        doc(db, "driver_routes", fromDocId),
+        {
+          driverName: fromDriver,
+          driverSlug: rbDriverSlug(fromDriver),
+          date: today,
+          stops: doneFrom,
+          totalDistanceMeters: 0,
+          totalDurationSec: 0,
+          createdBy: "admin",
+          updatedAtIso: new Date().toISOString(),
+          proofId,
+          updatedAt: serverTimestamp()
+        },
+        { merge: true }
+      );
+      batch.set(
+        doc(db, "driver_routes", toDocId),
+        {
+          driverName: toDriver,
+          driverSlug: rbDriverSlug(toDriver),
+          date: today,
+          includeReturnToBase: incBase,
+          baseLocation: getStoreBaseLocation(),
+          stops: finalToStops,
+          totalDistanceMeters: optRes.distanceMeters,
+          totalDurationSec: optRes.durationSec,
+          createdBy: "admin",
+          lastMinuteAddedAtIso: new Date().toISOString(),
+          updatedAtIso: new Date().toISOString(),
+          proofId,
+          updatedAt: serverTimestamp()
+        },
+        { merge: true }
+      );
+      pending
+        .filter((s) => s.kind === "order")
+        .forEach((s) => {
+          batch.update(doc(db, "orders", s.id), {
+            assignedDriver: toDriver,
+            proofId,
+            updatedAt: serverTimestamp()
+          });
+        });
+    });
+
+    const driverSel = document.getElementById("rbDriverSelect");
+    if (driverSel) {
+      driverSel.value = toDriver;
+      subscribeAdminBuilderToDriverRoute(toDriver);
+    }
+    showToast(`🔁 ${pending.length} parada(s) transferidas a ${toDriver} y optimizadas.`);
+  } catch (err) {
+    console.error("Error transfiriendo ruta:", err);
+    showToast("No se pudo transferir la ruta.");
+  }
 });
 
 document.getElementById("rbBtnClear")?.addEventListener("click", async () => {
