@@ -109,10 +109,10 @@
 
     <!-- Navigation Tabs -->
     <div class="admin-tabs">
-      <button type="button" class="tab-btn active" data-tab="tabWarehouse">📋 Control de Almacén</button>
-      <button type="button" class="tab-btn" data-tab="tabLots">❄️ Termos y Lotes QR</button>
-      <button type="button" class="tab-btn" data-tab="tabRoutes">🗺️ Ruta, GPS y Cortes</button>
+      <button type="button" class="tab-btn active" data-tab="tabRoutes">🗺️ Ruta, GPS y Cortes</button>
       <button type="button" class="tab-btn" data-tab="tabOrders">📦 Pedidos en Línea</button>
+      <button type="button" class="tab-btn" data-tab="tabWarehouse">📋 Control de Almacén</button>
+      <button type="button" class="tab-btn" data-tab="tabLots">❄️ Termos y Lotes QR</button>
       <button type="button" class="tab-btn" data-tab="tabCatalog">🏷️ Precios y Difusión</button>
       <button type="button" class="tab-btn" data-tab="tabDrivers">🚗 Equipo y PINs</button>
       <button type="button" class="tab-btn" data-tab="tabManual">📖 Manual del Equipo</button>
@@ -120,7 +120,7 @@
     </div>
 
     <!-- ================= TAB 1: CONTROL DE ALMACÉN ================= -->
-    <section id="tabWarehouse" class="admin-tab-pane">
+    <section id="tabWarehouse" class="admin-tab-pane" style="display:none;">
       <!-- Date & Print Bar -->
       <div class="admin-toolbar-card">
         <div class="toolbar-group">
@@ -267,7 +267,7 @@
     </section>
 
     <!-- ================= TAB 1B: RUTA, MAPA GPS Y CORTES ================= -->
-    <section id="tabRoutes" class="admin-tab-pane" style="display:none;">
+    <section id="tabRoutes" class="admin-tab-pane">
       <div id="adminMapCard" class="order-admin-card" style="margin-bottom:16px;padding:13px;">
         <div id="adminMapHeader" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
@@ -916,6 +916,6 @@
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <script type="module" src="js/admin.js?v=nav3d_11"></script>
+  <script type="module" src="js/admin.js?v=nav3d_12"></script>
 </body>
 </html>

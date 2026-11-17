@@ -431,6 +431,7 @@ function enterDashboard() {
   subscribeWarehouseDay(selectedWhDate);
   subscribeRouteCorteDay(selectedRouteDate);
   load30DayPlaceHistory();
+  switchAdminTab("tabRoutes");
 }
 
 document.getElementById("btnTopManual")?.addEventListener("click", () => {
