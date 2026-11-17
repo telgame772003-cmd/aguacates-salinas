@@ -1491,24 +1491,36 @@ function renderGpsMapAndChips() {
 
   badgeEl.textContent = `${onlineLocs.length} carro${onlineLocs.length === 1 ? "" : "s"} en vivo`;
 
+  const offlineLocs = validLocs.filter((loc) => !onlineLocs.some((o) => o.id === loc.id));
+  const showOfflineChips = Boolean(window.__salinasShowOfflineMapChips);
+
   if (validLocs.length === 0) {
     chipsEl.innerHTML = `<span style="font-size:0.82rem;color:var(--slate-500);">Aún ningún chofer ha activado su GPS hoy.</span>`;
     if (fsChipsEl) fsChipsEl.innerHTML = `<span class="fs-drv-pill paused">⚪ 0 carros</span>`;
   } else {
-    chipsEl.innerHTML = validLocs
+    const orderedForChips = showOfflineChips ? [...onlineLocs, ...offlineLocs] : onlineLocs;
+    const chipHtml = orderedForChips
       .map((loc) => {
         const isOnline = onlineLocs.some((o) => o.id === loc.id);
         const dot = isOnline ? "🟢" : "⚪";
-        const boxesTxt = typeof loc.boxesInCar === "number" ? ` • ${loc.boxesInCar} cajas` : "";
-        const pingCue = isOnline ? "" : ` <span title="Toca para pedir GPS por notificación">🔔</span>`;
+        const boxesTxt = typeof loc.boxesInCar === "number" ? ` • ${loc.boxesInCar}c` : "";
+        const pingCue = isOnline ? "" : ` 🔔`;
         return `
-          <button type="button" class="gps-driver-chip ${isOnline ? "online" : ""}" data-focus-driver="${escapeHtml(loc.id)}" title="${isOnline ? "Enfocar en mapa" : "Toca para enviar notificación Push y pedir GPS"}">
+          <button type="button" class="gps-driver-chip ${isOnline ? "online" : ""}" data-focus-driver="${escapeHtml(loc.id)}" title="${isOnline ? "Enfocar en mapa" : "Toca para pedir GPS por notificación"}">
             <span>${dot} ${escapeHtml(loc.driverName || loc.id)}${pingCue}</span>
-            <span style="font-weight:600;color:var(--slate-500);">${formatMinutesAgo(loc.updatedAtIso)}${boxesTxt}</span>
+            <span style="font-weight:600;color:var(--slate-500);">${formatMinutesAgo(loc.updatedAtIso).replace(/^hace\s+/, "")}${boxesTxt}</span>
           </button>
         `;
       })
       .join("");
+
+    const offlineToggleBtn = offlineLocs.length > 0
+      ? `<button type="button" id="btnToggleOfflineDriverChips" class="gps-driver-chip" style="background:#f1f5f9;border-style:dashed;">
+           <span>👥 ${showOfflineChips ? "Ocultar" : "Offline"} (${offlineLocs.length}) ${showOfflineChips ? "▴" : "▾"}</span>
+         </button>`
+      : "";
+
+    chipsEl.innerHTML = (chipHtml || `<span style="font-size:0.78rem;color:var(--slate-500);align-self:center;">0 en vivo ahora</span>`) + offlineToggleBtn;
 
     if (fsChipsEl) {
       fsChipsEl.innerHTML = validLocs
@@ -1868,8 +1880,72 @@ function focusDriverOnMap(id, triggerBtn = null) {
 }
 
 document.getElementById("gpsDriverChips")?.addEventListener("click", (e) => {
+  if (e.target.closest("#btnToggleOfflineDriverChips")) {
+    window.__salinasShowOfflineMapChips = !window.__salinasShowOfflineMapChips;
+    renderGpsMapAndChips();
+    return;
+  }
   const chip = e.target.closest("button[data-focus-driver]");
   if (chip) focusDriverOnMap(chip.dataset.focusDriver, chip);
+});
+
+document.getElementById("btnJumpToRouteBuilder")?.addEventListener("click", () => {
+  const det = document.getElementById("adminRouteBuilderDetails");
+  if (det) {
+    det.open = true;
+    det.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+});
+
+document.getElementById("mapQuickPlaceSearch")?.addEventListener("input", (e) => {
+  const q = e.target.value.trim();
+  const box = document.getElementById("mapQuickPlaceResults");
+  if (!box) return;
+  if (!q) {
+    box.style.display = "none";
+    box.innerHTML = "";
+    return;
+  }
+  const matches = allPlaces
+    .filter((p) => typeof p.lat === "number" && typeof p.lng === "number")
+    .filter((p) => {
+      const cat = PLACE_CATEGORIES[p.category] || PLACE_CATEGORIES.tienda;
+      return matchesSmartSearch(`${p.name || ""} ${p.address || ""} ${p.phone || ""} ${cat.label || ""}`, q);
+    })
+    .slice(0, 12);
+
+  box.style.display = "block";
+  box.innerHTML = matches.length
+    ? matches
+        .map((p) => {
+          const cat = PLACE_CATEGORIES[p.category] || PLACE_CATEGORIES.tienda;
+          return `
+            <div class="route-pick-result-item" data-map-fly-place="${escapeHtml(p.id)}" style="cursor:pointer;">
+              <div style="min-width:0;flex:1;">
+                <strong style="display:block;color:var(--green-950);">${cat.emoji} ${escapeHtml(p.name)}</strong>
+                <span style="font-size:0.73rem;color:var(--slate-500);">${escapeHtml(p.address || cat.label)}</span>
+              </div>
+              <span style="font-size:0.74rem;font-weight:800;color:#15803d;">Ver pin ↗</span>
+            </div>
+          `;
+        })
+        .join("")
+    : `<div style="padding:10px;font-size:0.8rem;color:var(--slate-500);">Sin tiendas con ese nombre.</div>`;
+});
+
+document.getElementById("mapQuickPlaceResults")?.addEventListener("click", (e) => {
+  const row = e.target.closest("[data-map-fly-place]");
+  if (!row) return;
+  const pid = row.dataset.mapFlyPlace;
+  const p = allPlaces.find((x) => x.id === pid);
+  const box = document.getElementById("mapQuickPlaceResults");
+  if (box) box.style.display = "none";
+  if (!p || !leafletMap) return;
+  leafletMap.flyTo([p.lat, p.lng], 16, { duration: 0.65 });
+  const marker = mapFocusMarkers.get(`place:${p.id}`);
+  if (marker) {
+    setTimeout(() => marker.openPopup(), 350);
+  }
 });
 
 document.getElementById("fsDriverChips")?.addEventListener("click", (e) => {

@@ -2180,23 +2180,33 @@ body.map-fullscreen-open {
 
 .gps-driver-chips {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 12px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  gap: 7px;
+  margin-bottom: 8px;
+  padding-bottom: 2px;
+}
+
+.gps-driver-chips::-webkit-scrollbar {
+  display: none;
 }
 
 .gps-driver-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
+  padding: 6px 11px;
   border-radius: 999px;
   background: var(--white);
   border: 1.5px solid var(--slate-200);
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   font-weight: 800;
   color: var(--slate-700);
   cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .gps-driver-chip.online {
@@ -2522,7 +2532,8 @@ body.map-fullscreen-open {
   }
 
   #adminLiveMap {
-    height: 330px;
+    height: 55vh;
+    min-height: 360px;
   }
 
   .order-admin-card {

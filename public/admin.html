@@ -267,20 +267,23 @@
 
     <!-- ================= TAB 1B: RUTA, MAPA GPS Y CORTES ================= -->
     <section id="tabRoutes" class="admin-tab-pane" style="display:none;">
-      <div id="adminMapCard" class="order-admin-card" style="margin-bottom:18px;">
-        <div id="adminMapHeader" style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
-          <div>
-            <h3 id="adminMapTitle" class="serif-title" style="font-size:1.18rem;color:var(--green-950);">🗺️ Monitor en Vivo: Unidades, Puntos de Venta y Pedidos</h3>
-            <p id="adminMapSubtitle" style="font-size:0.8rem;color:var(--slate-500);">
-              Toca cualquier filtro para aislar pines en el mapa o abre en pantalla completa.
-            </p>
-          </div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+      <div id="adminMapCard" class="order-admin-card" style="margin-bottom:16px;padding:13px;">
+        <div id="adminMapHeader" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <h3 id="adminMapTitle" class="serif-title" style="font-size:1.12rem;color:var(--green-950);margin:0;">🗺️ Monitor en Vivo</h3>
             <span id="gpsOnlineBadge" class="ripeness-badge">0 carros en vivo</span>
-            <button type="button" id="btnFitAllMap" class="btn btn-outline btn-sm" title="Encuadrar los puntos visibles en el mapa">🎯 Ver Todo</button>
-            <button type="button" id="btnAdminOpenPlaceModal" class="btn btn-primary btn-sm">+ Punto / Tienda</button>
-            <button type="button" id="btnToggleMapFullscreen" class="btn btn-outline btn-sm">⛶ Pantalla Completa</button>
           </div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;">
+            <button type="button" id="btnFitAllMap" class="btn btn-outline btn-sm" style="padding:5px 9px;font-size:0.75rem;" title="Encuadrar los puntos visibles">🎯 Todo</button>
+            <button type="button" id="btnJumpToRouteBuilder" class="btn btn-outline btn-sm" style="padding:5px 9px;font-size:0.75rem;" title="Ir al Constructor de Rutas">🧭 Ruta</button>
+            <button type="button" id="btnAdminOpenPlaceModal" class="btn btn-primary btn-sm" style="padding:5px 10px;font-size:0.75rem;">+ Punto</button>
+            <button type="button" id="btnToggleMapFullscreen" class="btn btn-outline btn-sm" style="padding:5px 9px;font-size:0.75rem;">⛶ Completa</button>
+          </div>
+        </div>
+
+        <div style="position:relative;margin-bottom:8px;">
+          <input type="search" id="mapQuickPlaceSearch" class="form-control" placeholder="🔍 Ubicar tienda en el mapa (nombre, giro o dirección)..." style="padding:7px 11px;font-size:0.8rem;">
+          <div id="mapQuickPlaceResults" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:45;max-height:190px;overflow-y:auto;background:#fff;border:1.5px solid var(--green-700);border-radius:10px;box-shadow:0 10px 25px rgba(0,0,0,0.18);margin-top:4px;"></div>
         </div>
 
         <div class="admin-map-stage">
