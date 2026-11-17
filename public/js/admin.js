@@ -4530,10 +4530,13 @@ function populateRouteBuilderDrivers() {
     .join("");
   if (prev && drivers.some((d) => d.name === prev)) {
     sel.value = prev;
-  } else if (drivers[0]) {
-    sel.value = drivers[0].name;
+  } else {
+    const firstReal = drivers.find((d) => !/^prueba$/i.test(String(d.name || "").trim())) || drivers[0];
+    if (firstReal) sel.value = firstReal.name;
   }
-  subscribeAdminBuilderToDriverRoute(sel.value);
+  if (sel.value && (sel.value !== prev || !rbRouteUnsub)) {
+    subscribeAdminBuilderToDriverRoute(sel.value);
+  }
 }
 
 function updateRbTruckStockBadge(driverName) {
@@ -4561,6 +4564,10 @@ function subscribeAdminBuilderToDriverRoute(driverName) {
   const docId = `${getLocalDateStr()}_${rbDriverSlug(driverName)}`;
   rbRouteUnsub = onSnapshot(doc(db, "driver_routes", docId), (snap) => {
     if (!snap.exists()) {
+      rbStops = [];
+      rbPreviewLatLngs = [];
+      rbTotalDistM = 0;
+      rbTotalDurSec = 0;
       renderRouteBuilderUI();
       return;
     }
@@ -4927,13 +4934,13 @@ document.getElementById("rbBtnOptimize")?.addEventListener("click", async () => 
   }
 });
 
-async function saveAdminRouteToFirestore(isLastMinute = false) {
+async function saveAdminRouteToFirestore(isLastMinute = false, allowEmpty = false) {
   const driverName = document.getElementById("rbDriverSelect")?.value || "";
   if (!driverName) {
     showToast("Selecciona un chofer primero.");
     return;
   }
-  if (rbStops.length === 0) {
+  if (rbStops.length === 0 && !allowEmpty) {
     showToast("Agrega al menos 1 parada antes de enviar.");
     return;
   }
@@ -4971,7 +4978,11 @@ async function saveAdminRouteToFirestore(isLastMinute = false) {
       });
   });
 
-  showToast(`📤 Ruta enviada en vivo a ${driverName} (${rbStops.length} paradas).`);
+  showToast(
+    rbStops.length === 0
+      ? `🗑️ Ruta de ${driverName} limpiada.`
+      : `📤 Ruta enviada en vivo a ${driverName} (${rbStops.length} paradas).`
+  );
 }
 
 document.getElementById("rbBtnSaveSend")?.addEventListener("click", () => saveAdminRouteToFirestore(false));
@@ -4986,10 +4997,22 @@ document.getElementById("rbBtnLastMinuteMenu")?.addEventListener("click", async 
   setTimeout(() => saveAdminRouteToFirestore(true), 900);
 });
 
-document.getElementById("rbBtnClear")?.addEventListener("click", () => {
+document.getElementById("rbBtnClear")?.addEventListener("click", async () => {
+  const driverName = document.getElementById("rbDriverSelect")?.value || "";
+  if (rbStops.length > 0) {
+    const ok = await showConfirmDialog({
+      title: `¿Limpiar la ruta de ${driverName || "este chofer"}?`,
+      message: `Se quitarán las ${rbStops.length} parada${rbStops.length === 1 ? "" : "s"} tanto de aquí como del celular del chofer.`,
+      confirmText: "Sí, limpiar"
+    });
+    if (!ok) return;
+  }
   rbStops = [];
   rbPreviewLatLngs = [];
   rbTotalDistM = 0;
   rbTotalDurSec = 0;
   renderRouteBuilderUI();
+  if (driverName) {
+    await saveAdminRouteToFirestore(false, true);
+  }
 });
