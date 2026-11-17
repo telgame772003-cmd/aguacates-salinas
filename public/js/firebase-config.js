@@ -59,6 +59,12 @@ export const DEFAULT_STORE_SETTINGS = {
   phoneDisplayPrimary: "452 171 50 74",
   phoneDisplaySecondary: "844 677 52 76",
   scheduleText: "Lunes a Sábado • 7:00 AM a 5:00 PM",
+  baseLocation: {
+    name: "Base / Bodega Salinas",
+    address: "Correo Marítimo 2661, Postal Cerritos 2da, Saltillo",
+    lat: 25.407054,
+    lng: -100.954645
+  },
   drivers: [
     { id: "vendedor_1", name: "Vendedor 1", phone: "", hasPin: true },
     { id: "vendedor_2", name: "Vendedor 2", phone: "", hasPin: true }

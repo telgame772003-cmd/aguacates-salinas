@@ -424,6 +424,27 @@
           </div>
         </div>
 
+        <div class="order-admin-card" style="margin-bottom:20px;border-left:4px solid var(--green-700);">
+          <h3 class="serif-title" style="font-size:1.22rem;color:var(--green-950);margin-bottom:6px;">📍 Base / Bodega de Salida y Regreso</h3>
+          <p style="font-size:0.82rem;color:var(--slate-500);margin-bottom:12px;">
+            Se usa como punto de origen o regreso a base al calcular rutas óptimas. Puedes pegar <code>lat, lng</code> o un enlace de Google Maps.
+          </p>
+          <div class="order-admin-grid">
+            <div class="form-group">
+              <label class="form-label" for="cfgBaseName">Nombre de la Base</label>
+              <input type="text" id="cfgBaseName" class="form-control" placeholder="Base / Bodega Salinas">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="cfgBaseAddress">Dirección</label>
+              <input type="text" id="cfgBaseAddress" class="form-control" placeholder="Correo Marítimo 2661, Saltillo">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="cfgBaseCoords">Coordenadas GPS (lat, lng)</label>
+              <input type="text" id="cfgBaseCoords" class="form-control" placeholder="25.407054, -100.954645">
+            </div>
+          </div>
+        </div>
+
         <h3 class="serif-title" style="font-size:1.28rem;color:var(--green-950);margin-bottom:14px;">Precios por Caja (4 Calibres)</h3>
         <div id="adminCalibersEditor" class="caliber-list" style="margin-bottom:20px;"></div>
 

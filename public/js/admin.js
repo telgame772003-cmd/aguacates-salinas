@@ -2829,6 +2829,16 @@ function populateCatalogForm() {
   document.getElementById("cfgPhone1").value = storeSettings.phoneDisplayPrimary || "";
   document.getElementById("cfgPhone2").value = storeSettings.phoneDisplaySecondary || "";
 
+  const baseLoc = storeSettings.baseLocation || DEFAULT_STORE_SETTINGS.baseLocation;
+  const baseNameEl = document.getElementById("cfgBaseName");
+  const baseAddrEl = document.getElementById("cfgBaseAddress");
+  const baseCoordsEl = document.getElementById("cfgBaseCoords");
+  if (baseNameEl) baseNameEl.value = baseLoc?.name || "Base / Bodega Salinas";
+  if (baseAddrEl) baseAddrEl.value = baseLoc?.address || "";
+  if (baseCoordsEl && Number.isFinite(Number(baseLoc?.lat)) && Number.isFinite(Number(baseLoc?.lng))) {
+    baseCoordsEl.value = `${Number(baseLoc.lat).toFixed(6)}, ${Number(baseLoc.lng).toFixed(6)}`;
+  }
+
   const calibers = Object.values(storeSettings.calibers || DEFAULT_STORE_SETTINGS.calibers).sort(
     (a, b) => (a.order || 99) - (b.order || 99)
   );
@@ -2909,6 +2919,20 @@ document.getElementById("catalogForm").addEventListener("submit", async (e) => {
     const phone1Display = document.getElementById("cfgPhone1").value.trim() || DEFAULT_STORE_SETTINGS.phoneDisplayPrimary;
     const phone2Display = document.getElementById("cfgPhone2").value.trim() || DEFAULT_STORE_SETTINGS.phoneDisplaySecondary;
 
+    const rawBaseCoords = document.getElementById("cfgBaseCoords")?.value.trim() || "";
+    const parsedBaseCoords = parseCoordsFromInput(rawBaseCoords);
+    if (rawBaseCoords && !parsedBaseCoords) {
+      showToast("Formato inválido en Coordenadas de la Base. Usa: lat, lng (ej. 25.407054, -100.954645).");
+      return;
+    }
+    const prevBase = storeSettings.baseLocation || DEFAULT_STORE_SETTINGS.baseLocation;
+    const baseLocation = {
+      name: document.getElementById("cfgBaseName")?.value.trim() || prevBase.name || "Base / Bodega Salinas",
+      address: document.getElementById("cfgBaseAddress")?.value.trim() || prevBase.address || "",
+      lat: parsedBaseCoords ? parsedBaseCoords.lat : prevBase.lat,
+      lng: parsedBaseCoords ? parsedBaseCoords.lng : prevBase.lng
+    };
+
     const newSettings = {
       storeOpen: document.getElementById("cfgStoreOpen").value === "true",
       scheduleText: document.getElementById("cfgSchedule").value.trim(),
@@ -2917,6 +2941,7 @@ document.getElementById("catalogForm").addEventListener("submit", async (e) => {
       phoneDisplaySecondary: phone2Display,
       whatsappPrimary: cleanPhoneForWhatsApp(phone1Display),
       whatsappSecondary: cleanPhoneForWhatsApp(phone2Display),
+      baseLocation,
       drivers: storeSettings.drivers || DEFAULT_STORE_SETTINGS.drivers,
       warehouseStaff: Array.isArray(storeSettings.warehouseStaff) ? storeSettings.warehouseStaff : [],
       calibers: updatedCalibers
