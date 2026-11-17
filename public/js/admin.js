@@ -93,6 +93,51 @@ let driverLocations = [];
 let leafletMap = null;
 let mapLayerGroup = null;
 let mapFocusMarkers = new Map();
+async function initCleanAdminVectorBaseMap(targetMap) {
+  const styleCandidates = [
+    "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
+    "https://tiles.openfreemap.org/styles/liberty"
+  ];
+  if (window.L && typeof window.L.maplibreGL === "function") {
+    for (const url of styleCandidates) {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) continue;
+        const styleObj = await res.json();
+        if (Array.isArray(styleObj.layers)) {
+          styleObj.layers = styleObj.layers.filter((l) => {
+            const lid = String(l?.id || "").toLowerCase();
+            if (l?.type === "fill-extrusion" || lid.includes("3d")) return false;
+            if (
+              lid.startsWith("poi") ||
+              lid.includes("_poi") ||
+              lid.includes("housenumber") ||
+              lid.includes("shop") ||
+              lid.includes("restaurant") ||
+              lid.includes("hotel") ||
+              lid.includes("cafe") ||
+              lid.includes("bar")
+            ) {
+              return false;
+            }
+            return true;
+          });
+        }
+        window.L.maplibreGL({ style: styleObj }).addTo(targetMap);
+        return;
+      } catch (_) {}
+    }
+  }
+  // Fallback si WebGL no estuviera disponible
+  window.L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}", {
+    maxZoom: 19,
+    attribution: "Tiles &copy; Esri"
+  }).addTo(targetMap);
+  window.L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}", {
+    maxZoom: 19
+  }).addTo(targetMap);
+}
+
 let hasCenteredMapOnce = false;
 let mapPickCallback = null;
 let mapPinFilter = "all";
@@ -1202,14 +1247,7 @@ function ensureLeafletMap() {
   // Default center: Saltillo / Región comercial
   leafletMap = window.L.map("adminLiveMap", { zoomControl: false }).setView([25.4267, -100.9954], 12);
   window.L.control.zoom({ position: "bottomright" }).addTo(leafletMap);
-  // Mapa base claro minimalista (Esri Light Gray Canvas + Referencia de calles/nombres, 0% relieve verdoso ni iconos ajenos)
-  window.L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}", {
-    maxZoom: 19,
-    attribution: "Tiles &copy; Esri"
-  }).addTo(leafletMap);
-  window.L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}", {
-    maxZoom: 19
-  }).addTo(leafletMap);
+  initCleanAdminVectorBaseMap(leafletMap);
 
   mapLayerGroup = window.L.layerGroup().addTo(leafletMap);
   leafletMap.on("zoomend", syncMapZoomTier);
