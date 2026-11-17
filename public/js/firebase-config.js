@@ -446,34 +446,85 @@ export function generateVaultId(tenantSlug = "t") {
   return `vlt_${tenantSlug.slice(0, 12)}_${hex}`;
 }
 
-export async function executeAdminBatch(keyHash, buildBatchFn) {
-  if (!activeVaultId) {
-    // Si es inicialización en limpio de un tenant nuevo, generar vaultId
+async function ensureVaultUnlocked(roleKeyCol, keyHash, allowCreateNew = false) {
+  if (activeVaultId && activeVaultId.startsWith("vlt_")) return activeVaultId;
+  if (keyHash) {
+    try {
+      const snap = await getDoc(doc(db, roleKeyCol, keyHash));
+      if (snap.exists() && snap.data()?.vaultId) {
+        setActiveVaultId(snap.data().vaultId, true);
+        return activeVaultId;
+      }
+    } catch (_) {}
+  }
+  if (allowCreateNew && !activeVaultId) {
     setActiveVaultId(generateVaultId(ACTIVE_TENANT_SLUG), true);
   }
-  const batch = writeBatch(db);
+  return activeVaultId;
+}
+
+function createTenantAwareBatchProxy(rawBatch) {
+  return {
+    set(docRef, data, options) {
+      const p = docRef?.path || "";
+      const enriched =
+        p.startsWith("vaults/") && data && typeof data === "object" && !data.tenantSlug
+          ? { ...data, tenantSlug: ACTIVE_TENANT_SLUG }
+          : data;
+      if (options !== undefined) {
+        rawBatch.set(docRef, enriched, options);
+      } else {
+        rawBatch.set(docRef, enriched);
+      }
+      return this;
+    },
+    update(docRef, data, ...rest) {
+      const p = docRef?.path || "";
+      const enriched =
+        p.startsWith("vaults/") && data && typeof data === "object" && !Array.isArray(data) && !data.tenantSlug
+          ? { ...data, tenantSlug: ACTIVE_TENANT_SLUG }
+          : data;
+      rawBatch.update(docRef, enriched, ...rest);
+      return this;
+    },
+    delete(docRef) {
+      rawBatch.delete(docRef);
+      return this;
+    },
+    commit() {
+      return rawBatch.commit();
+    }
+  };
+}
+
+export async function executeAdminBatch(keyHash, buildBatchFn) {
+  await ensureVaultUnlocked("admin_keys", keyHash, true);
+  const rawBatch = writeBatch(db);
+  const batch = createTenantAwareBatchProxy(rawBatch);
   const proofId = generateProofId("prf");
-  batch.set(doc(db, "admin_proofs", proofId), {
+  rawBatch.set(doc(db, "admin_proofs", proofId), {
     keyHash,
     tenantSlug: ACTIVE_TENANT_SLUG,
     vaultId: activeVaultId,
     createdAt: serverTimestamp()
   });
   buildBatchFn(batch, proofId);
-  await batch.commit();
+  await rawBatch.commit();
 }
 
 export async function executeDriverBatch(driverKeyHash, buildBatchFn) {
-  const batch = writeBatch(db);
+  await ensureVaultUnlocked("driver_keys", driverKeyHash, false);
+  const rawBatch = writeBatch(db);
+  const batch = createTenantAwareBatchProxy(rawBatch);
   const proofId = generateProofId("dprf");
-  batch.set(doc(db, "driver_proofs", proofId), {
+  rawBatch.set(doc(db, "driver_proofs", proofId), {
     keyHash: driverKeyHash,
     tenantSlug: ACTIVE_TENANT_SLUG,
     vaultId: activeVaultId,
     createdAt: serverTimestamp()
   });
   buildBatchFn(batch, proofId);
-  await batch.commit();
+  await rawBatch.commit();
 }
 
 export async function computeWarehousePinHash(staffName, pin) {
@@ -482,32 +533,33 @@ export async function computeWarehousePinHash(staffName, pin) {
 }
 
 export async function executeWarehouseBatch(warehouseKeyHash, buildBatchFn) {
-  const batch = writeBatch(db);
+  await ensureVaultUnlocked("warehouse_keys", warehouseKeyHash, false);
+  const rawBatch = writeBatch(db);
+  const batch = createTenantAwareBatchProxy(rawBatch);
   const proofId = generateProofId("wprf");
-  batch.set(doc(db, "warehouse_proofs", proofId), {
+  rawBatch.set(doc(db, "warehouse_proofs", proofId), {
     keyHash: warehouseKeyHash,
     tenantSlug: ACTIVE_TENANT_SLUG,
     vaultId: activeVaultId,
     createdAt: serverTimestamp()
   });
   buildBatchFn(batch, proofId);
-  await batch.commit();
+  await rawBatch.commit();
 }
 
 export async function executeSuperadminBatch(superadminKeyHash, buildBatchFn) {
-  if (!activeVaultId) {
-    setActiveVaultId(generateVaultId(ACTIVE_TENANT_SLUG), true);
-  }
-  const batch = writeBatch(db);
+  await ensureVaultUnlocked("superadmin_keys", superadminKeyHash, true);
+  const rawBatch = writeBatch(db);
+  const batch = createTenantAwareBatchProxy(rawBatch);
   const proofId = generateProofId("sprf");
-  batch.set(doc(db, "superadmin_proofs", proofId), {
+  rawBatch.set(doc(db, "superadmin_proofs", proofId), {
     keyHash: superadminKeyHash,
     tenantSlug: ACTIVE_TENANT_SLUG,
     vaultId: activeVaultId,
     createdAt: serverTimestamp()
   });
   buildBatchFn(batch, proofId);
-  await batch.commit();
+  await rawBatch.commit();
 }
 
 export const COLD_ROOMS = ["Cuarto 1", "Cuarto 2", "Cuarto 3", "Cuarto 4", "Emplayado / Quiebre", "Piso", "Área Selección"];

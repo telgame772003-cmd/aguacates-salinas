@@ -33,7 +33,7 @@ import {
   matchesSmartSearch,
   formatCurrency,
   cleanPhoneForWhatsApp
-} from "./firebase-config.js?v=rpd_1";
+} from "./firebase-config.js?v=rpd_2";
 import {
   isNativeCapacitorApp,
   startNativeBackgroundGps,

@@ -10,51 +10,65 @@ service cloud.firestore {
     }
 
     function isTenantActive(tenantSlug) {
-      let pubDoc = get(/databases/$(database)/documents/tenants/$(tenantSlug)/public/storefront);
-      return pubDoc == null || pubDoc.data.tenantStatus != 'suspended';
+      let pubPath = /databases/$(database)/documents/tenants/$(tenantSlug)/public/storefront;
+      return !exists(pubPath)
+        || get(pubPath).data.get('tenantStatus', 'active') != 'suspended';
     }
 
     function isTenantRoleKeyActiveForVault(tenantSlug, roleCol, keyHash, expectedVaultId) {
-      let keyDoc = getAfter(/databases/$(database)/documents/tenants/$(tenantSlug)/$(roleCol)/$(keyHash));
-      return keyDoc != null
-        && keyDoc.data.active == true
-        && keyDoc.data.vaultId == expectedVaultId
+      let keyPath = /databases/$(database)/documents/tenants/$(tenantSlug)/$(roleCol)/$(keyHash);
+      return keyHash != ''
+        && existsAfter(keyPath)
+        && getAfter(keyPath).data.get('active', false) == true
+        && getAfter(keyPath).data.get('vaultId', '') == expectedVaultId
         && isTenantActive(tenantSlug);
     }
 
     function isTenantRoleKeyActive(tenantSlug, roleCol, keyHash) {
-      let keyDoc = getAfter(/databases/$(database)/documents/tenants/$(tenantSlug)/$(roleCol)/$(keyHash));
-      return keyDoc != null
-        && keyDoc.data.active == true
+      let keyPath = /databases/$(database)/documents/tenants/$(tenantSlug)/$(roleCol)/$(keyHash);
+      return keyHash != ''
+        && existsAfter(keyPath)
+        && getAfter(keyPath).data.get('active', false) == true
         && isTenantActive(tenantSlug);
     }
 
     function hasValidTenantProofForCol(tenantSlug, proofCol, roleKeyCol, prefixPattern) {
-      let proofId = request.resource.data.proofId;
+      let proofId = request.resource.data.get('proofId', '');
+      let proofPath = /databases/$(database)/documents/tenants/$(tenantSlug)/$(proofCol)/$(proofId);
       return proofId is string
+        && proofId.size() > 4
         && proofId.matches(prefixPattern)
-        && getAfter(/databases/$(database)/documents/tenants/$(tenantSlug)/$(proofCol)/$(proofId)).data.keyHash is string
+        && existsAfter(proofPath)
         && isTenantRoleKeyActive(
           tenantSlug,
           roleKeyCol,
-          getAfter(/databases/$(database)/documents/tenants/$(tenantSlug)/$(proofCol)/$(proofId)).data.keyHash
+          getAfter(proofPath).data.get('keyHash', '')
         );
     }
 
+    function resolveVaultTenantSlug(vaultId) {
+      let reqSlug = request.resource.data.get('tenantSlug', '');
+      let metaPath = /databases/$(database)/documents/vaults_meta/$(vaultId);
+      return (reqSlug is string && reqSlug != '')
+        ? reqSlug
+        : (exists(metaPath) ? get(metaPath).data.get('tenantSlug', '') : '');
+    }
+
     function hasValidVaultProof(vaultId, proofCol, roleKeyCol, prefixPattern) {
-      let proofId = request.resource.data.proofId;
-      let tSlug = request.resource.data.tenantSlug is string
-        ? request.resource.data.tenantSlug
-        : get(/databases/$(database)/documents/vaults_meta/$(vaultId)).data.tenantSlug;
+      let proofId = request.resource.data.get('proofId', '');
+      let tSlug = resolveVaultTenantSlug(vaultId);
       return isValidVaultIdFormat(vaultId)
         && proofId is string
+        && proofId.size() > 4
         && proofId.matches(prefixPattern)
         && tSlug is string
-        && getAfter(/databases/$(database)/documents/tenants/$(tSlug)/$(proofCol)/$(proofId)).data.vaultId == vaultId
+        && tSlug != ''
+        && existsAfter(/databases/$(database)/documents/tenants/$(tSlug)/$(proofCol)/$(proofId))
+        && getAfter(/databases/$(database)/documents/tenants/$(tSlug)/$(proofCol)/$(proofId)).data.get('vaultId', '') == vaultId
         && isTenantRoleKeyActiveForVault(
           tSlug,
           roleKeyCol,
-          getAfter(/databases/$(database)/documents/tenants/$(tSlug)/$(proofCol)/$(proofId)).data.keyHash,
+          getAfter(/databases/$(database)/documents/tenants/$(tSlug)/$(proofCol)/$(proofId)).data.get('keyHash', ''),
           vaultId
         );
     }
@@ -111,7 +125,8 @@ service cloud.firestore {
       match /public_order_tracking/{orderId} {
         allow get: if true;
         allow list: if false;
-        allow write: if false;
+        allow write: if hasValidTenantProofForCol(tenantSlug, 'admin_proofs', 'admin_keys', '^prf_.*')
+          || hasValidTenantProofForCol(tenantSlug, 'driver_proofs', 'driver_keys', '^dprf_.*');
       }
 
       match /meta/{docId} {
@@ -133,8 +148,8 @@ service cloud.firestore {
 
       match /admin_proofs/{proofId} {
         allow read: if false;
-        allow create: if request.resource.data.keyHash is string
-          && isTenantRoleKeyActive(tenantSlug, 'admin_keys', request.resource.data.keyHash);
+        allow create: if request.resource.data.get('keyHash', '') is string
+          && isTenantRoleKeyActive(tenantSlug, 'admin_keys', request.resource.data.get('keyHash', ''));
         allow update, delete: if false;
       }
 
@@ -147,8 +162,8 @@ service cloud.firestore {
 
       match /driver_proofs/{proofId} {
         allow read: if false;
-        allow create: if request.resource.data.keyHash is string
-          && isTenantRoleKeyActive(tenantSlug, 'driver_keys', request.resource.data.keyHash);
+        allow create: if request.resource.data.get('keyHash', '') is string
+          && isTenantRoleKeyActive(tenantSlug, 'driver_keys', request.resource.data.get('keyHash', ''));
         allow update, delete: if false;
       }
 
@@ -162,8 +177,8 @@ service cloud.firestore {
 
       match /warehouse_proofs/{proofId} {
         allow read: if false;
-        allow create: if request.resource.data.keyHash is string
-          && isTenantRoleKeyActive(tenantSlug, 'warehouse_keys', request.resource.data.keyHash);
+        allow create: if request.resource.data.get('keyHash', '') is string
+          && isTenantRoleKeyActive(tenantSlug, 'warehouse_keys', request.resource.data.get('keyHash', ''));
         allow update, delete: if false;
       }
 
@@ -178,8 +193,8 @@ service cloud.firestore {
 
       match /superadmin_proofs/{proofId} {
         allow read: if false;
-        allow create: if request.resource.data.keyHash is string
-          && isTenantRoleKeyActive(tenantSlug, 'superadmin_keys', request.resource.data.keyHash);
+        allow create: if request.resource.data.get('keyHash', '') is string
+          && isTenantRoleKeyActive(tenantSlug, 'superadmin_keys', request.resource.data.get('keyHash', ''));
         allow update, delete: if false;
       }
     }
@@ -270,30 +285,30 @@ service cloud.firestore {
     // E. LEGACY ROOT TRANSITIONAL FALLBACK (FOR OPEN TABS DURING CUTOVER)
     // =========================================================================
     function isLegacyAdminKeyActive(keyHash) {
-      let keyDoc = getAfter(/databases/$(database)/documents/admin_keys/$(keyHash));
-      return keyDoc != null && keyDoc.data.active == true;
+      let keyPath = /databases/$(database)/documents/admin_keys/$(keyHash);
+      return keyHash != '' && existsAfter(keyPath) && getAfter(keyPath).data.get('active', false) == true;
     }
     function isLegacyDriverKeyActive(keyHash) {
-      let keyDoc = getAfter(/databases/$(database)/documents/driver_keys/$(keyHash));
-      return keyDoc != null && keyDoc.data.active == true;
+      let keyPath = /databases/$(database)/documents/driver_keys/$(keyHash);
+      return keyHash != '' && existsAfter(keyPath) && getAfter(keyPath).data.get('active', false) == true;
     }
     function hasLegacyAdminProof() {
-      let proofId = request.resource.data.proofId;
+      let proofId = request.resource.data.get('proofId', '');
       return proofId is string && proofId.matches('^prf_.*')
-        && isLegacyAdminKeyActive(getAfter(/databases/$(database)/documents/admin_proofs/$(proofId)).data.keyHash);
+        && isLegacyAdminKeyActive(getAfter(/databases/$(database)/documents/admin_proofs/$(proofId)).data.get('keyHash', ''));
     }
     function hasLegacyDriverProof() {
-      let proofId = request.resource.data.proofId;
+      let proofId = request.resource.data.get('proofId', '');
       return proofId is string && proofId.matches('^dprf_.*')
-        && isLegacyDriverKeyActive(getAfter(/databases/$(database)/documents/driver_proofs/$(proofId)).data.keyHash);
+        && isLegacyDriverKeyActive(getAfter(/databases/$(database)/documents/driver_proofs/$(proofId)).data.get('keyHash', ''));
     }
 
     match /admin_keys/{keyHash} { allow get: if true; allow list, write: if false; }
     match /driver_keys/{keyHash} { allow get: if true; allow list, write: if false; }
     match /warehouse_keys/{keyHash} { allow get: if true; allow list, write: if false; }
     match /superadmin_keys/{keyHash} { allow get: if true; allow list, write: if false; }
-    match /admin_proofs/{proofId} { allow read: if false; allow create: if isLegacyAdminKeyActive(request.resource.data.keyHash); }
-    match /driver_proofs/{proofId} { allow read: if false; allow create: if isLegacyDriverKeyActive(request.resource.data.keyHash); }
+    match /admin_proofs/{proofId} { allow read: if false; allow create: if isLegacyAdminKeyActive(request.resource.data.get('keyHash', '')); }
+    match /driver_proofs/{proofId} { allow read: if false; allow create: if isLegacyDriverKeyActive(request.resource.data.get('keyHash', '')); }
     match /settings/{docId} { allow read: if true; allow write: if false; }
     match /driver_locations/{driverId} { allow read: if true; allow write: if hasLegacyDriverProof() || hasLegacyAdminProof(); }
     match /place_visits/{visitId} { allow read: if true; allow create, update: if hasLegacyDriverProof() || hasLegacyAdminProof(); }
