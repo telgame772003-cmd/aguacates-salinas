@@ -117,6 +117,83 @@ export async function computeOrderedRouteMetrics({ startCoord = null, stops = []
 }
 
 /**
+ * Ajusta una estela GPS cruda a las calles reales usando OSRM Map Matching (/match/v1/driving/),
+ * separando segmentos cuando hay saltos > 450 m y con fallback limpio a los puntos crudos.
+ */
+export async function matchGpsTrailWithOsrm(points = []) {
+  const valid = (points || []).filter(
+    (pt) => Number.isFinite(Number(pt?.lat)) && Number.isFinite(Number(pt?.lng))
+  );
+  if (valid.length < 2) {
+    return { segments: [], source: "none" };
+  }
+
+  // Separar en segmentos cuando haya huecos > 450m
+  const rawSegments = [];
+  let cur = [];
+  for (let i = 0; i < valid.length; i++) {
+    const pt = [Number(valid[i].lat), Number(valid[i].lng)];
+    if (cur.length > 0) {
+      const prev = cur[cur.length - 1];
+      const gap = haversineMeters(prev[0], prev[1], pt[0], pt[1]);
+      if (gap !== null && gap > 450) {
+        if (cur.length >= 2) rawSegments.push(cur);
+        cur = [];
+      }
+    }
+    // Evitar puntos casi duplicados (< 8m) para mejorar matching OSRM
+    if (cur.length === 0 || i === valid.length - 1) {
+      cur.push(pt);
+    } else {
+      const prev = cur[cur.length - 1];
+      const d = haversineMeters(prev[0], prev[1], pt[0], pt[1]);
+      if (d === null || d >= 8) cur.push(pt);
+    }
+  }
+  if (cur.length >= 2) rawSegments.push(cur);
+
+  if (rawSegments.length === 0) {
+    return { segments: [], source: "none" };
+  }
+
+  let anyOsrm = false;
+  const matchedSegments = [];
+  for (const seg of rawSegments) {
+    // Limitar a máximo 45 puntos por segmento para URL corta y respuesta rápida
+    let sampled = seg;
+    if (seg.length > 45) {
+      sampled = [];
+      const step = (seg.length - 1) / 44;
+      for (let k = 0; k < 44; k++) sampled.push(seg[Math.round(k * step)]);
+      sampled.push(seg[seg.length - 1]);
+    }
+    const coordStr = sampled.map(([lat, lng]) => `${lng.toFixed(5)},${lat.toFixed(5)}`).join(";");
+    const radiusStr = sampled.map(() => "35").join(";");
+    const data = await fetchOsrmJson(
+      `/match/v1/driving/${coordStr}?geometries=geojson&overview=full&tidy=true&radiuses=${radiusStr}`,
+      5500
+    );
+    const matchings = Array.isArray(data?.matchings) ? data.matchings : [];
+    const snapped = [];
+    for (const m of matchings) {
+      if (Array.isArray(m?.geometry?.coordinates)) {
+        for (const [lng, lat] of m.geometry.coordinates) {
+          snapped.push([lat, lng]);
+        }
+      }
+    }
+    if (snapped.length >= 2) {
+      anyOsrm = true;
+      matchedSegments.push(snapped);
+    } else {
+      matchedSegments.push(seg);
+    }
+  }
+
+  return { segments: matchedSegments, source: anyOsrm ? "osrm" : "raw" };
+}
+
+/**
  * Optimiza el orden de las paradas desde `startCoord` hasta `endCoord` (opcional regreso a Base)
  * usando OSRM Trip API con fallback automático a Vecino Más Cercano.
  */

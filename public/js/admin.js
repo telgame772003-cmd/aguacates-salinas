@@ -29,11 +29,12 @@ import {
 import {
   optimizeStopsWithOsrm,
   computeOrderedRouteMetrics,
+  matchGpsTrailWithOsrm,
   insertPendingStopSmart,
   attachTouchDragSort,
   formatRouteKm,
   formatRouteMin
-} from "./route-optimizer.js?v=nav3d_9";
+} from "./route-optimizer.js?v=nav3d_14";
 import { STAFF_MANUALS } from "./manuals-data.js";
 
 const SESSION_HASH_KEY = "salinas_admin_hash_v1";
@@ -92,6 +93,11 @@ let historicalVisits30d = [];
 let historical30dLoaded = false;
 let allPlaces = [];
 let routeDriverFilterVal = "todos";
+let allRoutesTodayUnsub = null;
+let allDriverRoutesTodayMap = new Map();
+let showAllDriverRoutes = false;
+const allDriverRouteGeomCache = new Map();
+const matchedTrailCache = new Map();
 let driverLocations = [];
 let leafletMap = null;
 let mapLayerGroup = null;
@@ -399,6 +405,8 @@ btnLogout.addEventListener("click", () => {
   if (routeWhUnsub) routeWhUnsub();
   if (routeSalesUnsub) routeSalesUnsub();
   if (routeVisitsUnsub) routeVisitsUnsub();
+  if (allRoutesTodayUnsub) allRoutesTodayUnsub();
+  allDriverRoutesTodayMap.clear();
   historicalSales30d = [];
   historicalVisits30d = [];
   historical30dLoaded = false;
@@ -492,6 +500,19 @@ function startRealtimeListeners() {
   if (ordersUnsub) ordersUnsub();
   if (gpsUnsub) gpsUnsub();
   if (placesUnsub) placesUnsub();
+  if (allRoutesTodayUnsub) allRoutesTodayUnsub();
+
+  const qAllRoutesToday = query(collection(db, "driver_routes"), where("date", "==", getLocalDateStr()));
+  allRoutesTodayUnsub = onSnapshot(qAllRoutesToday, (snap) => {
+    allDriverRoutesTodayMap.clear();
+    snap.docs.forEach((d) => {
+      const data = d.data();
+      if (data && Array.isArray(data.stops) && data.stops.length > 0) {
+        allDriverRoutesTodayMap.set(d.id, { id: d.id, ...data });
+      }
+    });
+    renderGpsMapAndChips();
+  });
 
   settingsUnsub = onSnapshot(doc(db, "settings", "store"), (snap) => {
     if (snap.exists()) {
@@ -1712,6 +1733,144 @@ function getDriverInitials(rawName) {
   return src[0].slice(0, 2).toUpperCase();
 }
 
+function drawStyledRoutePolyline(latLngs, { color = "#0284c7", kind = "planned" } = {}) {
+  if (!mapLayerGroup || !window.L || !Array.isArray(latLngs) || latLngs.length < 2) return;
+  if (kind === "actual") {
+    // Halo blanco + cinta sólida brillante encima (estilo navegación Google Maps)
+    window.L.polyline(latLngs, {
+      color: "#ffffff",
+      weight: 8.5,
+      opacity: 0.92,
+      lineCap: "round",
+      lineJoin: "round",
+      interactive: false
+    }).addTo(mapLayerGroup);
+    window.L.polyline(latLngs, {
+      color,
+      weight: 4.5,
+      opacity: 0.96,
+      lineCap: "round",
+      lineJoin: "round"
+    }).addTo(mapLayerGroup);
+    return;
+  }
+  // Ruta planeada (OSRM): contorno suave + línea punteada redondeada
+  window.L.polyline(latLngs, {
+    color: "#0f172a",
+    weight: 7.5,
+    opacity: 0.18,
+    lineCap: "round",
+    lineJoin: "round",
+    interactive: false
+  }).addTo(mapLayerGroup);
+  window.L.polyline(latLngs, {
+    color,
+    weight: 4,
+    opacity: 0.78,
+    dashArray: "7 7",
+    lineCap: "round",
+    lineJoin: "round"
+  }).addTo(mapLayerGroup);
+}
+
+function getTrailRawSegments(pts) {
+  const segs = [];
+  let cur = [];
+  for (let i = 0; i < pts.length; i++) {
+    const pt = pts[i];
+    if (cur.length > 0) {
+      const prev = cur[cur.length - 1];
+      const gapM = haversineMeters(prev[0], prev[1], pt.lat, pt.lng);
+      if (gapM !== null && gapM > 450) {
+        if (cur.length >= 2) segs.push(cur);
+        cur = [];
+      }
+    }
+    cur.push([pt.lat, pt.lng]);
+  }
+  if (cur.length >= 2) segs.push(cur);
+  return segs;
+}
+
+function getOrFetchMatchedTrailSegments(driverKey, pts) {
+  const last = pts[pts.length - 1];
+  const cacheKey = `${pts.length}:${last?.lat?.toFixed?.(5) || ""},${last?.lng?.toFixed?.(5) || ""}`;
+  const entry = matchedTrailCache.get(driverKey);
+  if (entry && entry.key === cacheKey && Array.isArray(entry.segments)) {
+    return entry.segments;
+  }
+  if (!entry || entry.pendingKey !== cacheKey) {
+    const prevSegments = entry?.segments || getTrailRawSegments(pts);
+    matchedTrailCache.set(driverKey, { key: entry?.key || "", pendingKey: cacheKey, segments: prevSegments });
+    matchGpsTrailWithOsrm(pts)
+      .then((res) => {
+        const cur = matchedTrailCache.get(driverKey);
+        if (cur && cur.pendingKey === cacheKey) {
+          matchedTrailCache.set(driverKey, {
+            key: cacheKey,
+            pendingKey: "",
+            segments: res.segments?.length ? res.segments : getTrailRawSegments(pts)
+          });
+          if (focusedTrailDriverId === driverKey || showAllDriverRoutes) {
+            renderGpsMapAndChips();
+          }
+        }
+      })
+      .catch(() => {});
+  }
+  return entry?.segments || getTrailRawSegments(pts);
+}
+
+function getOrFetchPlannedRouteLatLngs(routeDoc) {
+  const stops = Array.isArray(routeDoc?.stops) ? routeDoc.stops : [];
+  if (stops.length === 0) return [];
+  const cacheKey = `${routeDoc.updatedAtIso || ""}:${stops.map((s) => `${s.id}:${s.status}`).join("|")}`;
+  const entry = allDriverRouteGeomCache.get(routeDoc.id);
+  if (entry && entry.key === cacheKey && Array.isArray(entry.latLngs)) {
+    return entry.latLngs;
+  }
+  if (!entry || entry.pendingKey !== cacheKey) {
+    const fallbackPts = stops
+      .filter((s) => Number.isFinite(Number(s?.lat)) && Number.isFinite(Number(s?.lng)))
+      .map((s) => [Number(s.lat), Number(s.lng)]);
+    allDriverRouteGeomCache.set(routeDoc.id, {
+      key: entry?.key || "",
+      pendingKey: cacheKey,
+      latLngs: entry?.latLngs || fallbackPts
+    });
+    const base = routeDoc.baseLocation || getStoreBaseLocation();
+    const pendingStops = stops.filter((s) => s.status !== "done");
+    const targetStops = pendingStops.length > 0 ? pendingStops : stops;
+    const endCoord = routeDoc.includeReturnToBase !== false ? base : null;
+    computeOrderedRouteMetrics({ startCoord: base, stops: targetStops, endCoord })
+      .then((res) => {
+        const cur = allDriverRouteGeomCache.get(routeDoc.id);
+        if (cur && cur.pendingKey === cacheKey && Array.isArray(res.latLngs) && res.latLngs.length >= 2) {
+          allDriverRouteGeomCache.set(routeDoc.id, {
+            key: cacheKey,
+            pendingKey: "",
+            latLngs: res.latLngs
+          });
+          if (showAllDriverRoutes) {
+            renderGpsMapAndChips();
+          }
+        }
+      })
+      .catch(() => {});
+  }
+  return entry?.latLngs || [];
+}
+
+document.getElementById("btnToggleAllRoutes")?.addEventListener("click", () => {
+  showAllDriverRoutes = !showAllDriverRoutes;
+  const btn = document.getElementById("btnToggleAllRoutes");
+  if (btn) {
+    btn.classList.toggle("btn-primary", showAllDriverRoutes);
+    btn.classList.toggle("btn-outline", !showAllDriverRoutes);
+  }
+  renderGpsMapAndChips();
+});
+
 function renderGpsMapAndChips() {
   const chipsEl = document.getElementById("gpsDriverChips");
   const fsChipsEl = document.getElementById("fsDriverChips");
@@ -1965,6 +2124,29 @@ function renderGpsMapAndChips() {
 
   // 2. Driver Daily Trajectory Trails + Live Car Markers (only when GPS is active/online)
   const trailColors = ["#15803d", "#0284c7", "#7c3aed", "#b45309"];
+  const allRoutesCntEl = document.getElementById("allRoutesCnt");
+  if (allRoutesCntEl) allRoutesCntEl.textContent = String(allDriverRoutesTodayMap.size);
+
+  // Si el toggle "Ver todas las rutas" está activo, dibujar rutas planeadas OSRM de todos los choferes
+  if (showAllDriverRoutes && allDriverRoutesTodayMap.size > 0) {
+    const selectedRbSlug = rbDriverSlug(document.getElementById("rbDriverSelect")?.value || "");
+    let rIdx = 0;
+    for (const routeDoc of allDriverRoutesTodayMap.values()) {
+      const rSlug = String(routeDoc.driverSlug || rbDriverSlug(routeDoc.driverName || ""));
+      const locIdx = onlineLocs.findIndex(
+        (l) => l.id === rSlug || rbDriverSlug(l.driverName || "") === rSlug
+      );
+      const rColor = locIdx >= 0 ? trailColors[locIdx % trailColors.length] : trailColors[rIdx % trailColors.length];
+      rIdx++;
+      // Evitar duplicar si el constructor ya está dibujando exactamente la ruta de este chofer
+      if (rSlug && rSlug === selectedRbSlug && rbPreviewLatLngs.length >= 2) continue;
+      const plannedLatLngs = getOrFetchPlannedRouteLatLngs(routeDoc);
+      if (plannedLatLngs.length >= 2) {
+        drawStyledRoutePolyline(plannedLatLngs, { color: rColor, kind: "planned" });
+      }
+    }
+  }
+
   // Agrupar choferes cercanos para separarlos en círculo en píxeles de pantalla (sin traslape al hacer zoom out)
   const driverClusters = [];
   onlineLocs.forEach((loc) => {
@@ -1996,26 +2178,16 @@ function renderGpsMapAndChips() {
     const offset = driverPixelOffsets.get(loc.id) || { dx: 0, dy: 0 };
     const trailColor = trailColors[idx % trailColors.length];
 
-    // Mostrar recorrido sutil solo del chofer seleccionado, cortando huecos > 450m para evitar diagonales
-    if (focusedTrailDriverId === loc.id && loc.trailDate === todayStr && Array.isArray(loc.trail) && loc.trail.length >= 2) {
+    // Mostrar recorrido real highlighted (ajustado a calles con OSRM Map Matching) del chofer enfocado o de todos si toggle activo
+    if ((focusedTrailDriverId === loc.id || showAllDriverRoutes) && loc.trailDate === todayStr && Array.isArray(loc.trail) && loc.trail.length >= 2) {
       const pts = loc.trail.filter((pt) => typeof pt.lat === "number" && typeof pt.lng === "number");
-      let currentSeg = [];
-      for (let i = 0; i < pts.length; i++) {
-        const pt = pts[i];
-        if (currentSeg.length > 0) {
-          const prev = currentSeg[currentSeg.length - 1];
-          const gapM = haversineMeters(prev[0], prev[1], pt.lat, pt.lng);
-          if (gapM !== null && gapM > 450) {
-            if (currentSeg.length >= 2) {
-              window.L.polyline(currentSeg, { color: trailColor, weight: 3, opacity: 0.55 }).addTo(mapLayerGroup);
-            }
-            currentSeg = [];
+      if (pts.length >= 2) {
+        const segs = getOrFetchMatchedTrailSegments(loc.id, pts);
+        for (const seg of segs) {
+          if (seg.length >= 2) {
+            drawStyledRoutePolyline(seg, { color: trailColor, kind: "actual" });
           }
         }
-        currentSeg.push([pt.lat, pt.lng]);
-      }
-      if (currentSeg.length >= 2) {
-        window.L.polyline(currentSeg, { color: trailColor, weight: 3, opacity: 0.55 }).addTo(mapLayerGroup);
       }
     }
 
@@ -4647,12 +4819,7 @@ function renderRouteBuilderUI() {
 function renderRoutePreviewOnAdminMap() {
   if (!leafletMap || !mapLayerGroup || !window.L) return;
   if (rbPreviewLatLngs.length >= 2) {
-    window.L.polyline(rbPreviewLatLngs, {
-      color: "#0284c7",
-      weight: 4.5,
-      opacity: 0.85,
-      dashArray: "8 6"
-    }).addTo(mapLayerGroup);
+    drawStyledRoutePolyline(rbPreviewLatLngs, { color: "#0284c7", kind: "planned" });
   }
 
   rbStops.forEach((st, idx) => {
