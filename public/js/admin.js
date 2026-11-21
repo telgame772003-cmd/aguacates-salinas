@@ -48,7 +48,7 @@ import {
   attachTouchDragSort,
   formatRouteKm,
   formatRouteMin
-} from "./route-optimizer.js?v=rpd_1";
+} from "./route-optimizer.js?v=pz_30";
 import { STAFF_MANUALS } from "./manuals-data.js?v=pz_23";
 
 const SESSION_HASH_KEY = tenantScopedStorageKey("salinas_admin_hash_v1");
@@ -5633,7 +5633,37 @@ function renderRoutePreviewOnAdminMap(placeStatusById = null) {
       iconSize: [23, 23],
       iconAnchor: [11, 11]
     });
-    window.L.marker([st.lat, st.lng], { icon: numIcon, zIndexOffset: 900 }).addTo(mapLayerGroup);
+    const numMarker = window.L.marker([st.lat, st.lng], { icon: numIcon, zIndexOffset: 900 }).addTo(mapLayerGroup);
+    numMarker.on("click", () => {
+      const targetMarker =
+        (st.id && mapFocusMarkers.get(`place:${st.id}`)) ||
+        (st.id && mapFocusMarkers.get(`order:${st.id}`)) ||
+        null;
+      if (targetMarker && typeof targetMarker.openPopup === "function") {
+        targetMarker.openPopup();
+        return;
+      }
+      const stLabel = sold ? "🟢 Visitado (Compró)" : visitedNoSale ? "🔴 Visitado (Sin compra)" : "🟡 Pendiente de visitar";
+      const fallbackHtml = `
+        <div style="font-family:sans-serif;max-width:100%;">
+          <div style="font-size:0.7rem;font-weight:800;color:#475569;text-transform:uppercase;">Parada #${idx + 1} • ${stLabel}</div>
+          <strong style="font-size:0.92rem;color:#132615;display:block;margin-top:2px;">${escapeHtml(st.name || "Parada")}</strong>
+          ${st.address ? `<div style="font-size:0.75rem;color:#475569;margin-top:2px;">📍 ${escapeHtml(st.address)}</div>` : ""}
+          ${st.subtitle ? `<div style="font-size:0.74rem;color:#64748b;margin-top:2px;">${escapeHtml(st.subtitle)}</div>` : ""}
+          <div style="margin-top:6px;">
+            <a href="https://maps.google.com/?q=${st.lat},${st.lng}" target="_blank" rel="noopener" style="font-size:0.75rem;font-weight:800;color:#15803d;text-decoration:underline;">Abrir en Google Maps ↗</a>
+          </div>
+        </div>
+      `;
+      window.L.popup({
+        maxWidth: isTouchDeviceViewport() ? 245 : 290,
+        autoPanPaddingTopLeft: [14, 52],
+        autoPanPaddingBottomRight: [14, 18]
+      })
+        .setLatLng([st.lat, st.lng])
+        .setContent(fallbackHtml)
+        .openOn(leafletMap);
+    });
   });
 
   const base = getStoreBaseLocation();

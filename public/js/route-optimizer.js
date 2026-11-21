@@ -147,7 +147,7 @@ export async function matchGpsTrailWithOsrm(points = []) {
     } else {
       const prev = cur[cur.length - 1];
       const d = haversineMeters(prev[0], prev[1], pt[0], pt[1]);
-      if (d === null || d >= 8) cur.push(pt);
+      if (d === null || d >= 18) cur.push(pt);
     }
   }
   if (cur.length >= 2) rawSegments.push(cur);
@@ -168,9 +168,9 @@ export async function matchGpsTrailWithOsrm(points = []) {
       sampled.push(seg[seg.length - 1]);
     }
     const coordStr = sampled.map(([lat, lng]) => `${lng.toFixed(5)},${lat.toFixed(5)}`).join(";");
-    const radiusStr = sampled.map(() => "35").join(";");
+    const radiusStr = sampled.map(() => "75").join(";");
     const data = await fetchOsrmJson(
-      `/match/v1/driving/${coordStr}?geometries=geojson&overview=full&tidy=true&radiuses=${radiusStr}`,
+      `/match/v1/driving/${coordStr}?geometries=geojson&overview=full&radiuses=${radiusStr}`,
       5500
     );
     const matchings = Array.isArray(data?.matchings) ? data.matchings : [];
