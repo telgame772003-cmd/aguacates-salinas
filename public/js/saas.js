@@ -271,12 +271,15 @@ function syncWizardTemplateDefaults() {
 }
 ntIndustrySel.addEventListener("change", syncWizardTemplateDefaults);
 
-document.getElementById("btnOpenNewTenantModal").addEventListener("click", () => {
+function openNewTenantWizard() {
   document.getElementById("newTenantForm").reset();
   document.getElementById("ntWelcomeKitBox").style.display = "none";
   syncWizardTemplateDefaults();
   newTenantModal.classList.add("open");
-});
+}
+
+document.getElementById("btnOpenNewTenantModal")?.addEventListener("click", openNewTenantWizard);
+document.getElementById("btnOpenNewTenantHero")?.addEventListener("click", openNewTenantWizard);
 
 document.getElementById("btnCloseNewTenantModal").addEventListener("click", () => {
   newTenantModal.classList.remove("open");
