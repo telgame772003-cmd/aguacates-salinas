@@ -2487,7 +2487,44 @@ function renderGpsMapAndChips() {
 
   onlineLocs.forEach((loc, idx) => {
     boundsPoints.push([loc.lat, loc.lng]);
-    const offset = driverPixelOffsets.get(loc.id) || { dx: 0, dy: 0 };
+    let offset = driverPixelOffsets.get(loc.id) || { dx: 0, dy: 0 };
+    if (offset.dx === 0 && offset.dy === 0) {
+      const nearPlace = allPlaces.some(
+        (p) =>
+          typeof p.lat === "number" &&
+          typeof p.lng === "number" &&
+          Math.abs(p.lat - loc.lat) < 0.00045 &&
+          Math.abs(p.lng - loc.lng) < 0.00045
+      );
+      const nearRbStop = rbStops.some(
+        (s) =>
+          typeof s.lat === "number" &&
+          typeof s.lng === "number" &&
+          Math.abs(s.lat - loc.lat) < 0.00045 &&
+          Math.abs(s.lng - loc.lng) < 0.00045
+      );
+      let nearAnyRouteStop = nearRbStop;
+      if (!nearAnyRouteStop && allDriverRoutesTodayMap?.size) {
+        for (const rDoc of allDriverRoutesTodayMap.values()) {
+          if (
+            Array.isArray(rDoc?.stops) &&
+            rDoc.stops.some(
+              (s) =>
+                typeof s.lat === "number" &&
+                typeof s.lng === "number" &&
+                Math.abs(s.lat - loc.lat) < 0.00045 &&
+                Math.abs(s.lng - loc.lng) < 0.00045
+            )
+          ) {
+            nearAnyRouteStop = true;
+            break;
+          }
+        }
+      }
+      if (nearPlace || nearAnyRouteStop) {
+        offset = { dx: 18, dy: -16 };
+      }
+    }
     const trailColor = trailColors[idx % trailColors.length];
 
     // Mostrar recorrido real highlighted (ajustado a calles con OSRM Map Matching) del chofer enfocado o de todos si toggle activo
@@ -2508,7 +2545,7 @@ function renderGpsMapAndChips() {
     const boxesBadge = typeof loc.boxesInCar === "number" ? ` • ${loc.boxesInCar} cajas` : "";
     const carIcon = window.L.divIcon({
       className: "salinas-div-icon",
-      html: `<div class="pin-car-badge" style="border-color:${trailColor};" title="🚗 ${escapeHtml(fullDriverLabel)}${boxesBadge}">${escapeHtml(initials)}</div>`,
+      html: `<div class="pin-car-badge is-live-pulse" style="border-color:${trailColor};" title="🚗 ${escapeHtml(fullDriverLabel)}${boxesBadge}">${escapeHtml(initials)}</div>`,
       iconSize: [28, 28],
       iconAnchor: [14 - offset.dx, 14 - offset.dy],
       popupAnchor: [offset.dx, -14 + offset.dy]
@@ -2535,7 +2572,7 @@ function renderGpsMapAndChips() {
       </div>
     `;
 
-    const m = window.L.marker([loc.lat, loc.lng], { icon: carIcon, zIndexOffset: 600 })
+    const m = window.L.marker([loc.lat, loc.lng], { icon: carIcon, zIndexOffset: 1500 })
       .addTo(mapLayerGroup)
       .bindPopup(popupHtml, {
         autoPanPaddingTopLeft: [14, 52],
