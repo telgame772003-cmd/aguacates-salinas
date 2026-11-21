@@ -2122,6 +2122,9 @@ function getOrFetchPlannedRouteLatLngs(routeDoc) {
 
 document.getElementById("btnToggleAllRoutes")?.addEventListener("click", () => {
   showAllDriverRoutes = !showAllDriverRoutes;
+  if (!showAllDriverRoutes) {
+    focusedTrailDriverId = null;
+  }
   const btn = document.getElementById("btnToggleAllRoutes");
   if (btn) {
     btn.classList.toggle("btn-primary", showAllDriverRoutes);
@@ -2658,7 +2661,7 @@ function renderGpsMapAndChips() {
     mapFocusMarkers.set(`order:${ord.id}`, m);
   }
 
-  if (typeof renderRoutePreviewOnAdminMap === "function") {
+  if (showAllDriverRoutes && typeof renderRoutePreviewOnAdminMap === "function") {
     renderRoutePreviewOnAdminMap(placeStatusById);
   }
 
@@ -5976,6 +5979,14 @@ document.getElementById("rbBtnOptimize")?.addEventListener("click", async () => 
     rbTotalDistM = res.distanceMeters;
     rbTotalDurSec = res.durationSec;
     rbPreviewLatLngs = res.latLngs || [];
+    if (!showAllDriverRoutes) {
+      showAllDriverRoutes = true;
+      const allBtn = document.getElementById("btnToggleAllRoutes");
+      if (allBtn) {
+        allBtn.classList.add("btn-primary");
+        allBtn.classList.remove("btn-outline");
+      }
+    }
     renderRouteBuilderUI();
     showToast(`⚡ Mejor ruta lista (${formatRouteKm(rbTotalDistM)} • ${formatRouteMin(rbTotalDurSec)}).`);
   } finally {
