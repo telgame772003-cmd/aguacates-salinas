@@ -2304,6 +2304,8 @@ function renderGpsMapAndChips() {
   }
 
   // 1. Registered Places (Tiendas, Carnicerías, Restaurantes, Fruterías)
+  const placeStatusById = new Map(placeEvaluations.map((ev) => [ev.place.id, ev.status]));
+  const activeRbStopIds = new Set(rbStops.map((s) => s.id).filter(Boolean));
   for (const { place, status, stats30d } of placeEvaluations) {
     if (!placeMatchesMapFilter(place, status, stats30d)) continue;
     boundsPoints.push([place.lat, place.lng]);
@@ -2312,9 +2314,11 @@ function renderGpsMapAndChips() {
       status.state === "sold" ? "st-sold" : status.state === "visited" ? "st-visited" : "st-pending";
     const isGoldFrequent = stats30d.salesCount30d >= 3;
     const assignedDrivers = placeAssignedMap.get(place.id) || [];
-    const assignedTagHtml = assignedDrivers.length > 0
-      ? `<span class="pin-assigned-tag" style="background:${assignedDrivers[0].color};">${escapeHtml(assignedDrivers[0].initials)}</span>`
-      : "";
+    const hasNumberedStopOnPin = activeRbStopIds.has(place.id);
+    const assignedTagHtml =
+      assignedDrivers.length > 0 && !hasNumberedStopOnPin
+        ? `<span class="pin-assigned-tag" style="background:${assignedDrivers[0].color};">${escapeHtml(assignedDrivers[0].initials)}</span>`
+        : "";
     const assignedLineHtml = assignedDrivers.length > 0
       ? `<div style="margin-top:3px;color:#0369a1;font-weight:800;font-size:0.74rem;">🧭 En ruta hoy: ${escapeHtml(assignedDrivers.map((a) => a.driverName).join(", "))}</div>`
       : "";
@@ -2655,7 +2659,7 @@ function renderGpsMapAndChips() {
   }
 
   if (typeof renderRoutePreviewOnAdminMap === "function") {
-    renderRoutePreviewOnAdminMap();
+    renderRoutePreviewOnAdminMap(placeStatusById);
   }
 
   if (!hasCenteredMapOnce && boundsPoints.length > 0) {
@@ -5609,7 +5613,7 @@ function renderRouteBuilderUI() {
   renderGpsMapAndChips();
 }
 
-function renderRoutePreviewOnAdminMap() {
+function renderRoutePreviewOnAdminMap(placeStatusById = null) {
   if (!leafletMap || !mapLayerGroup || !window.L) return;
   if (rbPreviewLatLngs.length >= 2) {
     drawStyledRoutePolyline(rbPreviewLatLngs, { color: "#0284c7", kind: "planned" });
@@ -5617,11 +5621,16 @@ function renderRoutePreviewOnAdminMap() {
 
   rbStops.forEach((st, idx) => {
     if (!Number.isFinite(st.lat) || !Number.isFinite(st.lng)) return;
-    const isDone = st.status === "done";
+    const pSt = st.id ? placeStatusById?.get(st.id) : null;
+    const sold = pSt?.state === "sold";
+    const visitedNoSale = !sold && (pSt?.state === "visited" || st.status === "done");
+    const bgColor = sold ? "#16a34a" : visitedNoSale ? "#dc2626" : "#facc15";
+    const txtColor = sold || visitedNoSale ? "#ffffff" : "#422006";
+    const labelTxt = sold ? `✓` : `${idx + 1}`;
     const numIcon = window.L.divIcon({
       className: "salinas-div-icon",
-      html: `<div style="width:22px;height:22px;border-radius:50%;background:${isDone ? "#64748b" : "#0284c7"};color:#fff;border:2px solid #fff;font-size:11px;font-weight:900;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.45);">${idx + 1}</div>`,
-      iconSize: [22, 22],
+      html: `<div style="width:23px;height:23px;border-radius:50%;background:${bgColor};color:${txtColor};border:2px solid #ffffff;font-size:11px;font-weight:900;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.45);">${labelTxt}</div>`,
+      iconSize: [23, 23],
       iconAnchor: [11, 11]
     });
     window.L.marker([st.lat, st.lng], { icon: numIcon, zIndexOffset: 900 }).addTo(mapLayerGroup);
