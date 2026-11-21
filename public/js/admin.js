@@ -474,6 +474,8 @@ function enterDashboard() {
   if (btnTopManual) btnTopManual.style.display = "inline-flex";
   document.getElementById("whDatePicker").value = selectedWhDate;
   document.getElementById("routeDatePicker").value = selectedRouteDate;
+  const mapDatePickerEl = document.getElementById("mapDatePicker");
+  if (mapDatePickerEl) mapDatePickerEl.value = selectedRouteDate;
   renderAdminManualTab();
   startRealtimeListeners();
   subscribeWarehouseDay(selectedWhDate);
@@ -3077,9 +3079,22 @@ function subscribeRouteCorteDay(dateStr) {
   if (allRoutesTodayUnsub) allRoutesTodayUnsub();
 
   selectedRouteDate = dateStr;
+  const isTodaySelected = dateStr === getLocalDateStr();
+  const routeDatePickerEl = document.getElementById("routeDatePicker");
+  if (routeDatePickerEl && routeDatePickerEl.value !== dateStr) routeDatePickerEl.value = dateStr;
+  const mapDatePickerEl = document.getElementById("mapDatePicker");
+  if (mapDatePickerEl && mapDatePickerEl.value !== dateStr) mapDatePickerEl.value = dateStr;
   const btnRouteTodayEl = document.getElementById("btnRouteToday");
   if (btnRouteTodayEl) {
-    btnRouteTodayEl.style.display = dateStr === getLocalDateStr() ? "none" : "inline-flex";
+    btnRouteTodayEl.style.display = isTodaySelected ? "none" : "inline-flex";
+  }
+  const mapBannerEl = document.getElementById("mapHistoryBanner");
+  const mapBannerTextEl = document.getElementById("mapHistoryBannerText");
+  if (mapBannerEl) {
+    mapBannerEl.style.display = isTodaySelected ? "none" : "flex";
+  }
+  if (mapBannerTextEl && !isTodaySelected) {
+    mapBannerTextEl.textContent = `⚠️ Estás viendo el historial del ${dateStr} (GPS en vivo oculto).`;
   }
   allDriverRoutesTodayMap.clear();
   routeWhDoc = createEmptyWhDoc(dateStr);
@@ -3140,11 +3155,17 @@ document.getElementById("routeDatePicker").addEventListener("change", (e) => {
   if (e.target.value) subscribeRouteCorteDay(e.target.value);
 });
 
-document.getElementById("btnRouteToday").addEventListener("click", () => {
-  const today = getLocalDateStr();
-  document.getElementById("routeDatePicker").value = today;
-  subscribeRouteCorteDay(today);
+document.getElementById("mapDatePicker")?.addEventListener("change", (e) => {
+  if (e.target.value) subscribeRouteCorteDay(e.target.value);
 });
+
+function resetRouteDateToToday() {
+  const today = getLocalDateStr();
+  subscribeRouteCorteDay(today);
+}
+
+document.getElementById("btnRouteToday").addEventListener("click", resetRouteDateToToday);
+document.getElementById("btnMapBannerToday")?.addEventListener("click", resetRouteDateToToday);
 
 document.getElementById("routeDriverFilter").addEventListener("change", (e) => {
   routeDriverFilterVal = e.target.value;

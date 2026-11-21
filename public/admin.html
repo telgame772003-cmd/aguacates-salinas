@@ -327,12 +327,18 @@
             <span id="gpsOnlineBadge" class="ripeness-badge">0 carros en vivo</span>
           </div>
           <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;">
+            <input type="date" id="mapDatePicker" class="form-control" style="width:auto;padding:4px 8px;font-size:0.75rem;font-weight:700;" title="Cambiar fecha del mapa y cortes">
             <button type="button" id="btnFitAllMap" class="btn btn-outline btn-sm" style="padding:5px 9px;font-size:0.75rem;" title="Encuadrar los puntos visibles">🎯 Todo</button>
             <button type="button" id="btnToggleAllRoutes" class="btn btn-outline btn-sm" style="padding:5px 9px;font-size:0.75rem;" title="Mostrar u ocultar rutas planeadas vs. recorrido real de todos los choferes">🛣️ Rutas (<span id="allRoutesCnt">0</span>)</button>
             <button type="button" id="btnJumpToRouteBuilder" class="btn btn-outline btn-sm" style="padding:5px 9px;font-size:0.75rem;" title="Ir al Constructor de Rutas">🧭 Ruta</button>
             <button type="button" id="btnAdminOpenPlaceModal" class="btn btn-primary btn-sm" style="padding:5px 10px;font-size:0.75rem;">+ Punto</button>
             <button type="button" id="btnToggleMapFullscreen" class="btn btn-outline btn-sm" style="padding:5px 9px;font-size:0.75rem;">⛶ Completa</button>
           </div>
+        </div>
+
+        <div id="mapHistoryBanner" style="display:none;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;padding:8px 12px;border-radius:10px;background:#fef3c7;border:1.5px solid #f59e0b;color:#78350f;font-size:0.8rem;font-weight:700;">
+          <span id="mapHistoryBannerText">⚠️ Estás viendo el historial de otra fecha (GPS en vivo oculto).</span>
+          <button type="button" id="btnMapBannerToday" class="btn btn-sm" style="background:#b45309;color:#fff;border:none;padding:5px 10px;font-size:0.76rem;font-weight:800;border-radius:8px;cursor:pointer;">↩ Volver a hoy</button>
         </div>
 
         <div style="position:relative;margin-bottom:8px;">
@@ -1285,7 +1291,7 @@
   <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-  <script type="module" src="js/admin.js?v=pz_35"></script>
+  <script type="module" src="js/admin.js?v=pz_36"></script>
   <script type="module" src="js/prospects-zones.js?v=pz_31"></script>
 </body>
 </html>
