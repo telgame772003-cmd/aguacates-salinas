@@ -3169,4 +3169,18 @@ body.map-fullscreen-open {
   line-height: 26px;
   color: #475569;
   font-weight: 800;
+  top: 4px;
+  right: 4px;
+}
+
+@media (max-width: 640px) {
+  .leaflet-popup-content-wrapper {
+    max-width: calc(100vw - 64px) !important;
+  }
+  .leaflet-popup-content {
+    margin: 11px 28px 11px 11px !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
 }

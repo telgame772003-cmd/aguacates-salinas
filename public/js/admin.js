@@ -1478,6 +1478,9 @@ function ensureLeafletMap() {
 
   leafletMap.on("popupopen", () => {
     document.getElementById("adminLiveMap")?.classList.add("has-open-popup");
+    leafletMap.eachLayer((lyr) => {
+      if (typeof lyr.closeTooltip === "function") lyr.closeTooltip();
+    });
   });
   leafletMap.on("popupclose", () => {
     document.getElementById("adminLiveMap")?.classList.remove("has-open-popup");
@@ -2332,11 +2335,21 @@ function renderGpsMapAndChips() {
 
     const freqLine = `📊 30d: <strong>${stats30d.salesCount30d}</strong> compra(s) • <strong>${stats30d.boxes30d}</strong> cajas • <strong>${stats30d.totalTouches30d}</strong> visita(s)`;
 
-    const historyBoxHtml = historical30dLoaded
+    const showPrevSale = !(status.state === "sold" && stats30d.daysSinceLastSale === 0);
+    const showPrevVisit = !(
+      (status.state === "sold" || status.state === "visited") &&
+      stats30d.daysSinceLastVisit === 0
+    );
+
+    const historyRows = [
+      showPrevSale ? `<div>${lastSaleLine}</div>` : "",
+      showPrevVisit ? `<div>${lastVisitLine}</div>` : "",
+      `<div>${freqLine}</div>`
+    ].filter(Boolean).join("");
+
+    const historyBoxHtml = historical30dLoaded && historyRows
       ? `<div style="margin-top:6px;padding:5px 7px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:0.74rem;line-height:1.45;color:#334155;">
-          <div>${lastSaleLine}</div>
-          <div>${lastVisitLine}</div>
-          <div>${freqLine}</div>
+          ${historyRows}
         </div>`
       : "";
 
@@ -2372,49 +2385,53 @@ function renderGpsMapAndChips() {
     });
 
     const popupHtml = `
-      <div style="font-family:sans-serif;min-width:205px;">
-        <div style="font-size:0.72rem;font-weight:800;color:#475569;text-transform:uppercase;">${cat.emoji} ${escapeHtml(cat.label)}${isGoldFrequent ? ` • <span style="color:#d97706;">⭐ Frecuente</span>` : ""}</div>
-        <strong style="font-size:0.95rem;color:#132615;">${escapeHtml(place.name)}</strong>
-        ${place.address ? `<div style="font-size:0.78rem;color:#475569;margin-top:2px;">📍 ${escapeHtml(place.address)}</div>` : ""}
-        ${place.phone ? `<div style="font-size:0.78rem;color:#475569;margin-top:2px;">📞 ${escapeHtml(place.phone)}</div>` : ""}
+      <div style="font-family:sans-serif;max-width:100%;">
+        <div style="font-size:0.7rem;font-weight:800;color:#475569;text-transform:uppercase;padding-right:10px;">${cat.emoji} ${escapeHtml(cat.label)}${isGoldFrequent ? ` • <span style="color:#d97706;">⭐ Frecuente</span>` : ""}</div>
+        <strong style="font-size:0.93rem;color:#132615;display:block;line-height:1.25;">${escapeHtml(place.name)}</strong>
+        ${place.address ? `<div style="font-size:0.76rem;color:#475569;margin-top:2px;">📍 ${escapeHtml(place.address)}</div>` : ""}
+        ${place.phone ? `<div style="font-size:0.76rem;color:#475569;margin-top:2px;">📞 ${escapeHtml(place.phone)}</div>` : ""}
         ${assignedLineHtml}
         ${stBadge}
         ${historyBoxHtml}
         <div style="margin-top:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
-          <a href="https://maps.google.com/?q=${place.lat},${place.lng}" target="_blank" rel="noopener" style="font-size:0.76rem;font-weight:800;color:#15803d;text-decoration:underline;">Abrir en Google Maps ↗</a>
-          <button type="button" onclick="window.__salinasAddPlaceToRoute?.('${escapeHtml(place.id)}')" style="border:none;background:#065f46;color:#fff;padding:4px 9px;border-radius:8px;font-size:0.74rem;font-weight:800;cursor:pointer;">➕ Sumar a Ruta</button>
+          <a href="https://maps.google.com/?q=${place.lat},${place.lng}" target="_blank" rel="noopener" style="font-size:0.75rem;font-weight:800;color:#15803d;text-decoration:underline;">Abrir en Google Maps ↗</a>
+          <button type="button" onclick="window.__salinasAddPlaceToRoute?.('${escapeHtml(place.id)}')" style="border:none;background:#065f46;color:#fff;padding:5px 9px;border-radius:8px;font-size:0.74rem;font-weight:800;cursor:pointer;">➕ Sumar a Ruta</button>
         </div>
       </div>
     `;
 
     const zOff = status.state === "sold" ? 300 : status.state === "visited" ? 200 : isGoldFrequent ? 100 : 0;
+    const isTouchMap = isTouchDeviceViewport();
     const m = window.L.marker([place.lat, place.lng], { icon, zIndexOffset: zOff })
       .addTo(mapLayerGroup)
-      .bindTooltip(tooltipHtml, {
+      .bindPopup(popupHtml, {
+        maxWidth: isTouchMap ? 245 : 295,
+        autoPanPaddingTopLeft: [14, 52],
+        autoPanPaddingBottomRight: [14, 18]
+      });
+    if (!isTouchMap) {
+      m.bindTooltip(tooltipHtml, {
         direction: "auto",
         sticky: false,
         opacity: 0.98,
         className: "salinas-place-tooltip",
         offset: [0, -8]
-      })
-      .bindPopup(popupHtml, {
-        autoPanPaddingTopLeft: [14, 52],
-        autoPanPaddingBottomRight: [14, 18]
       });
-    m.on("tooltipopen", (ev) => {
-      try {
-        const pt = leafletMap.latLngToContainerPoint(m.getLatLng());
-        const mapH = leafletMap.getSize().y || 500;
-        const tt = ev.tooltip;
-        if (!tt || !tt.options) return;
-        const desiredDir = pt.y < Math.min(165, mapH * 0.36) ? "bottom" : "top";
-        if (tt.options.direction !== desiredDir) {
-          tt.options.direction = desiredDir;
-          tt.options.offset = desiredDir === "bottom" ? [0, 12] : [0, -8];
-          tt.update();
-        }
-      } catch (_) {}
-    });
+      m.on("tooltipopen", (ev) => {
+        try {
+          const pt = leafletMap.latLngToContainerPoint(m.getLatLng());
+          const mapH = leafletMap.getSize().y || 500;
+          const tt = ev.tooltip;
+          if (!tt || !tt.options) return;
+          const desiredDir = pt.y < Math.min(165, mapH * 0.36) ? "bottom" : "top";
+          if (tt.options.direction !== desiredDir) {
+            tt.options.direction = desiredDir;
+            tt.options.offset = desiredDir === "bottom" ? [0, 12] : [0, -8];
+            tt.update();
+          }
+        } catch (_) {}
+      });
+    }
     mapFocusMarkers.set(`place:${place.id}`, m);
   }
 
