@@ -6,8 +6,10 @@
   <title>Panel de Administración y Almacén | Comercializadora Salinas</title>
   <link rel="icon" type="image/png" href="assets/favicon.png">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
-  <link rel="stylesheet" href="css/styles.css?v=nav3d_13">
+  <link rel="stylesheet" href="css/styles.css?v=pz_17">
 </head>
 <body class="admin-body">
 
@@ -29,7 +31,7 @@
           💾 <span class="hide-mobile">Respaldar</span>
         </button>
         <a href="almacen.html" target="_blank" class="btn btn-outline btn-sm" title="Abrir App Móvil de Almacén QR">❄️ <span class="hide-mobile">App Almacén</span></a>
-        <a href="chofer.html" target="_blank" class="btn btn-outline btn-sm" title="Abrir App Móvil de Chofer">🚗 <span class="hide-mobile">App Chofer</span></a>
+        <a href="chofer.html" id="btnNavToDriverApp" target="_blank" class="btn btn-outline btn-sm" title="Abrir App Móvil de Chofer">🚗 <span class="hide-mobile">App Chofer</span></a>
         <a href="index.html" target="_blank" class="btn btn-outline btn-sm">Tienda ↗</a>
         <button type="button" id="btnLogout" class="btn btn-outline btn-sm" style="display:none;">Salir</button>
       </div>
@@ -141,10 +143,110 @@
       <!-- Live Warehouse Stock Cards -->
       <div id="whStockCards" class="wh-stock-grid"></div>
 
-      <!-- Opening Stock & Cold Room Pulls -->
-      <details id="whOpeningDetails" class="order-admin-card" open>
+      <!-- 1. Register New Car Trip (Salida) -->
+      <div class="order-admin-card" style="background:linear-gradient(180deg,#ffffff 0%,#f7fbf5 100%);border-color:var(--green-600);">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+          <h3 style="font-size:1.08rem;color:var(--green-950);margin:0;">1. Registrar Salida de Carro (Nueva Vuelta)</h3>
+          <button type="button" id="btnToggleRipenessMix" class="btn btn-outline btn-sm" style="font-size:0.77rem;font-weight:800;border-color:#15803d;color:#14532d;background:#ecfdf5;">
+            🎨 Detallar mezcla por tamaño
+          </button>
+        </div>
+        <form id="whNewTripForm">
+          <div class="wh-trip-top-row">
+            <div>
+              <label class="form-label" for="tripDriver">Chofer / Vendedor *</label>
+              <select id="tripDriver" class="form-control" required></select>
+            </div>
+            <div id="tripQuickRipenessWrap">
+              <label class="form-label" for="tripRipeness">Maduración que lleva *</label>
+              <select id="tripRipeness" class="form-control">
+                <option value="Surtido">Surtido (Varios)</option>
+                <option value="Maduro">Maduro</option>
+                <option value="Sazón">Sazón</option>
+                <option value="Quebrado">Quebrado</option>
+                <option value="Verde">Verde</option>
+                <option value="Maduro y Sazón">Maduro y Sazón</option>
+                <option value="Quebrado y Sazón">Quebrado y Sazón</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Modo Rápido: 4 cajas por calibre -->
+          <div id="whTripSimpleBoxes">
+            <div style="font-size:0.78rem;font-weight:800;color:var(--green-900);margin-bottom:6px;">CAJAS QUE SUBE AL CARRO</div>
+            <div class="caliber-4-inputs">
+              <div>
+                <label class="form-label" for="tripOutM">M · Media</label>
+                <input type="number" min="0" max="500" inputmode="numeric" id="tripOutM" class="form-control" value="0">
+              </div>
+              <div>
+                <label class="form-label" for="tripOutP">P · Primera</label>
+                <input type="number" min="0" max="500" inputmode="numeric" id="tripOutP" class="form-control" value="0">
+              </div>
+              <div>
+                <label class="form-label" for="tripOutE">E · Extra</label>
+                <input type="number" min="0" max="500" inputmode="numeric" id="tripOutE" class="form-control" value="0">
+              </div>
+              <div>
+                <label class="form-label" for="tripOutS">S · Super</label>
+                <input type="number" min="0" max="500" inputmode="numeric" id="tripOutS" class="form-control" value="0">
+              </div>
+            </div>
+          </div>
+
+          <!-- Modo Detallado: Mezcla por tamaño x maduración (opcional, colapsado por defecto) -->
+          <div id="whTripMixPanel" style="display:none;background:#f8fafc;border:1.5px solid #bbf7d0;border-radius:12px;padding:10px;margin-bottom:10px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+              <span style="font-size:0.78rem;font-weight:800;color:var(--green-900);">🎨 MEZCLA EXACTA POR TAMAÑO Y MADURACIÓN</span>
+              <button type="button" id="btnClearTripMix" class="btn btn-outline btn-sm" style="padding:3px 8px;font-size:0.72rem;">Limpiar ceros</button>
+            </div>
+            <div class="wh-mix-grid">
+              <div class="wh-mix-head">Tam.</div>
+              <div class="wh-mix-head">Verde</div>
+              <div class="wh-mix-head">Quebr.</div>
+              <div class="wh-mix-head">Sazón</div>
+              <div class="wh-mix-head">Maduro</div>
+
+              <div class="wh-mix-cal">M <span class="wh-mix-sub" id="mixTotalM">0</span></div>
+              <input type="number" min="0" max="500" inputmode="numeric" class="form-control trip-mix-input" data-cal="M" data-rip="Verde" value="0">
+              <input type="number" min="0" max="500" inputmode="numeric" class="form-control trip-mix-input" data-cal="M" data-rip="Quebrado" value="0">
+              <input type="number" min="0" max="500" inputmode="numeric" class="form-control trip-mix-input" data-cal="M" data-rip="Sazón" value="0">
+              <input type="number" min="0" max="500" inputmode="numeric" class="form-control trip-mix-input" data-cal="M" data-rip="Maduro" value="0">
+
+              <div class="wh-mix-cal">P <span class="wh-mix-sub" id="mixTotalP">0</span></div>
+              <input type="number" min="0" max="500" inputmode="numeric" class="form-control trip-mix-input" data-cal="P" data-rip="Verde" value="0">
+              <input type="number" min="0" max="500" inputmode="numeric" class="form-control trip-mix-input" data-cal="P" data-rip="Quebrado" value="0">
+              <input type="number" min="0" max="500" inputmode="numeric" class="form-control trip-mix-input" data-cal="P" data-rip="Sazón" value="0">
+              <input type="number" min="0" max="500" inputmode="numeric" class="form-control trip-mix-input" data-cal="P" data-rip="Maduro" value="0">
+
+              <div class="wh-mix-cal">E <span class="wh-mix-sub" id="mixTotalE">0</span></div>
+              <input type="number" min="0" max="500" inputmode="numeric" class="form-control trip-mix-input" data-cal="E" data-rip="Verde" value="0">
+              <input type="number" min="0" max="500" inputmode="numeric" class="form-control trip-mix-input" data-cal="E" data-rip="Quebrado" value="0">
+              <input type="number" min="0" max="500" inputmode="numeric" class="form-control trip-mix-input" data-cal="E" data-rip="Sazón" value="0">
+              <input type="number" min="0" max="500" inputmode="numeric" class="form-control trip-mix-input" data-cal="E" data-rip="Maduro" value="0">
+
+              <div class="wh-mix-cal">S <span class="wh-mix-sub" id="mixTotalS">0</span></div>
+              <input type="number" min="0" max="500" inputmode="numeric" class="form-control trip-mix-input" data-cal="S" data-rip="Verde" value="0">
+              <input type="number" min="0" max="500" inputmode="numeric" class="form-control trip-mix-input" data-cal="S" data-rip="Quebrado" value="0">
+              <input type="number" min="0" max="500" inputmode="numeric" class="form-control trip-mix-input" data-cal="S" data-rip="Sazón" value="0">
+              <input type="number" min="0" max="500" inputmode="numeric" class="form-control trip-mix-input" data-cal="S" data-rip="Maduro" value="0">
+            </div>
+            <div id="tripMixSummaryPreview" style="margin-top:8px;font-size:0.78rem;font-weight:700;color:#14532d;background:#dcfce7;padding:6px 10px;border-radius:8px;">
+              Total: 0 cajas • Captura solo las celdas que apliquen
+            </div>
+          </div>
+
+          <div class="wh-trip-bottom-row">
+            <input type="text" id="tripNote" class="form-control" placeholder="Detalle opcional (ej. pedido especial, ruta norte)...">
+            <button type="submit" class="btn btn-primary">+ Dar Salida de Carro</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- 2. Opening Stock & Cold Room Pulls -->
+      <details id="whOpeningDetails" class="order-admin-card">
         <summary class="wh-details-summary">
-          <span>1. Inventario Inicial y Cámara Fría (Cajas)</span>
+          <span>2. Inventario Inicial y Cámara Fría (Cajas)</span>
           <span class="wh-chevron-pill">Ver / Editar ▾</span>
         </summary>
         <form id="whOpeningForm" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--slate-200);">
@@ -176,56 +278,6 @@
           </div>
         </form>
       </details>
-
-      <!-- Register New Car Trip (Salida) -->
-      <div class="order-admin-card" style="background:linear-gradient(180deg,#ffffff 0%,#f7fbf5 100%);border-color:var(--green-600);">
-        <h3 style="font-size:1.08rem;color:var(--green-950);margin-bottom:12px;">2. Registrar Salida de Carro (Nueva Vuelta)</h3>
-        <form id="whNewTripForm">
-          <div class="wh-trip-top-row">
-            <div>
-              <label class="form-label" for="tripDriver">Chofer / Vendedor *</label>
-              <select id="tripDriver" class="form-control" required></select>
-            </div>
-            <div>
-              <label class="form-label" for="tripRipeness">Maduración que lleva *</label>
-              <select id="tripRipeness" class="form-control">
-                <option value="Maduro">Maduro</option>
-                <option value="Sazón">Sazón</option>
-                <option value="Quebrado">Quebrado</option>
-                <option value="Verde">Verde</option>
-                <option value="Maduro y Sazón">Maduro y Sazón</option>
-                <option value="Quebrado y Sazón">Quebrado y Sazón</option>
-                <option value="Surtido">Surtido (Varios)</option>
-              </select>
-            </div>
-          </div>
-
-          <div style="font-size:0.78rem;font-weight:800;color:var(--green-900);margin-bottom:6px;">CAJAS QUE SUBE AL CARRO</div>
-          <div class="caliber-4-inputs">
-            <div>
-              <label class="form-label" for="tripOutM">M · Media</label>
-              <input type="number" min="0" max="500" inputmode="numeric" id="tripOutM" class="form-control" value="0">
-            </div>
-            <div>
-              <label class="form-label" for="tripOutP">P · Primera</label>
-              <input type="number" min="0" max="500" inputmode="numeric" id="tripOutP" class="form-control" value="0">
-            </div>
-            <div>
-              <label class="form-label" for="tripOutE">E · Extra</label>
-              <input type="number" min="0" max="500" inputmode="numeric" id="tripOutE" class="form-control" value="0">
-            </div>
-            <div>
-              <label class="form-label" for="tripOutS">S · Super</label>
-              <input type="number" min="0" max="500" inputmode="numeric" id="tripOutS" class="form-control" value="0">
-            </div>
-          </div>
-
-          <div class="wh-trip-bottom-row">
-            <input type="text" id="tripNote" class="form-control" placeholder="Detalle opcional (ej. Super maduro, Primera quebrado)...">
-            <button type="submit" class="btn btn-primary">+ Dar Salida de Carro</button>
-          </div>
-        </form>
-      </div>
 
       <!-- Active Drivers Summary -->
       <div style="margin:18px 0 8px;">
@@ -310,6 +362,7 @@
 
           <div class="map-canvas-wrap">
             <div id="adminLiveMap" data-zoom-tier="far"></div>
+            <button type="button" id="btnMobileMapPanLock" class="map-mobile-lock-btn" title="Desbloquear o fijar mapa para evitar zoom al hacer scroll">🔒 Mapa fijo (toca para mover)</button>
             <button type="button" id="btnCornerMapFullscreen" class="map-corner-fs-btn" title="Abrir mapa en pantalla completa">⛶</button>
           </div>
         </div>
@@ -318,6 +371,178 @@
           <span>Cargando puntos de compra...</span>
         </div>
       </div>
+
+      <!-- Módulo de Prospección DENUE + Cuadrantes KML / Anillos Concéntricos -->
+      <details id="adminProspectsZonesDetails" class="order-admin-card" style="margin-bottom:18px;border:1.5px solid #86efac;background:linear-gradient(180deg,#ffffff 0%,#f7fdf9 100%);" open>
+        <summary class="wh-details-summary">
+          <span>🎯 Prospección Aguacatera (Saltillo / Ramos) y Cuadrantes KML</span>
+          <span id="pzSummaryBadge" class="wh-chevron-pill">1,105 prospectos ▾</span>
+        </summary>
+
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--slate-200);display:flex;flex-direction:column;gap:12px;">
+          <!-- Fila 1: Toggles Principales -->
+          <div class="pz-actions-bar">
+            <div class="pz-toggle-grid">
+              <button type="button" id="btnToggleProspectsLayer" class="btn btn-outline btn-sm" style="font-weight:800;border-color:#15803d;color:#14532d;">
+                ⚪ Mostrar Prospectos DENUE
+              </button>
+              <button type="button" id="btnToggleAutoPacksPanel" class="btn btn-primary btn-sm" style="font-weight:800;">
+                📦 Paquetes Auto (25–30)
+              </button>
+              <button type="button" id="btnToggleQuadrantsLayer" class="btn btn-outline btn-sm" style="font-weight:800;">
+                📐 Cuadrantes / KML
+              </button>
+              <button type="button" id="btnToggleConcentricLayer" class="btn btn-outline btn-sm" style="font-weight:800;">
+                ⭕ Anillos Concéntricos
+              </button>
+            </div>
+            <div class="pz-export-row">
+              <button type="button" id="btnExportProspectsCsv" class="btn btn-outline btn-sm" style="font-weight:700;" title="Descargar en Excel (.xlsx) los prospectos del filtro actual">
+                📊 Exportar Excel (.xlsx)
+              </button>
+              <div id="pzSalesCorrelationPill" class="pz-sales-pill">
+                💡 Potencial calibrado por giro y tamaño
+              </div>
+            </div>
+          </div>
+
+          <!-- Fila 2: Filtros de Prospectos -->
+          <div id="pzProspectFiltersWrap" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px;background:#fff;padding:10px;border-radius:10px;border:1px solid #e2e8f0;">
+            <div>
+              <label class="form-label" style="font-size:0.74rem;margin-bottom:3px;">Giro Aguacatero</label>
+              <select id="pzFilterCat" class="form-control" style="padding:6px 9px;font-size:0.82rem;font-weight:700;">
+                <option value="all">Todos los giros</option>
+                <option value="fruteria">🥑 Fruterías</option>
+                <option value="carniceria">🥩 Carnicerías</option>
+                <option value="restaurante">🍽️ Restaurantes</option>
+                <option value="tienda">🏪 Abarrotes / Minisúper (6+)</option>
+                <option value="comedor">🏢 Comedores Industriales</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label" style="font-size:0.74rem;margin-bottom:3px;">Municipio</label>
+              <select id="pzFilterMun" class="form-control" style="padding:6px 9px;font-size:0.82rem;font-weight:700;">
+                <option value="all">Saltillo + Ramos + Arteaga</option>
+                <option value="Saltillo">Saltillo</option>
+                <option value="Ramos Arizpe">Ramos Arizpe</option>
+                <option value="Arteaga">Arteaga</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label" style="font-size:0.74rem;margin-bottom:3px;">Tamaño / Filtro Especial</label>
+              <select id="pzFilterTier" class="form-control" style="padding:6px 9px;font-size:0.82rem;font-weight:700;">
+                <option value="all">Todos los prospectos</option>
+                <option value="alto">🔥 Potencial Alto</option>
+                <option value="11plus">🏢 Grandes: 11+ empleados (189)</option>
+                <option value="31plus">🏆 Cuentas Clave: 31+ empleados (38)</option>
+                <option value="with_tel">📞 Solo con teléfono (433)</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label" style="font-size:0.74rem;margin-bottom:3px;">Filtrar por Cuadrante / Anillo</label>
+              <select id="pzFilterZone" class="form-control" style="padding:6px 9px;font-size:0.82rem;font-weight:700;">
+                <option value="all">Toda la ciudad</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Panel Propuesta 2: Generador Automático de Paquetes de Ruta (25-30 paradas cercanas) -->
+          <div id="pzAutoPacksPanel" style="display:block;background:#fff;padding:12px;border-radius:10px;border:1.5px solid #99f6e4;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+              <div>
+                <strong style="font-size:0.94rem;color:#0f172a;">📦 Generador Automático de Paquetes de Ruta (25–30 paradas pegadas)</strong>
+                <div style="font-size:0.77rem;color:#475569;">Agrupa automáticamente los negocios por cercanía y perfil de fruta para que el chofer visite ~28 puntos sin cruzar toda la ciudad.</div>
+              </div>
+              <span id="apProgressPill" style="font-size:0.75rem;font-weight:800;color:#0f766e;background:#ccfbf1;padding:4px 10px;border-radius:999px;">0 paquetes listos</span>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;align-items:end;background:#f8fafc;padding:10px;border-radius:8px;border:1px solid #e2e8f0;margin-bottom:10px;">
+              <div>
+                <label class="form-label" style="font-size:0.73rem;margin-bottom:3px;">Perfil de Carga / Giro</label>
+                <select id="apProfileSelect" class="form-control" style="padding:6px 9px;font-size:0.81rem;font-weight:700;">
+                  <option value="anaquel">🥑🥩🏪 Anaquel: Fruterías + Carnicerías + Abarrotes 6+</option>
+                  <option value="cocina">🍽️ Cocina: Solo Restaurantes (9:30–13:00)</option>
+                  <option value="carniceria">🥩 Solo Carnicerías</option>
+                  <option value="fruteria">🥑 Solo Fruterías</option>
+                  <option value="tienda">🏪 Solo Abarrotes / Minisúper 6+</option>
+                  <option value="ejecutiva">🏢🏆 Ejecutiva: Comedores + Cuentas 31+ emp.</option>
+                  <option value="actual">🔍 Usar filtro seleccionado arriba</option>
+                </select>
+              </div>
+              <div>
+                <label class="form-label" style="font-size:0.73rem;margin-bottom:3px;">Municipio</label>
+                <select id="apMunSelect" class="form-control" style="padding:6px 9px;font-size:0.81rem;font-weight:700;">
+                  <option value="all">Saltillo + Ramos + Arteaga</option>
+                  <option value="Saltillo">Solo Saltillo</option>
+                  <option value="Ramos Arizpe">Solo Ramos Arizpe</option>
+                  <option value="Arteaga">Solo Arteaga</option>
+                </select>
+              </div>
+              <div>
+                <label class="form-label" style="font-size:0.73rem;margin-bottom:3px;">Chofer a asignar</label>
+                <select id="apDriverSelect" class="form-control" style="padding:6px 9px;font-size:0.81rem;font-weight:700;">
+                  <option value="">— Elegir chofer —</option>
+                </select>
+              </div>
+              <div>
+                <label class="form-label" style="font-size:0.73rem;margin-bottom:3px;">Paradas por paquete</label>
+                <input type="number" id="apTargetSize" class="form-control" value="28" min="10" max="40" style="padding:6px 9px;font-size:0.82rem;font-weight:800;">
+              </div>
+              <div style="display:flex;gap:6px;">
+                <button type="button" id="btnGenerateAutoPacks" class="btn btn-primary btn-sm" style="flex:1;height:35px;background:#0f766e;border-color:#0f766e;font-weight:800;">
+                  ⚡ Armar Paquetes
+                </button>
+                <button type="button" id="btnClearPackPreview" class="btn btn-outline btn-sm" style="display:none;height:35px;" title="Quitar vista previa de paquete del mapa">
+                  ✕ Mapa
+                </button>
+              </div>
+            </div>
+
+            <div id="pzAutoPacksList" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:8px;max-height:360px;overflow-y:auto;overflow-x:hidden;"></div>
+          </div>
+
+          <!-- Panel de Cuadrantes Manuales y KML -->
+          <div id="pzQuadrantsPanel" style="display:none;background:#fff;padding:12px;border-radius:10px;border:1px solid #cbd5e1;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+              <div>
+                <strong style="font-size:0.9rem;color:#0f172a;">📐 Gestor de Cuadrantes y Polígonos KML</strong>
+                <div style="font-size:0.76rem;color:#64748b;">Dibuja cuadrantes clic por clic en el mapa o importa un archivo <code>.kml</code> de Google My Maps.</div>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <button type="button" id="btnStartDrawQuad" class="btn btn-primary btn-sm">✏️ Dibujar Cuadrante</button>
+                <button type="button" id="btnFinishDrawQuad" class="btn btn-primary btn-sm" style="display:none;background:#0284c7;">✅ Cerrar Polígono</button>
+                <button type="button" id="btnCancelDrawQuad" class="btn btn-outline btn-sm" style="display:none;color:#dc2626;">✕ Cancelar</button>
+                <label class="btn btn-outline btn-sm" style="cursor:pointer;margin:0;">
+                  📂 Subir KML
+                  <input type="file" id="inpImportKml" accept=".kml,.xml" style="display:none;">
+                </label>
+                <button type="button" id="btnExportKml" class="btn btn-outline btn-sm">💾 Descargar KML</button>
+                <button type="button" id="btnLoadPresetQuads" class="btn btn-outline btn-sm" title="Cargar sectores base de Saltillo y Ramos Arizpe">⚡ Sectores Base</button>
+              </div>
+            </div>
+            <div id="pzDrawHint" style="display:none;background:#eff6ff;border:1px solid #93c5fd;color:#1e3a8a;padding:8px 10px;border-radius:8px;font-size:0.8rem;font-weight:700;margin-bottom:8px;">
+              👆 Haz clic en el mapa para marcar cada esquina del cuadrante (mínimo 3 puntos). Presiona <strong>✅ Cerrar Polígono</strong> cuando termines.
+            </div>
+            <div id="pzQuadrantsList" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(235px,1fr));gap:8px;"></div>
+          </div>
+
+          <!-- Panel de Anillos Concéntricos -->
+          <div id="pzConcentricPanel" style="display:none;background:#fff;padding:12px;border-radius:10px;border:1px solid #cbd5e1;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+              <div>
+                <strong style="font-size:0.9rem;color:#0f172a;">⭕ Anillos Concéntricos desde Bodega</strong>
+                <div style="font-size:0.76rem;color:#64748b;">Clasifica clientes y prospectos por distancia radial en km desde tu base.</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:0.78rem;">
+                <span>Radios (km):</span>
+                <input type="text" id="inpConcentricRadii" class="form-control" value="3, 7, 12, 20" style="width:120px;padding:4px 8px;font-weight:700;">
+                <button type="button" id="btnApplyConcentricRadii" class="btn btn-outline btn-sm">Aplicar</button>
+              </div>
+            </div>
+            <div id="pzConcentricList" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:8px;"></div>
+          </div>
+        </div>
+      </details>
 
       <!-- Constructor Inteligente de Rutas (Admin Tablet/PC -> Chofer) -->
       <details id="adminRouteBuilderDetails" class="order-admin-card route-builder-card" style="margin-bottom:18px;" open>
@@ -345,7 +570,7 @@
 
           <!-- Buscador para agregar pedidos o tiendas + nota de selección en mapa -->
           <div style="background:var(--slate-100);border-radius:12px;padding:10px;margin-bottom:12px;">
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">
+            <div class="rb-search-row">
               <input type="text" id="rbAddSearch" class="form-control" placeholder="🔍 Buscar pedido o tienda por nombre, giro o dirección (o toca pines en el mapa)..." style="flex:1;min-width:210px;padding:8px 11px;font-size:0.84rem;background:#fff;">
               <button type="button" id="btnRbAddNewPlace" class="btn btn-primary btn-sm" style="white-space:nowrap;" title="Registrar negocio nuevo y sumarlo directo a esta ruta">+ Nuevo</button>
               <button type="button" id="rbBtnLoadAssigned" class="btn btn-outline btn-sm" style="white-space:nowrap;">📦 Cargar Pedidos del Chofer</button>
@@ -356,7 +581,7 @@
           <!-- Lista reordenable Drag & Drop -->
           <div id="rbStopsList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;"></div>
 
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <div class="rb-actions-row">
             <button type="button" id="rbBtnOptimize" class="btn btn-nav-3d btn-sm" style="padding:10px 14px;font-size:0.84rem;">
               ⚡ Calcular Mejor Ruta (OSRM)
             </button>
@@ -615,7 +840,17 @@
                   <option value="21">09:00 PM</option>
                 </select>
               </div>
-              <button type="submit" class="btn btn-primary" style="height:42px;">Guardar Push</button>
+              <div>
+                <label class="form-label" for="gpsAutoOffHour">Apagar GPS auto</label>
+                <select id="gpsAutoOffHour" class="form-control">
+                  <option value="19">07:00 PM</option>
+                  <option value="20" selected>08:00 PM (Rec.)</option>
+                  <option value="21">09:00 PM</option>
+                  <option value="22">10:00 PM</option>
+                  <option value="0">Nunca (solo al cerrar sesión)</option>
+                </select>
+              </div>
+              <button type="submit" class="btn btn-primary" style="height:42px;">Guardar GPS</button>
             </form>
           </div>
         </div>
@@ -1042,9 +1277,12 @@
   <div id="toastBox" class="toast-box"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <script type="module" src="js/admin.js?v=rpd_2"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script type="module" src="js/admin.js?v=pz_17"></script>
+  <script type="module" src="js/prospects-zones.js?v=pz_17"></script>
 </body>
 </html>

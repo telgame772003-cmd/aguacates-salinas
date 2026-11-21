@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Modo Chofer en Ruta | Comercializadora Salinas</title>
   <link rel="icon" type="image/png" href="assets/favicon.png">
-  <link rel="stylesheet" href="css/styles.css?v=nav3d_12">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="css/styles.css?v=pz_15">
   <script src="js/salinas-debug-logger.js?v=nav3d_6"></script>
 </head>
 <body class="driver-app-body">
@@ -21,19 +22,25 @@
         </div>
       </div>
 
-      <div id="driverTopUtility" class="driver-topbar-actions" style="display:none;">
-        <button type="button" id="btnTopOpenNav3D" class="gps-toggle-btn driver-top-nav3d-btn" title="Abrir Cabina de Navegación 3D">
-          🧭 <span>3D</span>
+      <div id="driverTopUtility" class="driver-topbar-actions" style="display:none;position:relative;">
+        <button type="button" id="btnToggleGps" class="gps-toggle-btn driver-top-gps-btn" title="Estado de GPS en jornada">
+          <span id="gpsDot">🟢</span> <span id="gpsLabel">GPS</span>
         </button>
-        <button type="button" id="btnToggleGps" class="gps-toggle-btn driver-top-gps-btn" title="Activar o pausar GPS">
-          <span id="gpsDot">⚪</span> <span id="gpsLabel">GPS</span>
+        <button type="button" id="btnDriverTopMenu" class="btn btn-outline btn-sm driver-top-util-btn" aria-haspopup="true" aria-expanded="false" title="Opciones de cuenta y guía" style="padding:5px 10px;font-size:0.95rem;line-height:1;">
+          ⋮
         </button>
-        <button type="button" id="btnOpenDriverHelp" class="btn btn-outline btn-sm driver-top-util-btn" title="Ver Guía Rápida">
-          ❓ <span class="hide-xs-label">Guía</span>
-        </button>
-        <button type="button" id="btnDriverLogout" class="btn btn-outline btn-sm driver-top-util-btn">
-          Salir
-        </button>
+        <div id="driverTopMenuDropdown" style="display:none;position:absolute;top:calc(100% + 6px);right:0;min-width:186px;background:#ffffff;color:#0f172a;border:1px solid #cbd5e1;border-radius:12px;box-shadow:0 12px 28px rgba(15,23,42,0.22);padding:6px;z-index:120;">
+          <button type="button" id="btnOpenDriverHelp" class="btn btn-outline btn-sm" style="width:100%;justify-content:flex-start;border:none;color:#0f172a;background:transparent;padding:9px 10px;font-size:0.84rem;font-weight:700;">
+            📖 Guía Rápida
+          </button>
+          <button type="button" id="btnSwitchToAdmin" class="btn btn-outline btn-sm" style="display:none;width:100%;justify-content:flex-start;border:none;color:#1e3a8a;background:transparent;padding:9px 10px;font-size:0.84rem;font-weight:700;">
+            🛡️ Cambiar a Admin
+          </button>
+          <div style="height:1px;background:#e2e8f0;margin:4px 0;"></div>
+          <button type="button" id="btnDriverLogout" class="btn btn-outline btn-sm" style="width:100%;justify-content:flex-start;border:none;color:#dc2626;background:transparent;padding:9px 10px;font-size:0.84rem;font-weight:700;">
+            🚪 Cerrar sesión
+          </button>
+        </div>
       </div>
     </div>
   </header>
@@ -90,15 +97,20 @@
       </div>
 
       <!-- Tarjeta de Ruta Activa del Día (Armada por Admin o por el Chofer) -->
-      <div id="driverActiveRouteCard" class="corte-summary-box route-builder-card" style="margin-bottom:14px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
-          <div>
-            <h3 style="font-size:1.05rem;color:var(--green-950);margin:0;">🗺️ Mi Ruta del Día</h3>
-            <div id="drvRouteMetaText" style="font-size:0.76rem;color:var(--slate-500);margin-top:2px;">Sin ruta armada aún</div>
+      <div id="driverActiveRouteCard" class="corte-summary-box route-builder-card" style="margin-bottom:14px;padding:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px;">
+          <div style="min-width:0;flex:1;">
+            <h3 style="font-size:1.02rem;color:var(--green-950);margin:0;line-height:1.2;">🗺️ Mi Ruta del Día</h3>
+            <div id="drvRouteMetaText" style="font-size:0.75rem;color:var(--slate-500);margin-top:2px;">Sin ruta armada aún</div>
           </div>
-          <button type="button" id="btnOpenDriverRouteBuilder" class="btn btn-outline btn-sm" style="padding:7px 11px;font-size:0.78rem;">
-            🗺️ Armar / Editar
-          </button>
+          <div style="display:flex;gap:5px;flex-shrink:0;">
+            <button type="button" id="btnToggleDrvPreviewMap" class="btn btn-outline btn-sm" style="display:none;padding:6px 9px;font-size:0.74rem;border-color:#0284c7;color:#0369a1;background:#f0f9ff;white-space:nowrap;">
+              🗺️ Mapa
+            </button>
+            <button type="button" id="btnOpenDriverRouteBuilder" class="btn btn-outline btn-sm" style="padding:6px 9px;font-size:0.74rem;white-space:nowrap;">
+              🗺️ Armar Ruta
+            </button>
+          </div>
         </div>
 
         <div id="driverLastMinuteBanner" style="display:none;background:#fef3c7;border:1.5px solid #f59e0b;border-radius:12px;padding:10px;margin-bottom:10px;">
@@ -108,19 +120,29 @@
           </div>
         </div>
 
-        <div id="driverActiveRouteList" style="display:flex;flex-direction:column;gap:7px;margin-bottom:10px;"></div>
-
-        <div id="driverActiveRouteFooter" style="display:none;gap:8px;flex-wrap:wrap;">
-          <button type="button" id="btnStartActiveRoute3D" class="btn btn-nav-3d btn-sm" style="flex:1;padding:11px 14px;font-size:0.86rem;">
+        <!-- Botonera principal arriba para iniciar ruta sin tener que bajar 28 tarjetas -->
+        <div id="driverActiveRouteFooter" style="display:none;gap:6px;margin-bottom:10px;">
+          <button type="button" id="btnStartActiveRoute3D" class="btn btn-nav-3d btn-sm" style="flex:1;padding:11px 12px;font-size:0.85rem;font-weight:800;">
             🧭 Iniciar Ruta 3D
           </button>
-          <button type="button" id="btnReoptimizeActiveRoute" class="btn btn-outline btn-sm" style="padding:11px 12px;font-size:0.8rem;">
-            ⚡ Reordenar
+          <button type="button" id="btnReoptimizeActiveRoute" class="btn btn-outline btn-sm" style="padding:10px 10px;font-size:0.78rem;white-space:nowrap;" title="Ordenar mejor recorrido">
+            ⚡ Ordenar
           </button>
-          <button type="button" id="btnClearActiveRoute" class="btn btn-outline btn-sm" style="padding:11px 10px;font-size:0.8rem;color:#dc2626;border-color:#fecaca;" title="Limpiar toda la lista de ruta">
-            🗑️ Limpiar
+          <button type="button" id="btnClearActiveRoute" class="btn btn-outline btn-sm" style="padding:10px 9px;font-size:0.78rem;color:#dc2626;border-color:#fecaca;" title="Limpiar toda la lista de ruta">
+            🗑️
           </button>
         </div>
+
+        <!-- Editor / Vista Previa de Ruta en Mapa 2D (antes de iniciar 3D) -->
+        <div id="drvPreRouteMapWrap" style="display:none;margin-bottom:10px;border:1.5px solid #cbd5e1;border-radius:12px;overflow:hidden;background:#f8fafc;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;padding:6px 10px;background:#f1f5f9;border-bottom:1px solid #cbd5e1;font-size:0.73rem;color:#334155;font-weight:700;">
+            <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">👆 Toca un pin para ponerlo #1 o quitarlo</span>
+            <button type="button" id="btnFitDrvPreMap" class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:0.7rem;background:#fff;flex-shrink:0;">🎯 Centrar</button>
+          </div>
+          <div id="drvPreRouteMap" style="width:100%;height:250px;"></div>
+        </div>
+
+        <div id="driverActiveRouteList" class="drv-stops-scroll"></div>
       </div>
 
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
@@ -173,6 +195,21 @@
             <input type="text" id="saleClientName" list="recentClientsDatalist" class="form-control" placeholder="Ej. Abarrotes Rodríguez" required maxlength="100">
             <datalist id="recentClientsDatalist"></datalist>
             <div id="saleLinkedPlaceBadge" style="display:none;margin-top:5px;font-size:0.76rem;color:var(--green-800);font-weight:700;"></div>
+            <div id="newSalePlaceCaptureBox" style="display:none;margin-top:8px;padding:9px 10px;border-radius:10px;background:#f0fdf4;border:1px solid #86efac;">
+              <label style="display:flex;align-items:center;gap:7px;font-size:0.78rem;font-weight:800;color:#14532d;cursor:pointer;margin-bottom:6px;">
+                <input type="checkbox" id="chkSaveNewSalePlace" checked style="width:16px;height:16px;accent-color:#15803d;">
+                <span>📍 Guardar este negocio nuevo en el mapa (GPS)</span>
+              </label>
+              <select id="saleNewPlaceCategory" class="form-control" style="padding:6px 9px;font-size:0.8rem;font-weight:700;background:#fff;">
+                <option value="tienda">🏪 Tienda / Abarrotes</option>
+                <option value="fruteria">🥑 Frutería</option>
+                <option value="carniceria">🥩 Carnicería</option>
+                <option value="restaurante">🍽️ Restaurante / Taquería</option>
+              </select>
+            </div>
+            <button type="button" id="btnQuickNoSaleFromSell" class="btn btn-outline btn-sm" style="display:none;margin-top:8px;width:100%;padding:9px 12px;font-size:0.8rem;font-weight:800;line-height:1.25;white-space:normal;text-align:center;justify-content:center;border-color:#d97706;color:#92400e;background:#fef3c7;">
+              📍 No compró hoy (Registrar motivo / nota)
+            </button>
           </div>
 
           <div class="form-group">
@@ -383,10 +420,18 @@
           <label class="form-label" for="visitReasonSelect">Motivo por el que hoy no compró</label>
           <select id="visitReasonSelect" class="form-control">
             <option value="Aún tiene aguacate">🥑 Aún tiene aguacate</option>
-            <option value="Local cerrado en este momento">🔒 Local cerrado en este momento</option>
-            <option value="Pidió pasar más tarde / mañana">🕒 Pidió pasar más tarde / mañana</option>
+            <option value="Precio / tiene otro proveedor">💰 Precio / ya tiene otro proveedor</option>
+            <option value="Pidió pasar más tarde / otro día">🕒 Pidió pasar más tarde / otro día</option>
             <option value="No estaba el encargado">👤 No estaba el encargado</option>
+            <option value="Local cerrado en este momento">🔒 Local cerrado en este momento</option>
+            <option value="No maneja aguacate">🚫 No maneja aguacate</option>
+            <option value="Otro motivo">📌 Otro motivo</option>
           </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="visitExtraNoteInput">Nota o detalle adicional (opcional)</label>
+          <textarea id="visitExtraNoteInput" class="form-control" rows="2" maxlength="220" placeholder="Ej. Compra los jueves, preguntar por Don José, dejó tel..."></textarea>
         </div>
 
         <button type="submit" id="btnSubmitVisit" class="btn btn-primary" style="width:100%;padding:12px;">
@@ -455,7 +500,7 @@
       class="rp-nav-embed-frame"
       src="about:blank"
       title="Ruta Pro Navegación 3D"
-      allow="geolocation; wake-lock; autoplay"
+      allow="geolocation; wake-lock; autoplay; fullscreen"
     ></iframe>
   </div>
 
@@ -477,6 +522,7 @@
 
   <div id="toastBox" class="toast-box"></div>
 
-  <script type="module" src="js/driver.js?v=rpd_2"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script type="module" src="js/driver.js?v=pz_20"></script>
 </body>
 </html>

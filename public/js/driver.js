@@ -253,7 +253,10 @@ function subscribeDriverSettings(sourceDoc = "public_storefront") {
       populateLoginDrivers();
       syncDefaultSalePrices();
       renderStreetSaleCalibers();
-      if (currentDriverName) refreshAllViews();
+      if (currentDriverName) {
+        syncSwitchToAdminMenuOption();
+        refreshAllViews();
+      }
     },
     (err) => {
       console.warn("Aviso cargando configuración:", err);
@@ -368,7 +371,79 @@ document.getElementById("driverLoginForm").addEventListener("submit", async (e) 
   }
 });
 
+function getGpsAutoOffHour() {
+  const h = Number(storeSettings?.gpsAutoOffHour);
+  if (Number.isFinite(h)) return h;
+  return 20; // 8:00 PM por defecto
+}
+
+function isWithinDriverWorkHours() {
+  const offHour = getGpsAutoOffHour();
+  if (offHour <= 0) return true; // 0 = sin apagado automático
+  const nowH = new Date().getHours();
+  return nowH >= 5 && nowH < offHour;
+}
+
+const driverTopMenuDropdown = document.getElementById("driverTopMenuDropdown");
+const btnSwitchToAdmin = document.getElementById("btnSwitchToAdmin");
+
+function normalizePersonName(name) {
+  return String(name || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function canCurrentDriverSwitchToAdmin() {
+  const norm = normalizePersonName(currentDriverName);
+  if (!norm) return false;
+  const drv = (storeSettings.drivers || []).find((d) => normalizePersonName(d?.name) === norm);
+  if (drv && typeof drv.canAccessAdmin === "boolean") {
+    return drv.canAccessAdmin;
+  }
+  return norm === "tello garcia" || norm === "alejandro salinas";
+}
+
+function syncSwitchToAdminMenuOption() {
+  if (!btnSwitchToAdmin) return;
+  btnSwitchToAdmin.style.display = canCurrentDriverSwitchToAdmin() ? "flex" : "none";
+}
+
+btnSwitchToAdmin?.addEventListener("click", () => {
+  if (driverTopMenuDropdown) driverTopMenuDropdown.style.display = "none";
+  if (!canCurrentDriverSwitchToAdmin()) return;
+  try {
+    sessionStorage.setItem("salinas_from_driver_app", "1");
+  } catch {
+    // ignorar si sessionStorage no está disponible
+  }
+  window.location.href = "admin.html";
+});
+
+document.getElementById("btnDriverTopMenu")?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (!driverTopMenuDropdown) return;
+  const open = driverTopMenuDropdown.style.display === "block";
+  driverTopMenuDropdown.style.display = open ? "none" : "block";
+});
+
+document.addEventListener("click", (e) => {
+  if (!driverTopMenuDropdown || driverTopMenuDropdown.style.display !== "block") return;
+  if (!e.target.closest("#driverTopUtility")) {
+    driverTopMenuDropdown.style.display = "none";
+  }
+});
+
 document.getElementById("btnDriverLogout").addEventListener("click", async () => {
+  if (driverTopMenuDropdown) driverTopMenuDropdown.style.display = "none";
+  const ok = await openDriverConfirmModal({
+    title: "¿Cerrar sesión?",
+    message: "Al cerrar sesión se finalizará tu turno de hoy y se apagará el GPS de tu ruta.",
+    confirmLabel: "Sí, cerrar sesión"
+  });
+  if (!ok) return;
   closeNav3DModal();
   await stopGpsSharing(true);
   if (whUnsub) whUnsub();
@@ -402,6 +477,7 @@ async function enterDriverApp() {
   const utilEl = document.getElementById("driverTopUtility");
   if (utilEl) utilEl.style.display = "flex";
   topDriverName.textContent = `🚗 ${currentDriverName}`;
+  syncSwitchToAdminMenuOption();
   subscribeDriverSettings("store");
 
   loadRecentClientsDatalist();
@@ -428,8 +504,12 @@ async function enterDriverApp() {
     }
   } catch (_) {}
 
-  if (!gpsActive && localStorage.getItem("salinas_gps_manual_pause") !== "1") {
+  if (!gpsActive && isWithinDriverWorkHours()) {
+    localStorage.removeItem("salinas_gps_manual_pause");
     startGpsSharing();
+  } else if (!isWithinDriverWorkHours()) {
+    gpsDot.textContent = "🌙";
+    gpsLabel.textContent = "Fin turno";
   }
   if (new URLSearchParams(window.location.search).get("ping") === "gps") {
     sendImmediateGpsPing("push");
@@ -517,15 +597,26 @@ document.addEventListener("visibilitychange", () => {
 
 btnToggleGps.addEventListener("click", () => {
   if (gpsActive) {
-    window.salinasLog?.("GPS-MANUAL-PAUSE", "El chofer tocó el botón superior para PAUSAR GPS");
-    localStorage.setItem("salinas_gps_manual_pause", "1");
-    stopGpsSharing(true);
-  } else {
-    window.salinasLog?.("GPS-MANUAL-RESUME", "El chofer tocó el botón superior para ACTIVAR GPS");
+    const offH = getGpsAutoOffHour();
+    const offMsg = offH > 0 ? ` (se apaga automático a las ${offH}:00 hrs o al cerrar sesión)` : "";
+    showToast(`🟢 GPS activo automáticamente en tu jornada${offMsg}.`);
+  } else if (isWithinDriverWorkHours()) {
     localStorage.removeItem("salinas_gps_manual_pause");
     startGpsSharing();
+  } else {
+    const offH = getGpsAutoOffHour();
+    showToast(`🌙 Fuera de horario laboral (después de las ${offH}:00 hrs).`);
   }
 });
+
+setInterval(() => {
+  if (currentDriverName && gpsActive && !isWithinDriverWorkHours()) {
+    window.salinasLog?.("GPS-SCHEDULE-OFF", "Apagado automático por horario límite");
+    stopGpsSharing(true);
+    gpsDot.textContent = "🌙";
+    gpsLabel.textContent = "Fin turno";
+  }
+}, 60 * 1000);
 
 function postGpsToNav3DEmbed({ lat, lng, speedKmh, accuracy, heading }) {
   if (!isNav3DOpen) return;
@@ -1200,16 +1291,99 @@ function renderPlacesList() {
     .join("");
 }
 
+let pendingProspectStop = null;
+
+function stripStopEmojiPrefix(rawName) {
+  return String(rawName || "")
+    .replace(/^(🥑|🥩|🍽️|🏪|🏢|📍)\s*/u, "")
+    .trim();
+}
+
+function inferCategoryFromStop(stop) {
+  if (stop?.category && PLACE_CATEGORIES[stop.category]) return stop.category;
+  const s = `${stop?.name || ""} ${stop?.subtitle || ""}`.toLowerCase();
+  if (s.includes("fruter") || s.includes("🥑")) return "fruteria";
+  if (s.includes("carnic") || s.includes("carne") || s.includes("🥩")) return "carniceria";
+  if (s.includes("restaur") || s.includes("comedor") || s.includes("🍽️") || s.includes("🏢")) return "restaurante";
+  return "tienda";
+}
+
 function openSellPaneForPlace(place) {
   if (!place) return;
+  pendingProspectStop = null;
   document.getElementById("saleSelectedPlaceId").value = place.id;
   document.getElementById("saleClientName").value = place.name || "";
   document.getElementById("saleClientPhone").value = place.phone || "";
   const badge = document.getElementById("saleLinkedPlaceBadge");
   badge.style.display = "block";
   badge.textContent = `✓ Vinculado en el mapa: ${place.name}`;
+  const noSaleBtn = document.getElementById("btnQuickNoSaleFromSell");
+  if (noSaleBtn) noSaleBtn.style.display = "flex";
+  const newBox = document.getElementById("newSalePlaceCaptureBox");
+  if (newBox) newBox.style.display = "none";
   switchToDriverPane("drvPaneSell");
 }
+
+function openSellPaneForRouteStop(stopObj) {
+  if (!stopObj) return;
+  const altId = String(stopObj.id || "").replace(/^denue_/, "plc_denue_");
+  const existing = allPlaces.find((p) => p.id === stopObj.id || p.id === altId);
+  if (existing) {
+    openSellPaneForPlace(existing);
+    return;
+  }
+  const cleanName = stripStopEmojiPrefix(stopObj.name);
+  pendingProspectStop = {
+    stopId: stopObj.id,
+    finalPlaceId: altId || `plc_${Date.now()}`,
+    name: cleanName || "Nuevo Cliente",
+    phone: stopObj.phone || "",
+    address: stopObj.address || "",
+    category: inferCategoryFromStop(stopObj),
+    lat: Number(stopObj.lat),
+    lng: Number(stopObj.lng)
+  };
+  document.getElementById("saleSelectedPlaceId").value = "";
+  document.getElementById("saleClientName").value = pendingProspectStop.name;
+  document.getElementById("saleClientPhone").value = pendingProspectStop.phone;
+  const badge = document.getElementById("saleLinkedPlaceBadge");
+  badge.style.display = "block";
+  badge.textContent = `🎯 Prospecto nuevo: ${pendingProspectStop.name} (se dará de alta automático en el mapa)`;
+  const noSaleBtn = document.getElementById("btnQuickNoSaleFromSell");
+  if (noSaleBtn) noSaleBtn.style.display = "flex";
+  const newBox = document.getElementById("newSalePlaceCaptureBox");
+  if (newBox) newBox.style.display = "none";
+  switchToDriverPane("drvPaneSell");
+}
+
+function syncNewSalePlaceCaptureBox() {
+  const box = document.getElementById("newSalePlaceCaptureBox");
+  if (!box) return;
+  const name = (document.getElementById("saleClientName")?.value || "").trim();
+  const explicitId = document.getElementById("saleSelectedPlaceId")?.value || "";
+  if (!name || explicitId || pendingProspectStop) {
+    box.style.display = "none";
+    return;
+  }
+  const phone = (document.getElementById("saleClientPhone")?.value || "").trim();
+  const matched = findMatchingPlace(name, phone);
+  box.style.display = matched ? "none" : "block";
+}
+
+document.getElementById("saleClientName")?.addEventListener("input", () => {
+  const explicit = document.getElementById("saleSelectedPlaceId");
+  if (explicit && explicit.value) {
+    const matched = allPlaces.find((p) => p.id === explicit.value);
+    const typed = (document.getElementById("saleClientName")?.value || "").trim();
+    if (!matched || matched.name !== typed) {
+      explicit.value = "";
+      document.getElementById("saleLinkedPlaceBadge").style.display = "none";
+      const noSaleBtn = document.getElementById("btnQuickNoSaleFromSell");
+      if (noSaleBtn) noSaleBtn.style.display = "none";
+    }
+  }
+  syncNewSalePlaceCaptureBox();
+});
 
 // Place card actions (Navegar 3D / Venderle / Registrar Visita)
 const visitNoSaleModal = document.getElementById("visitNoSaleModal");
@@ -1253,8 +1427,31 @@ document.getElementById("driverPlacesList").addEventListener("click", (e) => {
     const place = allPlaces.find((p) => p.id === visitBtn.dataset.visitPlace);
     if (!place) return;
     document.getElementById("visitPlaceId").value = place.id;
+    const noteEl = document.getElementById("visitExtraNoteInput");
+    if (noteEl) noteEl.value = "";
     document.getElementById("visitModalSubtitle").textContent =
       `Confirmar visita presencial a ${place.name}. Se validará tu distancia GPS.`;
+    visitNoSaleModal.classList.add("open");
+  }
+});
+
+document.getElementById("btnQuickNoSaleFromSell")?.addEventListener("click", () => {
+  const explicitPlaceId = document.getElementById("saleSelectedPlaceId").value;
+  const noteEl = document.getElementById("visitExtraNoteInput");
+  if (noteEl) noteEl.value = "";
+  if (explicitPlaceId) {
+    const place = allPlaces.find((p) => p.id === explicitPlaceId);
+    if (!place) return;
+    document.getElementById("visitPlaceId").value = place.id;
+    document.getElementById("visitModalSubtitle").textContent =
+      `Registrar visita sin venta a ${place.name}.`;
+    visitNoSaleModal.classList.add("open");
+    return;
+  }
+  if (pendingProspectStop) {
+    document.getElementById("visitPlaceId").value = `__prospect__:${pendingProspectStop.stopId}`;
+    document.getElementById("visitModalSubtitle").textContent =
+      `Registrar visita sin venta a ${pendingProspectStop.name} (quedará marcado en el mapa).`;
     visitNoSaleModal.classList.add("open");
   }
 });
@@ -1265,12 +1462,21 @@ document.getElementById("btnCloseVisitModal").addEventListener("click", () => {
 
 document.getElementById("visitNoSaleForm").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const placeId = document.getElementById("visitPlaceId").value;
-  const place = allPlaces.find((p) => p.id === placeId);
-  if (!place) {
+  const rawVisitId = document.getElementById("visitPlaceId").value;
+  const isProspect = rawVisitId.startsWith("__prospect__:");
+  const place = isProspect ? null : allPlaces.find((p) => p.id === rawVisitId);
+  const prospect = isProspect ? pendingProspectStop : null;
+
+  if (!place && !prospect) {
     visitNoSaleModal.classList.remove("open");
     return;
   }
+
+  const targetLat = place ? place.lat : prospect.lat;
+  const targetLng = place ? place.lng : prospect.lng;
+  const targetName = place ? place.name : (document.getElementById("saleClientName")?.value.trim() || prospect.name);
+  const targetPhone = place ? (place.phone || "") : (document.getElementById("saleClientPhone")?.value.trim() || prospect.phone);
+  const finalPlaceId = place ? place.id : prospect.finalPlaceId;
 
   const btn = document.getElementById("btnSubmitVisit");
   btn.disabled = true;
@@ -1278,17 +1484,43 @@ document.getElementById("visitNoSaleForm").addEventListener("submit", async (e) 
 
   try {
     const coords = await getOneShotGpsPosition();
-    const dist = coords ? haversineMeters(coords.lat, coords.lng, place.lat, place.lng) : null;
-    const reason = document.getElementById("visitReasonSelect").value;
-    const visitDocId = `${getLocalDateStr()}_${place.id}_${driverSlug(currentDriverName)}`;
+    const dist =
+      coords && Number.isFinite(targetLat) && Number.isFinite(targetLng)
+        ? haversineMeters(coords.lat, coords.lng, targetLat, targetLng)
+        : null;
+    const baseReason = document.getElementById("visitReasonSelect").value;
+    const extraNote = (document.getElementById("visitExtraNoteInput")?.value || "").trim();
+    const reason = extraNote ? `${baseReason} — ${extraNote}` : baseReason;
+    const visitDocId = `${getLocalDateStr()}_${finalPlaceId}_${driverSlug(currentDriverName)}`;
 
     await executeDriverBatch(currentDriverKeyHash, (batch, proofId) => {
+      if (prospect) {
+        batch.set(
+          doc(db, "places", finalPlaceId),
+          {
+            name: targetName,
+            category: prospect.category || "tienda",
+            address: prospect.address || "",
+            phone: targetPhone,
+            lat: targetLat,
+            lng: targetLng,
+            source: "denue_visita",
+            active: true,
+            createdBy: currentDriverName,
+            createdAtIso: new Date().toISOString(),
+            updatedAt: serverTimestamp(),
+            proofId
+          },
+          { merge: true }
+        );
+      }
       batch.set(doc(db, "place_visits", visitDocId), {
         date: getLocalDateStr(),
-        placeId: place.id,
-        placeName: place.name,
+        placeId: finalPlaceId,
+        placeName: targetName,
         driver: currentDriverName,
         reason,
+        notes: extraNote,
         driverLat: coords ? coords.lat : null,
         driverLng: coords ? coords.lng : null,
         distanceMeters: dist,
@@ -1298,11 +1530,26 @@ document.getElementById("visitNoSaleForm").addEventListener("submit", async (e) 
       });
     });
 
+    if (prospect) {
+      await markStopDoneInActiveRoute(prospect.stopId);
+      pendingProspectStop = null;
+    } else if (place) {
+      await markStopDoneInActiveRoute(place.id);
+    }
+
+    const noteEl = document.getElementById("visitExtraNoteInput");
+    if (noteEl) noteEl.value = "";
+    const noSaleBtn = document.getElementById("btnQuickNoSaleFromSell");
+    if (noSaleBtn) noSaleBtn.style.display = "none";
+    document.getElementById("saleLinkedPlaceBadge").style.display = "none";
+    document.getElementById("saleSelectedPlaceId").value = "";
+
     visitNoSaleModal.classList.remove("open");
+    switchToDriverPane("drvPaneRoute");
     showToast(
       dist !== null
-        ? `Visita registrada en ${place.name} (GPS a ${dist} m).`
-        : `Visita registrada en ${place.name}.`
+        ? `🟡 Visita registrada en ${targetName} (GPS a ${dist} m).`
+        : `🟡 Visita registrada en ${targetName}.`
     );
   } catch (err) {
     console.error(err);
@@ -1636,6 +1883,16 @@ function openNav3DModal(stops, activeStopIndex = 0) {
   document.body.style.overflow = "hidden";
   overlay.classList.add("open");
 
+  // Ocultar botones inferiores nativos de Android (APK inmersivo + PWA fullscreen)
+  try {
+    window.SalinasNative?.setImmersive?.(true);
+  } catch (_) {}
+  try {
+    if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+      document.documentElement.requestFullscreen({ navigationUI: "hide" }).catch(() => {});
+    }
+  } catch (_) {}
+
   if (!frame.src || frame.src === "about:blank" || !frame.src.startsWith(RP_NAV_EMBED_ORIGIN)) {
     frame.src = RP_NAV_EMBED_URL;
   } else {
@@ -1647,6 +1904,15 @@ function closeNav3DModal() {
   isNav3DOpen = false;
   pendingNav3DPayload = null;
   document.body.style.overflow = "";
+
+  try {
+    window.SalinasNative?.setImmersive?.(false);
+  } catch (_) {}
+  try {
+    if (document.fullscreenElement && document.exitFullscreen) {
+      document.exitFullscreen().catch(() => {});
+    }
+  } catch (_) {}
 
   const overlay = document.getElementById("rpNavEmbedOverlay");
   const frame = document.getElementById("rpNavEmbedFrame");
@@ -1716,10 +1982,8 @@ window.addEventListener("message", async (event) => {
           openDeliverOrderModalForOrder(ord);
         }
       } else if (targetStop.kind === "place") {
-        const place = allPlaces.find((p) => p.id === targetStop.id);
-        if (place) {
-          openSellPaneForPlace(place);
-        }
+        const fullStop = activeRouteStops.find((s) => s.id === targetStop.id) || targetStop;
+        openSellPaneForRouteStop(fullStop);
       }
     }
   }
@@ -2086,34 +2350,44 @@ function renderStreetSaleCalibers() {
       const kgPrice = saleKgPrices[code] || Number(cal.pricePerKg) || Math.round((unitPrice / uCfg.subUnitsPerUnit) * 100) / 100;
 
       return `
-        <div class="driver-sale-cal-row ${isActiveRow ? "active-row" : ""}" data-cal-row="${code}">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
-            <div>
-              <strong style="font-size:0.98rem;color:var(--green-950);">${escapeHtml(code)} · ${escapeHtml(cal.name)}</strong>
-              <span style="display:block;font-size:0.73rem;color:var(--slate-500);">
-                Lista: ${formatCurrency(cal.price)}/${escapeHtml(uCfg.unitSingular)}${allowFrac ? ` (${formatCurrency(Number(cal.pricePerKg) || cal.price / uCfg.subUnitsPerUnit)}/${escapeHtml(uCfg.subUnit)})` : ""} • Mín: ${formatCurrency(minPrice)}
+        <div class="driver-sale-cal-row ${isActiveRow ? "active-row" : ""}" data-cal-row="${code}" style="padding:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px;">
+            <div style="min-width:0;flex:1;">
+              <strong style="font-size:1rem;color:var(--green-950);display:block;line-height:1.2;">${escapeHtml(code)} · ${escapeHtml(cal.name)}</strong>
+              <span style="display:block;font-size:0.73rem;color:var(--slate-500);margin-top:2px;">
+                Lista: <strong>${formatCurrency(cal.price)}</strong>/${escapeHtml(uCfg.unitSingular)} • Mín: <strong>${formatCurrency(minPrice)}</strong>
               </span>
             </div>
-            <span class="ripeness-badge" data-avail-badge="${code}">En carro: ${formatBoxesKg(stats.avail[code] ?? 0)}</span>
+            <span class="ripeness-badge" data-avail-badge="${code}" style="white-space:nowrap;flex-shrink:0;font-size:0.72rem;padding:4px 9px;">En carro: ${formatBoxesKg(stats.avail[code] ?? 0)}</span>
           </div>
 
-          <div class="driver-cal-controls" style="flex-wrap:wrap;gap:8px;">
-            <div class="stepper">
-              <button type="button" data-step-code="${code}" data-delta="-1">−</button>
-              <input type="number" min="0" max="500" inputmode="numeric" data-qty-code="${code}" value="${qty}" title="${escapeHtml(uCfg.unitPlural)}">
-              <button type="button" data-step-code="${code}" data-delta="1">+</button>
+          <div style="display:grid;grid-template-columns:${allowFrac ? "1fr 1fr" : "1fr"};gap:8px;margin-bottom:8px;">
+            <div style="display:flex;flex-direction:column;gap:3px;">
+              <span style="font-size:0.68rem;font-weight:800;color:var(--slate-600);text-transform:uppercase;letter-spacing:0.3px;">📦 ${escapeHtml(uCfg.unitPlural)}</span>
+              <div class="stepper" style="width:100%;justify-content:space-between;">
+                <button type="button" data-step-code="${code}" data-delta="-1" style="flex:0 0 36px;">−</button>
+                <input type="number" min="0" max="500" inputmode="numeric" data-qty-code="${code}" value="${qty}" title="${escapeHtml(uCfg.unitPlural)}" style="flex:1;min-width:34px;text-align:center;">
+                <button type="button" data-step-code="${code}" data-delta="1" style="flex:0 0 36px;">+</button>
+              </div>
             </div>
 
-            ${allowFrac ? `<div class="stepper" style="border-color:#cbd5e1;" title="Unidades sueltas (${escapeHtml(uCfg.subUnit)})">
-              <button type="button" data-kg-step-code="${code}" data-delta="-1">−</button>
-              <input type="number" min="0" max="99" inputmode="numeric" data-kg-code="${code}" value="${kg}" style="width:36px;">
-              <button type="button" data-kg-step-code="${code}" data-delta="1">+</button>
-              <span style="font-size:0.72rem;font-weight:800;color:var(--slate-500);padding:0 6px 0 2px;">${escapeHtml(uCfg.subUnit)}</span>
+            ${allowFrac ? `<div style="display:flex;flex-direction:column;gap:3px;">
+              <span style="font-size:0.68rem;font-weight:800;color:var(--slate-600);text-transform:uppercase;letter-spacing:0.3px;">⚖️ Sueltos (${escapeHtml(uCfg.subUnit)})</span>
+              <div class="stepper" style="width:100%;justify-content:space-between;border-color:#cbd5e1;" title="Unidades sueltas (${escapeHtml(uCfg.subUnit)})">
+                <button type="button" data-kg-step-code="${code}" data-delta="-1" style="flex:0 0 36px;">−</button>
+                <input type="number" min="0" max="99" inputmode="numeric" data-kg-code="${code}" value="${kg}" style="flex:1;min-width:34px;text-align:center;">
+                <button type="button" data-kg-step-code="${code}" data-delta="1" style="flex:0 0 36px;">+</button>
+              </div>
             </div>` : ""}
+          </div>
 
-            <div class="driver-price-box">
-              <span class="lbl">$/${escapeHtml(uCfg.unitSingular)} ${allowFrac ? `<small style="color:var(--slate-500);font-weight:600;" data-kg-price-lbl="${code}">(${formatCurrency(kgPrice)}/${escapeHtml(uCfg.subUnit)})</small>` : ""}</span>
-              <input type="number" min="${minPrice}" max="99999" inputmode="numeric" class="form-control" data-price-code="${code}" value="${unitPrice}">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding-top:8px;border-top:1px dashed #e2e8f0;">
+            <div style="font-size:0.78rem;font-weight:700;color:var(--slate-700);">
+              Precio/${escapeHtml(uCfg.unitSingular)} ${allowFrac ? `<small style="color:var(--slate-500);font-weight:600;" data-kg-price-lbl="${code}">(${formatCurrency(kgPrice)}/${escapeHtml(uCfg.subUnit)})</small>` : ""}
+            </div>
+            <div style="display:flex;align-items:center;gap:4px;">
+              <span style="font-size:0.85rem;font-weight:800;color:var(--slate-500);">$</span>
+              <input type="number" min="${minPrice}" max="99999" inputmode="numeric" class="form-control" data-price-code="${code}" value="${unitPrice}" style="width:86px;padding:6px 8px;text-align:center;font-weight:800;font-size:0.95rem;">
             </div>
           </div>
         </div>
@@ -2383,6 +2657,32 @@ document.getElementById("streetSaleForm").addEventListener("submit", async (e) =
   const matchedPlace = explicitPlaceId
     ? allPlaces.find((p) => p.id === explicitPlaceId)
     : findMatchingPlace(customerName, phone);
+  const promotingProspect = !matchedPlace && pendingProspectStop ? pendingProspectStop : null;
+  const wantSaveNewPlace =
+    !matchedPlace &&
+    !promotingProspect &&
+    Boolean(document.getElementById("chkSaveNewSalePlace")?.checked);
+
+  let saleCoords = lastGpsCoords;
+  if (wantSaveNewPlace && !saleCoords) {
+    saleCoords = await getOneShotGpsPosition();
+  }
+  const newDirectPlace =
+    wantSaveNewPlace && saleCoords && Number.isFinite(saleCoords.lat) && Number.isFinite(saleCoords.lng)
+      ? {
+          id: `plc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          category: document.getElementById("saleNewPlaceCategory")?.value || "tienda",
+          lat: saleCoords.lat,
+          lng: saleCoords.lng
+        }
+      : null;
+  const resolvedPlaceId = matchedPlace
+    ? matchedPlace.id
+    : promotingProspect
+      ? promotingProspect.finalPlaceId
+      : newDirectPlace
+        ? newDirectPlace.id
+        : null;
 
   const folio = generateRouteFolio();
   const saleRecord = {
@@ -2392,8 +2692,8 @@ document.getElementById("streetSaleForm").addEventListener("submit", async (e) =
     driver: currentDriverName,
     customerName,
     phone,
-    ...(matchedPlace ? { placeId: matchedPlace.id } : {}),
-    ...(lastGpsCoords ? { saleLat: lastGpsCoords.lat, saleLng: lastGpsCoords.lng } : {}),
+    ...(resolvedPlaceId ? { placeId: resolvedPlaceId } : {}),
+    ...(saleCoords ? { saleLat: saleCoords.lat, saleLng: saleCoords.lng } : {}),
     items,
     boxesByCaliber,
     totalBoxes,
@@ -2414,6 +2714,45 @@ document.getElementById("streetSaleForm").addEventListener("submit", async (e) =
   try {
     const newSaleRef = doc(collection(db, "route_sales"));
     await executeDriverBatch(currentDriverKeyHash, (batch, proofId) => {
+      if (promotingProspect) {
+        batch.set(
+          doc(db, "places", promotingProspect.finalPlaceId),
+          {
+            name: customerName,
+            category: promotingProspect.category || "tienda",
+            address: promotingProspect.address || "",
+            phone: phone || promotingProspect.phone || "",
+            lat: promotingProspect.lat,
+            lng: promotingProspect.lng,
+            source: "denue_venta",
+            active: true,
+            createdBy: currentDriverName,
+            createdAtIso: new Date().toISOString(),
+            updatedAt: serverTimestamp(),
+            proofId
+          },
+          { merge: true }
+        );
+      } else if (newDirectPlace) {
+        batch.set(
+          doc(db, "places", newDirectPlace.id),
+          {
+            name: customerName,
+            category: newDirectPlace.category,
+            address: "",
+            phone: phone || "",
+            lat: newDirectPlace.lat,
+            lng: newDirectPlace.lng,
+            source: "venta_calle",
+            active: true,
+            createdBy: currentDriverName,
+            createdAtIso: new Date().toISOString(),
+            updatedAt: serverTimestamp(),
+            proofId
+          },
+          { merge: true }
+        );
+      }
       batch.set(newSaleRef, { ...saleRecord, proofId });
     });
 
@@ -2424,12 +2763,21 @@ document.getElementById("streetSaleForm").addEventListener("submit", async (e) =
     syncDefaultSalePrices();
     document.getElementById("saleSelectedPlaceId").value = "";
     document.getElementById("saleLinkedPlaceBadge").style.display = "none";
+    const newBox = document.getElementById("newSalePlaceCaptureBox");
+    if (newBox) newBox.style.display = "none";
+    const noSaleBtn = document.getElementById("btnQuickNoSaleFromSell");
+    if (noSaleBtn) noSaleBtn.style.display = "none";
     document.getElementById("saleClientName").value = "";
     document.getElementById("saleClientPhone").value = "";
     document.getElementById("saleNotes").value = "";
     document.getElementById("saleAdvanceInput").value = "0";
     renderStreetSaleCalibers();
-    if (matchedPlace?.id) markStopDoneInActiveRoute(matchedPlace.id);
+    if (promotingProspect) {
+      await markStopDoneInActiveRoute(promotingProspect.stopId);
+      pendingProspectStop = null;
+    } else if (matchedPlace?.id) {
+      await markStopDoneInActiveRoute(matchedPlace.id);
+    }
     openSaleSuccessModal(saleRecord, "¡Venta Registrada!");
   } catch (err) {
     console.error("Error guardando venta en ruta:", err);
@@ -2709,14 +3057,29 @@ function renderDriverActiveRouteCard() {
   const footerEl = document.getElementById("driverActiveRouteFooter");
   if (!metaEl || !listEl || !footerEl) return;
 
+  const btnBuilder = document.getElementById("btnOpenDriverRouteBuilder");
   if (activeRouteStops.length === 0) {
-    metaEl.textContent = "Sin ruta armada aún • Toca 'Armar / Editar' o pide a Admin";
+    metaEl.textContent = "Sin ruta armada aún • Toca 'Armar Ruta' o pide a Admin";
     listEl.innerHTML = "";
     footerEl.style.display = "none";
+    const btnMap = document.getElementById("btnToggleDrvPreviewMap");
+    const mapWrap = document.getElementById("drvPreRouteMapWrap");
+    if (btnMap) btnMap.style.display = "none";
+    if (mapWrap) mapWrap.style.display = "none";
+    if (btnBuilder) btnBuilder.style.display = "inline-flex";
     return;
   }
 
+  if (btnBuilder) btnBuilder.style.display = "none";
+
+  const btnMap = document.getElementById("btnToggleDrvPreviewMap");
+  if (btnMap) {
+    btnMap.style.display = "inline-flex";
+    btnMap.textContent = drvPreMapVisible ? "▲ Cerrar Mapa" : "🗺️ Ver Mapa";
+  }
+
   const pending = activeRouteStops.filter((s) => s.status !== "done");
+  const firstPendingIdx = activeRouteStops.findIndex((s) => s.status !== "done");
   const distStr = activeRouteDoc?.totalDistanceMeters ? ` • ${formatRouteKm(activeRouteDoc.totalDistanceMeters)}` : "";
   const durStr = activeRouteDoc?.totalDurationSec ? ` • ~${formatRouteMin(activeRouteDoc.totalDurationSec)}` : "";
   const baseStr = activeRouteDoc?.includeReturnToBase !== false ? " • 🏠 +Base" : "";
@@ -2725,23 +3088,28 @@ function renderDriverActiveRouteCard() {
   listEl.innerHTML = activeRouteStops
     .map((st, idx) => {
       const isDone = st.status === "done";
+      const isNext = idx === firstPendingIdx;
+      const cleanSub = String(st.address || st.subtitle || "")
+        .replace(/^Parada #\d+\s*\([^)]*\)\s*•\s*/i, "")
+        .trim();
       return `
-        <div class="route-stop-row ${isDone ? "is-done" : ""}" data-stop-idx="${idx}">
-          <span class="route-drag-handle" title="Arrastrar">⋮⋮</span>
-          <span class="route-stop-num">${isDone ? "✓" : idx + 1}</span>
-          <div style="flex:1;min-width:0;">
-            <div style="font-size:0.85rem;font-weight:800;color:var(--green-950);line-height:1.25;word-break:break-word;">
+        <div class="route-stop-row drv-stop-card ${isDone ? "is-done" : ""} ${isNext ? "is-next" : ""}" data-stop-idx="${idx}">
+          <div class="drv-stop-top">
+            <span class="route-drag-handle" style="padding:3px 4px;font-size:0.9rem;" title="Arrastrar">⋮⋮</span>
+            <span class="route-stop-num" style="width:22px;height:22px;font-size:0.72rem;${isNext ? "background:#15803d;" : ""}">${isDone ? "✓" : idx + 1}</span>
+            <div style="flex:1;min-width:0;font-size:0.84rem;font-weight:800;color:var(--green-950);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
               ${escapeHtml(st.name || "Parada")}
             </div>
-            <div style="font-size:0.72rem;color:var(--slate-500);line-height:1.25;margin-top:2px;word-break:break-word;">
-              ${escapeHtml(st.subtitle || st.address || "")}
-            </div>
           </div>
-          <div style="display:flex;gap:3px;flex-shrink:0;">
-            <button type="button" class="route-mini-btn" data-drv-rt-move="-1" data-drv-rt-idx="${idx}">▲</button>
-            <button type="button" class="route-mini-btn" data-drv-rt-move="1" data-drv-rt-idx="${idx}">▼</button>
-            <button type="button" class="route-mini-btn" data-drv-rt-toggle="${idx}" title="Marcar listo / pendiente">${isDone ? "↩️" : "✓"}</button>
-            <button type="button" class="route-mini-btn" data-drv-rt-remove="${idx}" title="Quitar de mi ruta" style="color:#dc2626;">✕</button>
+          <div class="drv-stop-bottom">
+            <div class="drv-stop-sub">${escapeHtml(cleanSub || "Sin detalle adicional")}</div>
+            <div style="display:flex;gap:3px;flex-shrink:0;">
+              ${!isDone ? `<button type="button" class="route-mini-btn" style="padding:4px 7px;background:#dcfce7;color:#14532d;border-color:#86efac;" data-drv-rt-sell="${idx}" title="Vender o registrar visita">➕</button>` : ""}
+              <button type="button" class="route-mini-btn" style="padding:4px 6px;" data-drv-rt-move="-1" data-drv-rt-idx="${idx}">▲</button>
+              <button type="button" class="route-mini-btn" style="padding:4px 6px;" data-drv-rt-move="1" data-drv-rt-idx="${idx}">▼</button>
+              <button type="button" class="route-mini-btn" style="padding:4px 6px;" data-drv-rt-toggle="${idx}" title="Marcar listo / pendiente">${isDone ? "↩️" : "✓"}</button>
+              <button type="button" class="route-mini-btn danger" style="padding:4px 6px;" data-drv-rt-remove="${idx}" title="Quitar de mi ruta">✕</button>
+            </div>
           </div>
         </div>
       `;
@@ -2759,7 +3127,141 @@ function renderDriverActiveRouteCard() {
     renderDriverActiveRouteCard();
     await persistDriverActiveRoute("driver");
   });
+
+  if (drvPreMapVisible) {
+    renderDrvPreRouteMap(false);
+  }
 }
+
+let drvPreMapVisible = false;
+let drvPreLeafletMap = null;
+let drvPreLayerGroup = null;
+
+function renderDrvPreRouteMap(fit = true) {
+  const wrap = document.getElementById("drvPreRouteMapWrap");
+  const mapEl = document.getElementById("drvPreRouteMap");
+  if (!wrap || !mapEl || typeof window.L === "undefined") return;
+
+  if (!drvPreMapVisible || activeRouteStops.length === 0) {
+    wrap.style.display = "none";
+    return;
+  }
+  wrap.style.display = "block";
+
+  if (!drvPreLeafletMap) {
+    drvPreLeafletMap = window.L.map("drvPreRouteMap", { zoomControl: true, maxZoom: 19 }).setView([25.4267, -100.9954], 12);
+    drvPreLeafletMap.attributionControl?.setPrefix(false);
+    window.L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap"
+    }).addTo(drvPreLeafletMap);
+    drvPreLayerGroup = window.L.layerGroup().addTo(drvPreLeafletMap);
+  }
+
+  setTimeout(() => drvPreLeafletMap?.invalidateSize(), 60);
+  drvPreLayerGroup.clearLayers();
+
+  const boundsPts = [];
+  const linePts = [];
+
+  if (lastGpsCoords && Number.isFinite(lastGpsCoords.lat)) {
+    boundsPts.push([lastGpsCoords.lat, lastGpsCoords.lng]);
+    linePts.push([lastGpsCoords.lat, lastGpsCoords.lng]);
+    const meIcon = window.L.divIcon({
+      className: "salinas-div-icon",
+      html: `<div style="width:24px;height:24px;border-radius:50%;background:#0284c7;color:#fff;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;font-size:12px;">🚗</div>`,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12]
+    });
+    window.L.marker([lastGpsCoords.lat, lastGpsCoords.lng], { icon: meIcon, zIndexOffset: 900 })
+      .bindTooltip("Tu ubicación actual")
+      .addTo(drvPreLayerGroup);
+  }
+
+  activeRouteStops.forEach((st, idx) => {
+    if (!Number.isFinite(st.lat) || !Number.isFinite(st.lng)) return;
+    boundsPts.push([st.lat, st.lng]);
+    if (st.status !== "done") {
+      linePts.push([st.lat, st.lng]);
+    }
+    const isDone = st.status === "done";
+    const isNext = !isDone && activeRouteStops.slice(0, idx).every((x) => x.status === "done");
+    const bg = isDone ? "#94a3b8" : isNext ? "#16a34a" : "#1e293b";
+    const sz = isNext ? 23 : 19;
+    const half = Math.round(sz / 2);
+    const icon = window.L.divIcon({
+      className: "salinas-div-icon",
+      html: `<div style="width:${sz}px;height:${sz}px;border-radius:50%;background:${bg};color:#fff;border:1.8px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;font-size:${isNext ? 11 : 9.5}px;font-weight:800;">${isDone ? "✓" : idx + 1}</div>`,
+      iconSize: [sz, sz],
+      iconAnchor: [half, half],
+      popupAnchor: [0, -half]
+    });
+
+    const popupHtml = `
+      <div style="font-family:sans-serif;min-width:195px;">
+        <div style="font-size:0.7rem;font-weight:800;color:#15803d;">PARADA #${idx + 1}</div>
+        <strong style="font-size:0.88rem;color:#0f172a;display:block;">${escapeHtml(st.name || "Parada")}</strong>
+        <div style="font-size:0.74rem;color:#475569;margin-top:2px;">${escapeHtml(st.subtitle || st.address || "")}</div>
+        ${
+          !isDone
+            ? `<div style="display:flex;gap:5px;margin-top:7px;">
+                <button type="button" class="btn btn-primary btn-sm" style="padding:4px 8px;font-size:0.72rem;flex:1;" onclick="window.__drvMakeStopFirst(${idx})">🥇 Ir 1º aquí</button>
+                <button type="button" class="btn btn-outline btn-sm" style="padding:4px 8px;font-size:0.72rem;color:#dc2626;border-color:#fecaca;" onclick="window.__drvRemoveStopFromMap(${idx})">✕</button>
+              </div>`
+            : ""
+        }
+      </div>
+    `;
+    window.L.marker([st.lat, st.lng], { icon, zIndexOffset: isDone ? 200 : 600 })
+      .bindPopup(popupHtml)
+      .addTo(drvPreLayerGroup);
+  });
+
+  if (linePts.length >= 2) {
+    window.L.polyline(linePts, {
+      color: "#15803d",
+      weight: 3.5,
+      opacity: 0.78,
+      dashArray: "6,5"
+    }).addTo(drvPreLayerGroup);
+  }
+
+  if (fit && boundsPts.length > 0) {
+    setTimeout(() => {
+      if (boundsPts.length === 1) drvPreLeafletMap.setView(boundsPts[0], 15);
+      else drvPreLeafletMap.fitBounds(boundsPts, { padding: [26, 26], maxZoom: 15 });
+    }, 90);
+  }
+}
+
+window.__drvMakeStopFirst = async function (idx) {
+  if (idx < 0 || idx >= activeRouteStops.length) return;
+  const picked = activeRouteStops.splice(idx, 1)[0];
+  const firstPendingIdx = activeRouteStops.findIndex((s) => s.status !== "done");
+  if (firstPendingIdx === -1) activeRouteStops.push(picked);
+  else activeRouteStops.splice(firstPendingIdx, 0, picked);
+  renderDriverActiveRouteCard();
+  await persistDriverActiveRoute("driver");
+  showToast(`🥇 "${picked.name}" movida como tu siguiente parada.`);
+};
+
+window.__drvRemoveStopFromMap = async function (idx) {
+  if (idx < 0 || idx >= activeRouteStops.length) return;
+  const removed = activeRouteStops.splice(idx, 1)[0];
+  renderDriverActiveRouteCard();
+  await persistDriverActiveRoute("driver");
+  showToast(`Parada "${removed?.name || ""}" quitada.`);
+};
+
+document.getElementById("btnToggleDrvPreviewMap")?.addEventListener("click", () => {
+  drvPreMapVisible = !drvPreMapVisible;
+  renderDriverActiveRouteCard();
+  renderDrvPreRouteMap(drvPreMapVisible);
+});
+
+document.getElementById("btnFitDrvPreMap")?.addEventListener("click", () => {
+  renderDrvPreRouteMap(true);
+});
 
 async function persistDriverActiveRoute(createdBy = "driver", includeReturnOverride = null) {
   if (!currentDriverKeyHash || !currentDriverName) return;
@@ -2816,6 +3318,12 @@ document.getElementById("btnDismissLastMinute")?.addEventListener("click", () =>
 });
 
 document.getElementById("driverActiveRouteList")?.addEventListener("click", async (e) => {
+  const sellStopBtn = e.target.closest("button[data-drv-rt-sell]");
+  if (sellStopBtn) {
+    const stop = activeRouteStops[Number(sellStopBtn.dataset.drvRtSell)];
+    if (stop) openSellPaneForRouteStop(stop);
+    return;
+  }
   const mv = e.target.closest("button[data-drv-rt-move]");
   if (mv) {
     const idx = Number(mv.dataset.drvRtIdx);

@@ -482,6 +482,30 @@ function enterDashboard() {
   switchAdminTab("tabRoutes");
 }
 
+(function setupNavToDriverAppButton() {
+  const btn = document.getElementById("btnNavToDriverApp");
+  if (!btn) return;
+  const fromDriver = (() => {
+    try {
+      return sessionStorage.getItem("salinas_from_driver_app") === "1" || document.referrer.includes("chofer.html");
+    } catch {
+      return false;
+    }
+  })();
+  const isNative = Boolean(window.Capacitor?.isNativePlatform?.() || window.SalinasNative);
+  if (fromDriver) {
+    btn.innerHTML = '🚗 <span class="hide-mobile">Volver a Chofer</span>';
+    btn.title = "Regresar a la App del Chofer";
+  }
+  if (fromDriver || isNative) {
+    btn.removeAttribute("target");
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      window.location.href = "chofer.html";
+    });
+  }
+})();
+
 document.getElementById("btnTopManual")?.addEventListener("click", () => {
   switchAdminTab("tabManual");
 });
@@ -554,6 +578,7 @@ function startRealtimeListeners() {
       }
     });
     renderGpsMapAndChips();
+    window.dispatchEvent(new CustomEvent("salinas:routes-updated"));
   });
 
   settingsUnsub = onSnapshot(doc(db, "settings", "store"), (snap) => {
@@ -579,6 +604,7 @@ function startRealtimeListeners() {
     renderOrdersList();
     renderRouteCortesAndSales();
     renderGpsMapAndChips();
+    window.dispatchEvent(new CustomEvent("salinas:routes-updated"));
   });
 
   const q = query(collection(db, "orders"), orderBy("createdAtIso", "desc"), limit(200));
@@ -609,11 +635,13 @@ function startRealtimeListeners() {
     updateLiveOrderAlertBar();
     renderOrdersList();
     renderGpsMapAndChips();
+    window.dispatchEvent(new CustomEvent("salinas:routes-updated"));
   });
 
   gpsUnsub = onSnapshot(collection(db, "driver_locations"), (snap) => {
     driverLocations = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     renderGpsMapAndChips();
+    window.dispatchEvent(new CustomEvent("salinas:routes-updated"));
   });
 
   placesUnsub = onSnapshot(collection(db, "places"), (snap) => {
@@ -624,6 +652,7 @@ function startRealtimeListeners() {
     renderGpsMapAndChips();
     renderAdminPlacesDirectory();
     renderOrdersList();
+    window.dispatchEvent(new CustomEvent("salinas:places-updated"));
   });
 
   if (typeof startThermosAndLotsListeners === "function") {
@@ -1061,17 +1090,111 @@ document.getElementById("whOpeningForm").addEventListener("submit", async (e) =>
   }
 });
 
+// Mix Mode (Caliber x Ripeness) for Warehouse Trip Dispatch
+let whTripMixMode = false;
+
+function readTripMixMatrix() {
+  const mix = {
+    M: { Verde: 0, Quebrado: 0, "Sazón": 0, Maduro: 0 },
+    P: { Verde: 0, Quebrado: 0, "Sazón": 0, Maduro: 0 },
+    E: { Verde: 0, Quebrado: 0, "Sazón": 0, Maduro: 0 },
+    S: { Verde: 0, Quebrado: 0, "Sazón": 0, Maduro: 0 }
+  };
+  document.querySelectorAll(".trip-mix-input").forEach((inp) => {
+    const cal = inp.dataset.cal;
+    const rip = inp.dataset.rip;
+    if (!mix[cal] || !(rip in mix[cal])) return;
+    mix[cal][rip] = Math.max(0, Math.floor(Number(inp.value) || 0));
+  });
+  const totals = {
+    M: mix.M.Verde + mix.M.Quebrado + mix.M["Sazón"] + mix.M.Maduro,
+    P: mix.P.Verde + mix.P.Quebrado + mix.P["Sazón"] + mix.P.Maduro,
+    E: mix.E.Verde + mix.E.Quebrado + mix.E["Sazón"] + mix.E.Maduro,
+    S: mix.S.Verde + mix.S.Quebrado + mix.S["Sazón"] + mix.S.Maduro
+  };
+  const totalBoxes = totals.M + totals.P + totals.E + totals.S;
+  const ripShort = { Verde: "Ver", Quebrado: "Queb", "Sazón": "Saz", Maduro: "Mad" };
+  const parts = [];
+  ["M", "P", "E", "S"].forEach((cal) => {
+    const items = [];
+    ["Verde", "Quebrado", "Sazón", "Maduro"].forEach((rip) => {
+      if (mix[cal][rip] > 0) items.push(`${mix[cal][rip]} ${ripShort[rip]}`);
+    });
+    if (items.length > 0) parts.push(`${cal}: ${items.join(", ")}`);
+  });
+  return {
+    mix,
+    totals,
+    totalBoxes,
+    summaryText: parts.join(" • ") || "Surtido"
+  };
+}
+
+function syncTripMixUI() {
+  const { totals, totalBoxes, summaryText } = readTripMixMatrix();
+  ["M", "P", "E", "S"].forEach((cal) => {
+    const badge = document.getElementById(`mixTotal${cal}`);
+    if (badge) badge.textContent = String(totals[cal]);
+    const outInput = document.getElementById(`tripOut${cal}`);
+    if (outInput && whTripMixMode) outInput.value = String(totals[cal]);
+  });
+  const preview = document.getElementById("tripMixSummaryPreview");
+  if (preview) {
+    preview.textContent =
+      totalBoxes > 0
+        ? `Total: ${totalBoxes} cajas (${summaryText})`
+        : "Total: 0 cajas • Captura solo las celdas que apliquen";
+  }
+}
+
+document.getElementById("btnToggleRipenessMix")?.addEventListener("click", () => {
+  whTripMixMode = !whTripMixMode;
+  const mixPanel = document.getElementById("whTripMixPanel");
+  const simpleBoxes = document.getElementById("whTripSimpleBoxes");
+  const quickWrap = document.getElementById("tripQuickRipenessWrap");
+  const btn = document.getElementById("btnToggleRipenessMix");
+  if (mixPanel) mixPanel.style.display = whTripMixMode ? "block" : "none";
+  if (simpleBoxes) simpleBoxes.style.display = whTripMixMode ? "none" : "block";
+  if (quickWrap) quickWrap.style.opacity = whTripMixMode ? "0.45" : "1";
+  const ripSelect = document.getElementById("tripRipeness");
+  if (ripSelect) ripSelect.disabled = whTripMixMode;
+  if (btn) {
+    btn.textContent = whTripMixMode ? "⚡ Volver a modo rápido" : "🎨 Detallar mezcla por tamaño";
+  }
+  if (whTripMixMode) syncTripMixUI();
+});
+
+document.getElementById("btnClearTripMix")?.addEventListener("click", () => {
+  document.querySelectorAll(".trip-mix-input").forEach((inp) => {
+    inp.value = "0";
+  });
+  syncTripMixUI();
+});
+
+document.getElementById("whTripMixPanel")?.addEventListener("input", (e) => {
+  if (e.target.classList.contains("trip-mix-input")) {
+    syncTripMixUI();
+  }
+});
+
 // Add New Car Trip
 document.getElementById("whNewTripForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const driver = document.getElementById("tripDriver").value;
-  const ripeness = document.getElementById("tripRipeness").value;
-  const out = {
+  let ripeness = document.getElementById("tripRipeness").value;
+  let ripenessMix = null;
+  let out = {
     M: Math.max(0, Math.floor(Number(document.getElementById("tripOutM").value) || 0)),
     P: Math.max(0, Math.floor(Number(document.getElementById("tripOutP").value) || 0)),
     E: Math.max(0, Math.floor(Number(document.getElementById("tripOutE").value) || 0)),
     S: Math.max(0, Math.floor(Number(document.getElementById("tripOutS").value) || 0))
   };
+  if (whTripMixMode) {
+    const parsedMix = readTripMixMatrix();
+    out = parsedMix.totals;
+    ripeness = parsedMix.summaryText;
+    ripenessMix = parsedMix.mix;
+  }
   const note = document.getElementById("tripNote").value.trim();
 
   if (out.M + out.P + out.E + out.S <= 0) {
@@ -1087,6 +1210,7 @@ document.getElementById("whNewTripForm").addEventListener("submit", async (e) =>
     time: timeStr,
     driver,
     ripeness,
+    ...(ripenessMix ? { ripenessMix } : {}),
     out,
     ret: { M: 0, P: 0, E: 0, S: 0 },
     note
@@ -1103,6 +1227,10 @@ document.getElementById("whNewTripForm").addEventListener("submit", async (e) =>
     document.getElementById("tripOutP").value = "0";
     document.getElementById("tripOutE").value = "0";
     document.getElementById("tripOutS").value = "0";
+    document.querySelectorAll(".trip-mix-input").forEach((inp) => {
+      inp.value = "0";
+    });
+    syncTripMixUI();
     document.getElementById("tripNote").value = "";
   } catch (err) {
     console.error(err);
@@ -1317,13 +1445,15 @@ function ensureLeafletMap() {
   if (!mapEl) return;
 
   // Default center: Saltillo / Región comercial
-  leafletMap = window.L.map("adminLiveMap", { zoomControl: false }).setView([25.4267, -100.9954], 12);
+  leafletMap = window.L.map("adminLiveMap", { zoomControl: false, minZoom: 5, maxZoom: 19 }).setView([25.4267, -100.9954], 12);
+  leafletMap.attributionControl?.setPrefix(false);
   window.L.control.zoom({ position: "bottomright" }).addTo(leafletMap);
   initCleanAdminVectorBaseMap(leafletMap);
 
   mapLayerGroup = window.L.layerGroup().addTo(leafletMap);
   leafletMap.on("zoomend", syncMapZoomTier);
   syncMapZoomTier();
+  setTimeout(() => window.dispatchEvent(new CustomEvent("salinas:map-ready")), 0);
 
   leafletMap.on("click", (ev) => {
     if (typeof mapPickCallback === "function") {
@@ -1334,7 +1464,69 @@ function ensureLeafletMap() {
       cb({ lat: Number(ev.latlng.lat.toFixed(6)), lng: Number(ev.latlng.lng.toFixed(6)) });
     }
   });
+
+  syncMobileMapInteractionLock();
 }
+
+let mobileMapManualUnlocked = false;
+
+function isTouchDeviceViewport() {
+  return window.matchMedia?.("(pointer: coarse)")?.matches || window.innerWidth <= 900;
+}
+
+function syncMobileMapInteractionLock() {
+  if (!leafletMap) return;
+  const mapEl = document.getElementById("adminLiveMap");
+  const lockBtn = document.getElementById("btnMobileMapPanLock");
+  const card = document.getElementById("adminMapCard");
+  const isFullscreen = Boolean(card?.classList.contains("is-fullscreen"));
+  const touchMode = isTouchDeviceViewport();
+
+  if (!touchMode) {
+    leafletMap.dragging?.enable();
+    leafletMap.touchZoom?.enable();
+    leafletMap.doubleClickZoom?.enable();
+    mapEl?.classList.remove("is-scroll-locked");
+    if (lockBtn) lockBtn.style.display = "none";
+    return;
+  }
+
+  const shouldLock = !isFullscreen && !mobileMapManualUnlocked;
+  if (shouldLock) {
+    leafletMap.dragging?.disable();
+    leafletMap.touchZoom?.disable();
+    leafletMap.doubleClickZoom?.disable();
+    mapEl?.classList.add("is-scroll-locked");
+  } else {
+    leafletMap.dragging?.enable();
+    leafletMap.touchZoom?.enable();
+    leafletMap.doubleClickZoom?.enable();
+    mapEl?.classList.remove("is-scroll-locked");
+  }
+
+  if (lockBtn) {
+    lockBtn.style.display = isFullscreen ? "none" : "inline-flex";
+    lockBtn.classList.toggle("is-unlocked", mobileMapManualUnlocked);
+    lockBtn.textContent = mobileMapManualUnlocked
+      ? "🔓 Moviendo mapa (fijar scroll)"
+      : "🔒 Mapa fijo (toca para mover)";
+  }
+}
+
+document.getElementById("btnMobileMapPanLock")?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  mobileMapManualUnlocked = !mobileMapManualUnlocked;
+  syncMobileMapInteractionLock();
+  showToast(
+    mobileMapManualUnlocked
+      ? "🔓 Mapa desbloqueado: ya puedes moverlo y hacer zoom."
+      : "🔒 Mapa fijado: desliza libremente para bajar/subir la página."
+  );
+});
+
+window.addEventListener("resize", () => {
+  syncMobileMapInteractionLock();
+});
 
 let mapUsedNativeFullscreen = false;
 
@@ -1345,6 +1537,7 @@ async function setMapFullscreen(wantFull) {
 
   card.classList.toggle("is-fullscreen", wantFull);
   document.body.classList.toggle("map-fullscreen-open", wantFull);
+  syncMobileMapInteractionLock();
 
   if (btnHeader) btnHeader.textContent = wantFull ? "✕ Salir Pantalla Completa" : "⛶ Pantalla Completa";
 
@@ -4049,11 +4242,24 @@ function syncGpsPingConfigForm() {
   const iv = document.getElementById("gpsPingIntervalMin");
   const sh = document.getElementById("gpsPingStartHour");
   const eh = document.getElementById("gpsPingEndHour");
+  const ao = document.getElementById("gpsAutoOffHour");
   if (!en || !iv || !sh || !eh) return;
   en.checked = Boolean(storeSettings.gpsPingEnabled);
   iv.value = String(storeSettings.gpsPingIntervalMin || 15);
   sh.value = String(storeSettings.gpsPingStartHour ?? 8);
   eh.value = String(storeSettings.gpsPingEndHour ?? 19);
+  if (ao) ao.value = String(storeSettings.gpsAutoOffHour ?? 20);
+}
+
+function isDriverAdminAllowed(drv) {
+  if (typeof drv?.canAccessAdmin === "boolean") return drv.canAccessAdmin;
+  const norm = String(drv?.name || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+  return norm === "tello garcia" || norm === "alejandro salinas";
 }
 
 function renderDriversEditor() {
@@ -4085,6 +4291,10 @@ function renderDriversEditor() {
           </div>
         </div>
         <div class="driver-card-actions">
+          <label class="form-label" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;margin:0;padding:5px 9px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;font-size:0.78rem;" title="Permite cambiar entre App Chofer y Panel Admin">
+            <input type="checkbox" class="drv-edit-admin" data-idx="${idx}" ${isDriverAdminAllowed(drv) ? "checked" : ""}>
+            <span>🛡️ Rol Admin</span>
+          </label>
           <button type="button" class="btn btn-whatsapp btn-sm" data-invite-driver="${idx}">📲 Mandar App</button>
           <button type="button" class="btn btn-outline btn-sm" data-copy-driver="${idx}">📋 Copiar</button>
           <button type="button" class="btn btn-outline btn-sm" data-ping-driver="${idx}" title="Enviar notificación Push para que reporte su GPS">📍 Pedir GPS</button>
@@ -4134,10 +4344,12 @@ document.getElementById("driversListEditor").addEventListener("click", async (e)
     const nameInput = document.querySelector(`.drv-edit-name[data-idx='${idx}']`);
     const phoneInput = document.querySelector(`.drv-edit-phone[data-idx='${idx}']`);
     const pinInput = document.querySelector(`.drv-edit-pin[data-idx='${idx}']`);
+    const adminCheck = document.querySelector(`.drv-edit-admin[data-idx='${idx}']`);
 
     const newName = nameInput ? nameInput.value.trim() : "";
     const newPhone = phoneInput ? phoneInput.value.trim() : "";
     const newPin = pinInput ? pinInput.value.trim() : "";
+    const canAccessAdmin = Boolean(adminCheck?.checked);
 
     if (!newName) {
       showToast("El nombre del chofer no puede quedar vacío.");
@@ -4159,7 +4371,8 @@ document.getElementById("driversListEditor").addEventListener("click", async (e)
         ...updatedDrivers[idx],
         name: newName,
         phone: newPhone,
-        hasPin: Boolean(pinHashToSave || updatedDrivers[idx].hasPin)
+        hasPin: Boolean(pinHashToSave || updatedDrivers[idx].hasPin),
+        canAccessAdmin
       };
     }
 
@@ -4337,6 +4550,8 @@ document.getElementById("gpsPingConfigForm")?.addEventListener("submit", async (
   const gpsPingIntervalMin = Number(document.getElementById("gpsPingIntervalMin")?.value || 15);
   const gpsPingStartHour = Number(document.getElementById("gpsPingStartHour")?.value || 8);
   const gpsPingEndHour = Number(document.getElementById("gpsPingEndHour")?.value || 19);
+  const rawAutoOff = document.getElementById("gpsAutoOffHour")?.value;
+  const gpsAutoOffHour = rawAutoOff !== undefined && rawAutoOff !== "" ? Number(rawAutoOff) : 20;
   try {
     await executeAdminBatch(currentKeyHash, (batch, proofId) => {
       batch.set(
@@ -4346,20 +4561,22 @@ document.getElementById("gpsPingConfigForm")?.addEventListener("submit", async (
           gpsPingIntervalMin,
           gpsPingStartHour,
           gpsPingEndHour,
+          gpsAutoOffHour,
           proofId,
           updatedAt: serverTimestamp()
         },
         { merge: true }
       );
     });
+    const autoOffTxt = gpsAutoOffHour === 0 ? "sin apagado automático" : `apagado auto ${gpsAutoOffHour}:00`;
     showToast(
       gpsPingEnabled
-        ? `🔔 Recordatorio automático activado (cada ${gpsPingIntervalMin} min, ${gpsPingStartHour}:00–${gpsPingEndHour}:00).`
-        : "Recordatorio automático de GPS desactivado."
+        ? `✅ GPS guardado: Push cada ${gpsPingIntervalMin} min (${gpsPingStartHour}:00–${gpsPingEndHour}:00) y ${autoOffTxt}.`
+        : `✅ GPS guardado (${autoOffTxt}).`
     );
   } catch (err) {
     console.error(err);
-    showToast("No se pudo guardar la configuración Push.");
+    showToast("No se pudo guardar la configuración GPS.");
   }
 });
 
@@ -5211,6 +5428,7 @@ function subscribeAdminBuilderToDriverRoute(driverName) {
 }
 
 function renderRouteBuilderUI() {
+  window.dispatchEvent(new CustomEvent("salinas:routes-updated"));
   const listEl = document.getElementById("rbStopsList");
   const badgeEl = document.getElementById("rbSummaryBadge");
   const pillEl = document.getElementById("rbMetricsPill");
@@ -5804,3 +6022,129 @@ document.getElementById("rbBtnClear")?.addEventListener("click", async () => {
     await saveAdminRouteToFirestore(false, true);
   }
 });
+
+// ================= BRIDGE PARA PROSPECTOS DENUE Y CUADRANTES KML =================
+window.__salinasMapBridge = {
+  getMap() {
+    ensureLeafletMap();
+    return leafletMap;
+  },
+  getAllPlaces() {
+    return allPlaces || [];
+  },
+  getRouteSales() {
+    return (historicalSales30d && historicalSales30d.length ? historicalSales30d : routeSalesList) || [];
+  },
+  getBaseLocation() {
+    return getStoreBaseLocation();
+  },
+  getSelectedDriver() {
+    return document.getElementById("rbDriverSelect")?.value || "";
+  },
+  getDriversList() {
+    return (storeSettings.drivers || []).map((d) => d.name).filter(Boolean);
+  },
+  selectDriverForBuilder(driverName) {
+    const sel = document.getElementById("rbDriverSelect");
+    if (!sel || !driverName) return;
+    if (sel.value !== driverName) {
+      sel.value = driverName;
+      subscribeAdminBuilderToDriverRoute(driverName);
+    }
+  },
+  getDraftStops() {
+    return rbStops || [];
+  },
+  getSentRoutesToday() {
+    return Array.from(allDriverRoutesTodayMap.values());
+  },
+  addStopToRoute(stopObj, mode = "append") {
+    return addStopToAdminBuilder(stopObj, mode);
+  },
+  addStopsBulkToRoute(stopObjs, replacePending = false) {
+    if (!Array.isArray(stopObjs) || !stopObjs.length) return 0;
+    if (replacePending) {
+      rbStops = rbStops.filter((s) => s.status === "done");
+    }
+    const existingKeys = new Set(rbStops.map((s) => `${s.kind}:${s.id}`));
+    let added = 0;
+    for (const st of stopObjs) {
+      if (!st || !Number.isFinite(st.lat) || !Number.isFinite(st.lng)) continue;
+      const key = `${st.kind}:${st.id}`;
+      if (existingKeys.has(key)) continue;
+      existingKeys.add(key);
+      rbStops.push(st);
+      added++;
+    }
+    if (added > 0) {
+      renderRouteBuilderUI();
+      recalculateAdminBuilderMetrics();
+      const det = document.getElementById("adminRouteBuilderDetails");
+      if (det) det.open = true;
+    }
+    return added;
+  },
+  async promoteProspectToPlace(item) {
+    if (!currentKeyHash) {
+      showToast("Inicia sesión en Administración primero.");
+      return null;
+    }
+    const newId = `plc_denue_${item.id || Date.now()}`;
+    const catMap = {
+      fruteria: "fruteria",
+      carniceria: "carniceria",
+      restaurante: "restaurante",
+      tienda: "tienda",
+      comedor: "restaurante"
+    };
+    const category = catMap[item.c] || "tienda";
+    await executeAdminBatch(currentKeyHash, (batch, proofId) => {
+      batch.set(
+        doc(db, "places", newId),
+        {
+          name: item.n,
+          category,
+          address: item.dir || item.col || "",
+          phone: item.tel || "",
+          lat: Number(item.lat),
+          lng: Number(item.lng),
+          source: "denue",
+          denueId: item.id,
+          active: true,
+          createdAtIso: new Date().toISOString(),
+          updatedAt: serverTimestamp(),
+          proofId
+        },
+        { merge: true }
+      );
+    });
+    showToast(`⭐ "${item.n}" guardado como Cliente Oficial.`);
+    return newId;
+  },
+  async saveZonesConfig(zonesData) {
+    if (!currentKeyHash) return;
+    await executeAdminBatch(currentKeyHash, (batch, proofId) => {
+      batch.set(
+        doc(db, "settings", "zones"),
+        {
+          ...zonesData,
+          updatedAtIso: new Date().toISOString(),
+          updatedAt: serverTimestamp(),
+          proofId
+        },
+        { merge: true }
+      );
+    });
+  },
+  async loadZonesConfig() {
+    try {
+      const snap = await getDoc(doc(db, "settings", "zones"));
+      return snap.exists() ? snap.data() : null;
+    } catch (_) {
+      return null;
+    }
+  },
+  showToast(msg) {
+    showToast(msg);
+  }
+};
