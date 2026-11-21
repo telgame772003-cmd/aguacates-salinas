@@ -2332,17 +2332,19 @@ function renderGpsMapAndChips() {
       assignedDrivers.length > 0 && !hasNumberedStopOnPin
         ? `<span class="pin-assigned-tag" style="background:${assignedDrivers[0].color};">${escapeHtml(assignedDrivers[0].initials)}</span>`
         : "";
+    const dayLabel = isViewingToday ? "hoy" : `el ${escapeHtml(selectedRouteDate)}`;
+    const dayCapLabel = isViewingToday ? "Hoy" : escapeHtml(selectedRouteDate);
     const assignedLineHtml = assignedDrivers.length > 0
-      ? `<div style="margin-top:3px;color:#0369a1;font-weight:800;font-size:0.74rem;">🧭 En ruta hoy: ${escapeHtml(assignedDrivers.map((a) => a.driverName).join(", "))}</div>`
+      ? `<div style="margin-top:3px;color:#0369a1;font-weight:800;font-size:0.74rem;">🧭 En ruta ${dayLabel}: ${escapeHtml(assignedDrivers.map((a) => a.driverName).join(", "))}</div>`
       : "";
     const stBadge =
       status.state === "sold"
-        ? `<div style="margin-top:5px;background:#dcfce7;color:#14532d;padding:4px 7px;border-radius:6px;font-size:0.78rem;font-weight:700;">🟢 Compró hoy: ${status.boxes} caja(s) (${formatCurrency(status.amount)}) • ${escapeHtml(status.driver)}</div>`
+        ? `<div style="margin-top:5px;background:#dcfce7;color:#14532d;padding:4px 7px;border-radius:6px;font-size:0.78rem;font-weight:700;">🟢 Compró ${dayLabel}: ${status.boxes} caja(s) (${formatCurrency(status.amount)}) • ${escapeHtml(status.driver)}</div>`
         : status.state === "visited"
-          ? `<div style="margin-top:5px;background:#fee2e2;color:#991b1b;padding:4px 7px;border-radius:6px;font-size:0.78rem;font-weight:700;">🔴 Visitado hoy (no compró) por ${escapeHtml(status.driver)}: ${escapeHtml(status.reason)}${status.distanceMeters !== null ? ` (GPS a ${status.distanceMeters} m)` : ""}</div>`
+          ? `<div style="margin-top:5px;background:#fee2e2;color:#991b1b;padding:4px 7px;border-radius:6px;font-size:0.78rem;font-weight:700;">🔴 Visitado ${dayLabel} (no compró) por ${escapeHtml(status.driver)}: ${escapeHtml(status.reason)}${status.distanceMeters !== null ? ` (GPS a ${status.distanceMeters} m)` : ""}</div>`
           : inTodayRoute
-            ? `<div style="margin-top:5px;background:#fef9c3;color:#713f12;padding:4px 7px;border-radius:6px;font-size:0.78rem;font-weight:700;">🟡 Pendiente de visitar hoy (en ruta)</div>`
-            : `<div style="margin-top:5px;background:#f1f5f9;color:#475569;padding:4px 7px;border-radius:6px;font-size:0.78rem;">⚪ Aún sin visita ni ruta registrada hoy</div>`;
+            ? `<div style="margin-top:5px;background:#fef9c3;color:#713f12;padding:4px 7px;border-radius:6px;font-size:0.78rem;font-weight:700;">🟡 Pendiente de visitar ${dayLabel} (en ruta)</div>`
+            : `<div style="margin-top:5px;background:#f1f5f9;color:#475569;padding:4px 7px;border-radius:6px;font-size:0.78rem;">⚪ Aún sin visita ni ruta registrada ${dayLabel}</div>`;
 
     const lastSaleLine = stats30d.lastSaleDate
       ? `🛒 Últ. compra: <strong>${escapeHtml(formatRelativeDaysLabel(stats30d.daysSinceLastSale, stats30d.lastSaleDate))}</strong> • ${stats30d.lastSaleBoxes} caja(s) (${formatCurrency(stats30d.lastSaleAmount)})${stats30d.lastSaleDriver ? ` • ${escapeHtml(stats30d.lastSaleDriver)}` : ""}`
@@ -2374,12 +2376,12 @@ function renderGpsMapAndChips() {
 
     const todayHoverBadge =
       status.state === "sold"
-        ? `<div style="color:#15803d;font-weight:700;">🟢 Hoy: compró ${status.boxes} caja(s) (${formatCurrency(status.amount)})</div>`
+        ? `<div style="color:#15803d;font-weight:700;">🟢 ${dayCapLabel}: compró ${status.boxes} caja(s) (${formatCurrency(status.amount)})</div>`
         : status.state === "visited"
-          ? `<div style="color:#dc2626;font-weight:700;">🔴 Visitado hoy — no compró (${escapeHtml(status.driver || "chofer")})</div>`
+          ? `<div style="color:#dc2626;font-weight:700;">🔴 Visitado ${dayLabel} — no compró (${escapeHtml(status.driver || "chofer")})</div>`
           : inTodayRoute
-            ? `<div style="color:#a16207;font-weight:700;">🟡 Pendiente de visitar hoy</div>`
-            : `<div style="color:#64748b;">⚪ Sin visita hoy</div>`;
+            ? `<div style="color:#a16207;font-weight:700;">🟡 Pendiente de visitar ${dayLabel}</div>`
+            : `<div style="color:#64748b;">⚪ Sin visita ${dayLabel}</div>`;
 
     const tooltipHtml = `
       <div class="salinas-tt-inner">
@@ -2861,6 +2863,11 @@ document.getElementById("adminLiveMap")?.addEventListener("click", async (e) => 
 function renderAdminPlacesDirectory() {
   const listEl = document.getElementById("adminPlacesList");
   const pillEl = document.getElementById("placesDirCountPill");
+  const titleEl = document.getElementById("placesDirTitle");
+  const isTodayDir = selectedRouteDate === getLocalDateStr();
+  const dirDaySuffix = isTodayDir ? "de Hoy" : `(${selectedRouteDate})`;
+  const dirDayLabel = isTodayDir ? "hoy" : `el ${escapeHtml(selectedRouteDate)}`;
+  if (titleEl) titleEl.textContent = `🏪 Directorio de Puntos de Compra y Visitas ${dirDaySuffix}`;
   if (pillEl) pillEl.textContent = `${allPlaces.length} registrado${allPlaces.length === 1 ? "" : "s"} ▾`;
   if (!listEl) return;
 
@@ -2877,8 +2884,8 @@ function renderAdminPlacesDirectory() {
         st.state === "sold"
           ? `<span style="background:#dcfce7;color:#14532d;padding:3px 8px;border-radius:999px;font-size:0.74rem;font-weight:800;">🟢 Compró (${st.boxes}c)</span>`
           : st.state === "visited"
-            ? `<span style="background:#fef9c3;color:#713f12;padding:3px 8px;border-radius:999px;font-size:0.74rem;font-weight:800;">🟡 Visitado s/venta</span>`
-            : `<span style="background:#f1f5f9;color:#475569;padding:3px 8px;border-radius:999px;font-size:0.74rem;font-weight:700;">⚪ Pendiente hoy</span>`;
+            ? `<span style="background:#fee2e2;color:#991b1b;padding:3px 8px;border-radius:999px;font-size:0.74rem;font-weight:800;">🔴 No compró</span>`
+            : `<span style="background:#f1f5f9;color:#475569;padding:3px 8px;border-radius:999px;font-size:0.74rem;font-weight:700;">⚪ Sin visita ${dirDayLabel}</span>`;
 
       return `
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--slate-200);">
