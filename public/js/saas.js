@@ -135,23 +135,90 @@ async function loadTenantsAndTelemetry() {
   }
 }
 
-function computeDueStatus(dateStr) {
-  if (!dateStr) return { state: "unset", label: "Sin fecha", color: "#94a3b8", bg: "rgba(148,163,184,0.12)" };
+let activeBillingFilter = "all";
+
+function getTodayIsoLocal() {
   const today = new Date();
-  const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+}
+
+function computeDueStatus(dateStr, cycleDays = 30) {
+  if (!dateStr) {
+    return {
+      state: "unset",
+      diffDays: null,
+      label: "Sin fecha",
+      shortHint: "Sin fecha asignada",
+      progressPct: 0,
+      barColor: "#475569",
+      color: "#94a3b8",
+      bg: "rgba(148,163,184,0.12)"
+    };
+  }
+  const todayIso = getTodayIsoLocal();
   const diffDays = Math.round((new Date(dateStr + "T00:00:00") - new Date(todayIso + "T00:00:00")) / 86400000);
   if (diffDays < 0) {
-    return { state: "overdue", label: `🔴 Vencido (${Math.abs(diffDays)}d)`, color: "#fca5a5", bg: "rgba(239,68,68,0.18)" };
+    return {
+      state: "overdue",
+      diffDays,
+      label: `🔴 Vencido (${Math.abs(diffDays)}d)`,
+      shortHint: `Vencido hace ${Math.abs(diffDays)} día${Math.abs(diffDays) === 1 ? "" : "s"} (${dateStr})`,
+      progressPct: 100,
+      barColor: "#ef4444",
+      color: "#fca5a5",
+      bg: "rgba(239,68,68,0.2)"
+    };
   }
   if (diffDays <= 5) {
+    const pct = Math.min(98, Math.max(78, Math.round(((cycleDays - diffDays) / cycleDays) * 100)));
     return {
       state: "soon",
-      label: diffDays === 0 ? "🟡 Vence HOY" : `🟡 En ${diffDays}d`,
+      diffDays,
+      label: diffDays === 0 ? "🟠 Vence HOY" : `🟡 En ${diffDays}d`,
+      shortHint: diffDays === 0 ? `Vence HOY (${dateStr})` : `Faltan ${diffDays} día${diffDays === 1 ? "" : "s"} (${dateStr})`,
+      progressPct: pct,
+      barColor: diffDays === 0 ? "#f97316" : "#f59e0b",
       color: "#fde68a",
       bg: "rgba(245,158,11,0.18)"
     };
   }
-  return { state: "ok", label: `🟢 ${dateStr}`, color: "#6ee7b7", bg: "rgba(16,185,129,0.14)" };
+  const pct = Math.min(82, Math.max(8, Math.round(((cycleDays - Math.min(cycleDays, diffDays)) / cycleDays) * 100)));
+  return {
+    state: "ok",
+    diffDays,
+    label: `🟢 Faltan ${diffDays}d`,
+    shortHint: `Al corriente • Corte: ${dateStr}`,
+    progressPct: pct,
+    barColor: "#10b981",
+    color: "#6ee7b7",
+    bg: "rgba(16,185,129,0.14)"
+  };
+}
+
+function computePunctualityBadge(plan = {}) {
+  const hist = Array.isArray(plan?.paymentHistory) ? plan.paymentHistory : [];
+  if (hist.length === 0) {
+    return { label: "Sin pagos aún", color: "#94a3b8", bg: "rgba(148,163,184,0.12)" };
+  }
+  const lateCount = hist.filter((h) => Number(h.daysLate) > 1).length;
+  if (lateCount === 0) {
+    return { label: `⭐ Puntual (${hist.length})`, color: "#6ee7b7", bg: "rgba(16,185,129,0.16)" };
+  }
+  const ratio = lateCount / hist.length;
+  if (ratio <= 0.35) {
+    return { label: `🟡 Atraso leve (${lateCount}/${hist.length})`, color: "#fde68a", bg: "rgba(245,158,11,0.18)" };
+  }
+  return { label: `🔴 Moroso (${lateCount}/${hist.length})`, color: "#fca5a5", bg: "rgba(239,68,68,0.2)" };
+}
+
+function getTenantBillingSummary(t) {
+  const mDue = computeDueStatus(t.plan?.nextMonthlyDue, 30);
+  const aDue = computeDueStatus(t.plan?.nextAnnualDue, 365);
+  let overall = "unset";
+  if (mDue.state === "overdue" || aDue.state === "overdue") overall = "overdue";
+  else if (mDue.state === "soon" || aDue.state === "soon") overall = "soon";
+  else if (mDue.state === "ok" || aDue.state === "ok") overall = "ok";
+  return { mDue, aDue, overall };
 }
 
 function addMonthsIso(baseIso, months) {
@@ -210,9 +277,14 @@ function renderKpisAndGrid() {
   }
 
   const q = document.getElementById("saasSearchInput").value.trim();
-  const filtered = allTenants.filter((t) =>
-    matchesSmartSearch(`${t.brandName || ""} ${t.tenantSlug || ""} ${t.industry || ""} ${t.billingNotes || ""}`, q)
-  );
+  const filtered = allTenants.filter((t) => {
+    const textOk = matchesSmartSearch(`${t.brandName || ""} ${t.tenantSlug || ""} ${t.industry || ""} ${t.billingNotes || ""}`, q);
+    if (!textOk) return false;
+    if (activeBillingFilter === "all") return true;
+    if (activeBillingFilter === "suspended") return t.tenantStatus === "suspended";
+    const { overall } = getTenantBillingSummary(t);
+    return overall === activeBillingFilter;
+  });
 
   const grid = document.getElementById("saasTenantsGrid");
   if (filtered.length === 0) {
@@ -231,8 +303,15 @@ function renderKpisAndGrid() {
       const perDriver = Number(t.plan?.perDriverFeeMxn) || 0;
       const annualFee = Number(t.plan?.annualFeeMxn) || 0;
       const monthlyTotal = baseMonthly + perDriver * drvCount;
-      const mDue = computeDueStatus(t.plan?.nextMonthlyDue);
-      const aDue = computeDueStatus(t.plan?.nextAnnualDue);
+      const { mDue, aDue, overall } = getTenantBillingSummary(t);
+      const punct = computePunctualityBadge(t.plan);
+      const lastPay = Array.isArray(t.plan?.paymentHistory) && t.plan.paymentHistory.length
+        ? t.plan.paymentHistory[0]
+        : null;
+      const lastPayStr = lastPay
+        ? `Último pago: ${String(lastPay.paidAtIso || "").slice(0, 10)} (${formatCurrency(lastPay.amount || 0)})`
+        : "Sin pagos registrados aún";
+      const showRemindBtn = mDue.state === "soon" || mDue.state === "overdue" || aDue.state === "soon" || aDue.state === "overdue";
 
       const feeParts = [];
       if (baseMonthly > 0) feeParts.push(`${formatCurrency(baseMonthly)}/mes`);
@@ -242,7 +321,7 @@ function renderKpisAndGrid() {
       const qParam = t.tenantSlug === "salinas" ? "" : `?t=${encodeURIComponent(t.tenantSlug)}`;
 
       return `
-        <article class="saas-tenant-card ${isSusp ? "is-suspended" : ""}">
+        <article class="saas-tenant-card ${isSusp ? "is-suspended" : ""} is-billing-${overall}">
           <div>
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px;">
               <div>
@@ -251,7 +330,10 @@ function renderKpisAndGrid() {
                   Código: <code style="color:#38bdf8;">${escapeHtml(t.tenantSlug)}</code> • ${escapeHtml(fee)}
                 </div>
               </div>
-              <span class="saas-pill ${isSusp ? "suspended" : "active"}">${isSusp ? "⏸️ En Pausa" : "🟢 Activo"}</span>
+              <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+                <span class="saas-pill ${isSusp ? "suspended" : "active"}">${isSusp ? "⏸️ En Pausa" : "🟢 Activo"}</span>
+                <button type="button" data-saas-history="${escapeHtml(t.tenantSlug)}" style="border:none;cursor:pointer;font-size:0.68rem;font-weight:800;padding:2px 8px;border-radius:999px;color:${punct.color};background:${punct.bg};" title="Ver historial de pagos">${punct.label}</button>
+              </div>
             </div>
 
             <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#0f172a;padding:10px;border-radius:10px;text-align:center;margin:10px 0;">
@@ -270,22 +352,31 @@ function renderKpisAndGrid() {
               </div>
             </div>
 
-            <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:9px 10px;margin-bottom:10px;font-size:0.75rem;">
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:5px;">
-                <span style="color:#94a3b8;font-weight:700;">💳 Mensual (${formatCurrency(monthlyTotal)}):</span>
-                <span style="padding:2px 7px;border-radius:999px;font-weight:800;color:${mDue.color};background:${mDue.bg};">${mDue.label}</span>
+            <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:10px;margin-bottom:10px;font-size:0.75rem;">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+                <span style="color:#cbd5e1;font-weight:700;">💳 Mensual (${formatCurrency(monthlyTotal)}):</span>
+                <span style="padding:2px 8px;border-radius:999px;font-weight:800;color:${mDue.color};background:${mDue.bg};">${mDue.label}</span>
               </div>
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:7px;">
-                <span style="color:#94a3b8;font-weight:700;">📅 Anual (${formatCurrency(annualFee)}):</span>
-                <span style="padding:2px 7px;border-radius:999px;font-weight:800;color:${aDue.color};background:${aDue.bg};">${aDue.label}</span>
+              <div class="saas-cycle-track">
+                <div class="saas-cycle-fill" style="width:${mDue.progressPct}%;background:${mDue.barColor};"></div>
               </div>
-              <div style="display:flex;gap:6px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:4px;">
+                <span style="color:#cbd5e1;font-weight:700;">📅 Anual (${formatCurrency(annualFee)}):</span>
+                <span style="padding:2px 8px;border-radius:999px;font-weight:800;color:${aDue.color};background:${aDue.bg};">${aDue.label}</span>
+              </div>
+              <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:7px;">${escapeHtml(lastPayStr)}</div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
                 <button type="button" class="btn btn-outline btn-sm" data-saas-pay-month="${escapeHtml(t.tenantSlug)}" style="flex:1;padding:4px 6px;font-size:0.71rem;">✅ Cobrar Mes (+1m)</button>
                 <button type="button" class="btn btn-outline btn-sm" data-saas-pay-year="${escapeHtml(t.tenantSlug)}" style="flex:1;padding:4px 6px;font-size:0.71rem;">✅ Cobrar Año (+1a)</button>
+                ${
+                  showRemindBtn
+                    ? `<button type="button" class="btn btn-outline btn-sm" data-saas-remind="${escapeHtml(t.tenantSlug)}" style="width:100%;padding:5px 8px;font-size:0.72rem;color:#fde68a !important;border-color:#d97706 !important;">💬 Recordar Pago por WhatsApp</button>`
+                    : ""
+                }
               </div>
             </div>
 
-            ${t.billingNotes ? `<div style="font-size:0.75rem;color:#cbd5e1;margin-bottom:8px;">📝 ${escapeHtml(t.billingNotes)}</div>` : ""}
+            ${t.billingNotes ? `<div style="font-size:0.74rem;color:#cbd5e1;margin-bottom:8px;">📝 Nota facturación: ${escapeHtml(t.billingNotes)}</div>` : ""}
 
             <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
               <a href="${origin}/${qParam}" target="_blank" rel="noopener" class="saas-link-chip">🛒 Tienda</a>
@@ -310,6 +401,15 @@ function renderKpisAndGrid() {
 }
 
 document.getElementById("saasSearchInput").addEventListener("input", renderKpisAndGrid);
+document.getElementById("saasBillingFilters")?.addEventListener("click", (e) => {
+  const chip = e.target.closest("button[data-billing-filter]");
+  if (!chip) return;
+  activeBillingFilter = chip.dataset.billingFilter || "all";
+  document.querySelectorAll("#saasBillingFilters .saas-filter-chip").forEach((b) => {
+    b.classList.toggle("active", b === chip);
+  });
+  renderKpisAndGrid();
+});
 document.getElementById("btnSaasRefresh").addEventListener("click", loadTenantsAndTelemetry);
 
 document.getElementById("btnSaasResyncSalinas").addEventListener("click", async () => {
@@ -370,6 +470,10 @@ document.getElementById("newTenantForm").addEventListener("submit", async (e) =>
   const primaryColor = document.getElementById("ntPrimaryColor").value;
   const maxDrivers = Number(document.getElementById("ntMaxDrivers").value) || 10;
   const monthlyFeeMxn = Number(document.getElementById("ntMonthlyFee").value) || 0;
+  const perDriverFeeMxn = Number(document.getElementById("ntPerDriverFee")?.value) || 0;
+  const annualFeeMxn = Number(document.getElementById("ntAnnualFee")?.value) || 0;
+  const nextMonthlyDue = document.getElementById("ntNextMonthlyDue")?.value || "";
+  const nextAnnualDue = document.getElementById("ntNextAnnualDue")?.value || "";
   const coords = parseCoordsFromInput(document.getElementById("ntBaseCoords").value) || { lat: 25.407054, lng: -100.954645 };
   const adminPassword = document.getElementById("ntAdminPass").value.trim();
   const ownerPassword = document.getElementById("ntOwnerPass").value.trim();
@@ -415,6 +519,24 @@ document.getElementById("newTenantForm").addEventListener("submit", async (e) =>
 
     const origin = window.location.origin;
     const tSlug = res.tenantSlug;
+    if (perDriverFeeMxn > 0 || annualFeeMxn > 0 || nextMonthlyDue || nextAnnualDue) {
+      await callSaasApi("saasUpdateTenant", {
+        saasKeyHash: currentSaasHash,
+        tenantSlug: tSlug,
+        updates: {
+          plan: {
+            tier: "pro",
+            maxDrivers,
+            monthlyFeeMxn,
+            perDriverFeeMxn,
+            annualFeeMxn,
+            nextMonthlyDue,
+            nextAnnualDue,
+            paymentHistory: []
+          }
+        }
+      });
+    }
     const kit =
       `🚀 *BIENVENIDO A RUTA PRO DISTRIBUTION*\n` +
       `Empresa: *${brandName}* (Código: *${tSlug}*)\n\n` +
@@ -480,7 +602,24 @@ document.getElementById("saasTenantsGrid").addEventListener("click", async (e) =
     const slug = payMonthBtn.dataset.saasPayMonth;
     const t = allTenants.find((x) => x.tenantSlug === slug);
     if (!t) return;
-    const nextDate = addMonthsIso(t.plan?.nextMonthlyDue, 1);
+    const prevDue = t.plan?.nextMonthlyDue || "";
+    const todayIso = getTodayIsoLocal();
+    const daysLate = prevDue ? Math.round((new Date(todayIso + "T00:00:00") - new Date(prevDue + "T00:00:00")) / 86400000) : 0;
+    const drvCount = Number(t.telemetry?.driversConfigured) || 0;
+    const amount = (Number(t.plan?.monthlyFeeMxn) || 0) + (Number(t.plan?.perDriverFeeMxn) || 0) * drvCount;
+    const nextDate = addMonthsIso(prevDue, 1);
+    const prevHist = Array.isArray(t.plan?.paymentHistory) ? t.plan.paymentHistory : [];
+    const nextHist = [
+      {
+        id: "pay_" + Date.now().toString(36),
+        type: "mensual",
+        amount,
+        dueDate: prevDue || todayIso,
+        paidAtIso: new Date().toISOString(),
+        daysLate
+      },
+      ...prevHist
+    ].slice(0, 24);
     try {
       await callSaasApi("saasUpdateTenant", {
         saasKeyHash: currentSaasHash,
@@ -489,11 +628,12 @@ document.getElementById("saasTenantsGrid").addEventListener("click", async (e) =
           plan: {
             ...(t.plan || {}),
             nextMonthlyDue: nextDate,
-            lastPaymentAtIso: new Date().toISOString()
+            lastPaymentAtIso: new Date().toISOString(),
+            paymentHistory: nextHist
           }
         }
       });
-      showToast(`✅ Pago mensual registrado para ${t.brandName}. Próximo corte: ${nextDate}.`);
+      showToast(`✅ Pago mensual (${formatCurrency(amount)}) registrado para ${t.brandName}. Próximo corte: ${nextDate}.`);
       loadTenantsAndTelemetry();
     } catch (err) {
       showToast(err.message);
@@ -506,7 +646,23 @@ document.getElementById("saasTenantsGrid").addEventListener("click", async (e) =
     const slug = payYearBtn.dataset.saasPayYear;
     const t = allTenants.find((x) => x.tenantSlug === slug);
     if (!t) return;
-    const nextDate = addMonthsIso(t.plan?.nextAnnualDue, 12);
+    const prevDue = t.plan?.nextAnnualDue || "";
+    const todayIso = getTodayIsoLocal();
+    const daysLate = prevDue ? Math.round((new Date(todayIso + "T00:00:00") - new Date(prevDue + "T00:00:00")) / 86400000) : 0;
+    const amount = Number(t.plan?.annualFeeMxn) || 0;
+    const nextDate = addMonthsIso(prevDue, 12);
+    const prevHist = Array.isArray(t.plan?.paymentHistory) ? t.plan.paymentHistory : [];
+    const nextHist = [
+      {
+        id: "pay_" + Date.now().toString(36),
+        type: "anual",
+        amount,
+        dueDate: prevDue || todayIso,
+        paidAtIso: new Date().toISOString(),
+        daysLate
+      },
+      ...prevHist
+    ].slice(0, 24);
     try {
       await callSaasApi("saasUpdateTenant", {
         saasKeyHash: currentSaasHash,
@@ -515,15 +671,74 @@ document.getElementById("saasTenantsGrid").addEventListener("click", async (e) =
           plan: {
             ...(t.plan || {}),
             nextAnnualDue: nextDate,
-            lastAnnualPaymentAtIso: new Date().toISOString()
+            lastAnnualPaymentAtIso: new Date().toISOString(),
+            paymentHistory: nextHist
           }
         }
       });
-      showToast(`✅ Anualidad registrada para ${t.brandName}. Próxima renovación: ${nextDate}.`);
+      showToast(`✅ Anualidad (${formatCurrency(amount)}) registrada para ${t.brandName}. Próxima renovación: ${nextDate}.`);
       loadTenantsAndTelemetry();
     } catch (err) {
       showToast(err.message);
     }
+    return;
+  }
+
+  const remindBtn = e.target.closest("button[data-saas-remind]");
+  if (remindBtn) {
+    const slug = remindBtn.dataset.saasRemind;
+    const t = allTenants.find((x) => x.tenantSlug === slug);
+    if (!t) return;
+    const drvCount = Number(t.telemetry?.driversConfigured) || 0;
+    const mAmt = (Number(t.plan?.monthlyFeeMxn) || 0) + (Number(t.plan?.perDriverFeeMxn) || 0) * drvCount;
+    const aAmt = Number(t.plan?.annualFeeMxn) || 0;
+    const msg =
+      `Hola *${t.brandName}*, te saludamos de *Ruta Pro Distribution*.\n` +
+      `Te compartimos tu recordatorio de renovación de servicio:\n` +
+      (t.plan?.nextMonthlyDue ? `• *Mensualidad:* ${formatCurrency(mAmt)} (corte: ${t.plan.nextMonthlyDue})\n` : "") +
+      (t.plan?.nextAnnualDue && aAmt > 0 ? `• *Anualidad:* ${formatCurrency(aAmt)} (vence: ${t.plan.nextAnnualDue})\n` : "") +
+      `Quedamos pendientes de tu comprobante para mantener tu flotilla activa al 100%. ¡Gracias!`;
+    const phoneDigits = String(t.contactPhone || "").replace(/\D/g, "").slice(-10);
+    if (phoneDigits.length === 10) {
+      window.open(`https://api.whatsapp.com/send?phone=52${phoneDigits}&text=${encodeURIComponent(msg)}`, "_blank", "noopener");
+    } else {
+      await navigator.clipboard?.writeText?.(msg);
+      showToast("📋 Recordatorio de pago copiado (no hay WhatsApp de 10 dígitos guardado en este tenant).");
+    }
+    return;
+  }
+
+  const histBtn = e.target.closest("button[data-saas-history]");
+  if (histBtn) {
+    const slug = histBtn.dataset.saasHistory;
+    const t = allTenants.find((x) => x.tenantSlug === slug);
+    if (!t) return;
+    const hist = Array.isArray(t.plan?.paymentHistory) ? t.plan.paymentHistory : [];
+    const punct = computePunctualityBadge(t.plan);
+    document.getElementById("phModalTitle").textContent = `📜 Pagos de ${t.brandName}`;
+    document.getElementById("phModalSub").textContent = `Comportamiento: ${punct.label}`;
+    const listEl = document.getElementById("phHistoryList");
+    listEl.innerHTML = hist.length
+      ? hist
+          .map((h) => {
+            const late = Number(h.daysLate) || 0;
+            const badge =
+              late <= 1
+                ? `<span style="color:#6ee7b7;background:rgba(16,185,129,0.16);padding:2px 7px;border-radius:999px;font-size:0.7rem;font-weight:800;">✅ A tiempo</span>`
+                : `<span style="color:#fca5a5;background:rgba(239,68,68,0.2);padding:2px 7px;border-radius:999px;font-size:0.7rem;font-weight:800;">⏰ +${late}d tarde</span>`;
+            return `
+              <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:9px 11px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                <div>
+                  <strong style="color:#fff;font-size:0.86rem;">${h.type === "anual" ? "📅 Anualidad" : "💳 Mensualidad"} • ${formatCurrency(h.amount || 0)}</strong>
+                  <div style="font-size:0.72rem;color:#94a3b8;">Pagó: ${String(h.paidAtIso || "").slice(0, 10)} (Corte: ${h.dueDate || "-"})</div>
+                </div>
+                ${badge}
+              </div>
+            `;
+          })
+          .join("")
+      : `<div style="color:#94a3b8;font-size:0.82rem;text-align:center;padding:18px;">Aún no hay pagos registrados para este tenant.</div>`;
+    document.getElementById("paymentHistoryModal")?.classList.add("open");
     return;
   }
 
@@ -593,6 +808,16 @@ document.getElementById("btnSaveTenantEdit").addEventListener("click", async () 
     showToast(err.message);
   } finally {
     btn.disabled = false;
+  }
+});
+
+document.getElementById("btnCloseHistoryModal")?.addEventListener("click", () => {
+  document.getElementById("paymentHistoryModal")?.classList.remove("open");
+});
+
+document.getElementById("paymentHistoryModal")?.addEventListener("click", (e) => {
+  if (e.target.id === "paymentHistoryModal") {
+    e.currentTarget.classList.remove("open");
   }
 });
 
