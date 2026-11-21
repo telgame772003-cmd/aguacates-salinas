@@ -3077,6 +3077,10 @@ function subscribeRouteCorteDay(dateStr) {
   if (allRoutesTodayUnsub) allRoutesTodayUnsub();
 
   selectedRouteDate = dateStr;
+  const btnRouteTodayEl = document.getElementById("btnRouteToday");
+  if (btnRouteTodayEl) {
+    btnRouteTodayEl.style.display = dateStr === getLocalDateStr() ? "none" : "inline-flex";
+  }
   allDriverRoutesTodayMap.clear();
   routeWhDoc = createEmptyWhDoc(dateStr);
   routeSalesList = [];
