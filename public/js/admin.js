@@ -493,11 +493,22 @@ function enterDashboard() {
     }
   })();
   const isNative = Boolean(window.Capacitor?.isNativePlatform?.() || window.SalinasNative);
-  if (fromDriver) {
-    btn.innerHTML = '🚗 <span class="hide-mobile">Volver a Chofer</span>';
-    btn.title = "Regresar a la App del Chofer";
+  if (isNative) {
+    document.querySelectorAll('a[href="index.html"], a[href="almacen.html"]').forEach((a) => {
+      if (a.getAttribute("href") === "index.html") {
+        a.style.display = "none";
+      } else {
+        a.removeAttribute("target");
+      }
+    });
   }
   if (fromDriver || isNative) {
+    btn.innerHTML = '🚗 <span>Chofer</span>';
+    btn.title = "Regresar a la App del Chofer";
+    btn.style.borderColor = "#15803d";
+    btn.style.color = "#14532d";
+    btn.style.background = "#ecfdf5";
+    btn.style.fontWeight = "800";
     btn.removeAttribute("target");
     btn.addEventListener("click", (e) => {
       e.preventDefault();

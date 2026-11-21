@@ -14,28 +14,45 @@ if (fs.existsSync(OUT_DIR)) {
 }
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
-// 1. Copiar recursos visuales y hojas de estilo
-for (const folder of ["assets", "css"]) {
+// 1. Copiar recursos visuales, hojas de estilo y catálogos geográficos (data/)
+for (const folder of ["assets", "css", "data"]) {
   const src = path.join(PUBLIC_DIR, folder);
   if (fs.existsSync(src)) {
     fs.cpSync(src, path.join(OUT_DIR, folder), { recursive: true });
   }
 }
 
-// 2. Copiar únicamente los módulos JS requeridos por el Chofer
+// 2. Copiar módulos JS requeridos por Chofer + Rol Mixto Admin/Almacén (incluyendo tenant-config.js)
 const jsOut = path.join(OUT_DIR, "js");
 fs.mkdirSync(jsOut, { recursive: true });
-for (const jsFile of ["firebase-config.js", "manuals-data.js", "driver.js", "native-bg-gps.js", "salinas-debug-logger.js", "route-optimizer.js"]) {
+for (const jsFile of [
+  "tenant-config.js",
+  "firebase-config.js",
+  "manuals-data.js",
+  "driver.js",
+  "admin.js",
+  "almacen.js",
+  "prospects-zones.js",
+  "native-bg-gps.js",
+  "salinas-debug-logger.js",
+  "route-optimizer.js"
+]) {
   const srcJs = path.join(PUBLIC_DIR, "js", jsFile);
   if (fs.existsSync(srcJs)) {
     fs.copyFileSync(srcJs, path.join(jsOut, jsFile));
   }
 }
 
-// 3. Empaquetar chofer.html como index.html raíz de la app nativa y chofer.html
+// 3. Empaquetar chofer.html como index.html raíz (inicio de la app nativa) + vistas internas admin.html y almacen.html
 const choferHtml = path.join(PUBLIC_DIR, "chofer.html");
 fs.copyFileSync(choferHtml, path.join(OUT_DIR, "index.html"));
 fs.copyFileSync(choferHtml, path.join(OUT_DIR, "chofer.html"));
+for (const extraHtml of ["admin.html", "almacen.html"]) {
+  const srcHtml = path.join(PUBLIC_DIR, extraHtml);
+  if (fs.existsSync(srcHtml)) {
+    fs.copyFileSync(srcHtml, path.join(OUT_DIR, extraHtml));
+  }
+}
 
 // 4. Pantalla ligera de reconexión sin señal para zonas rurales / carretera
 const offlineHtml = `<!DOCTYPE html>
