@@ -2135,7 +2135,8 @@ body.map-fullscreen-open {
 }
 
 .pin-place-dot.st-sold { background: #16a34a; }
-.pin-place-dot.st-visited { background: #eab308; }
+.pin-place-dot.st-visited { background: #dc2626; }
+.pin-place-dot.st-route-pending { background: #facc15; }
 .pin-place-dot.st-pending { background: #64748b; }
 .pin-place-dot.is-frequent {
   box-shadow: 0 0 0 2.5px #f59e0b, 0 1px 4px rgba(0, 0, 0, 0.3);
@@ -2210,7 +2211,8 @@ body.map-fullscreen-open {
 }
 
 #adminLiveMap[data-zoom-tier="far"] .pin-place-dot.st-sold,
-#adminLiveMap[data-zoom-tier="far"] .pin-place-dot.st-visited {
+#adminLiveMap[data-zoom-tier="far"] .pin-place-dot.st-visited,
+#adminLiveMap[data-zoom-tier="far"] .pin-place-dot.st-route-pending {
   width: 12px;
   height: 12px;
   border-width: 2px;
@@ -2229,7 +2231,8 @@ body.map-fullscreen-open {
 }
 
 #adminLiveMap[data-zoom-tier="mid"] .pin-place-dot.st-sold,
-#adminLiveMap[data-zoom-tier="mid"] .pin-place-dot.st-visited {
+#adminLiveMap[data-zoom-tier="mid"] .pin-place-dot.st-visited,
+#adminLiveMap[data-zoom-tier="mid"] .pin-place-dot.st-route-pending {
   width: 16px;
   height: 16px;
 }

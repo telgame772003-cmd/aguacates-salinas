@@ -1628,11 +1628,12 @@ document.addEventListener("keydown", (ev) => {
   }
 });
 
-function placeMatchesMapFilter(place, status, stats30d) {
+function placeMatchesMapFilter(place, status, stats30d, inTodayRoute = false) {
   if (mapPinFilter === "all") return true;
   if (mapPinFilter === "orders") return false;
   if (mapPinFilter === "sold") return status.state === "sold";
   if (mapPinFilter === "visited") return status.state === "visited";
+  if (mapPinFilter === "route_pending") return status.state === "pending" && inTodayRoute;
   if (mapPinFilter === "pending") return status.state === "pending";
   if (mapPinFilter === "stale3d") {
     return stats30d ? (stats30d.daysSinceLastVisit === null || stats30d.daysSinceLastVisit >= 3) : false;
@@ -2214,9 +2215,26 @@ function renderGpsMapAndChips() {
     }
   }
 
+  const trailColors = ["#15803d", "#0284c7", "#7c3aed", "#b45309"];
+  const placeAssignedMap = new Map();
+  let assignColorIdx = 0;
+  for (const rDoc of allDriverRoutesTodayMap.values()) {
+    const dName = rDoc.driverName || rDoc.id;
+    const dColor = trailColors[assignColorIdx % trailColors.length];
+    assignColorIdx++;
+    const dInitials = getDriverInitials(dName);
+    for (const st of rDoc.stops || []) {
+      if (st.status === "done" || st.kind !== "place" || !st.id) continue;
+      if (!placeAssignedMap.has(st.id)) placeAssignedMap.set(st.id, []);
+      placeAssignedMap.get(st.id).push({ driverName: dName, color: dColor, initials: dInitials });
+    }
+  }
+  const activeRbStopIds = new Set(rbStops.map((s) => s.id).filter(Boolean));
+
   // Compute daily place supervision counts and category counts
   let soldCount = 0;
   let visitedCount = 0;
+  let routePendingCount = 0;
   let pendingCount = 0;
   let stale3dCount = 0;
   let stale7dCount = 0;
@@ -2228,15 +2246,20 @@ function renderGpsMapAndChips() {
   const placeEvaluations = validPlaces.map((p) => {
     const st = getPlaceDailyStatus(p);
     const stats30d = computePlace30dStats(p, historyIndex, todayStr);
+    const assignedDrivers = placeAssignedMap.get(p.id) || [];
+    const inTodayRoute = assignedDrivers.length > 0 || activeRbStopIds.has(p.id);
     if (st.state === "sold") soldCount++;
     else if (st.state === "visited") visitedCount++;
-    else pendingCount++;
+    else {
+      pendingCount++;
+      if (inTodayRoute) routePendingCount++;
+    }
     if (stats30d.daysSinceLastVisit === null || stats30d.daysSinceLastVisit >= 3) stale3dCount++;
     if (stats30d.daysSinceLastSale === null || stats30d.daysSinceLastSale >= 7) stale7dCount++;
     if (stats30d.salesCount30d >= 2 || stats30d.totalTouches30d >= 3) frequentCount++;
     const catKey = p.category || "tienda";
     if (catCounts[catKey] !== undefined) catCounts[catKey]++;
-    return { place: p, status: st, stats30d };
+    return { place: p, status: st, stats30d, assignedDrivers, inTodayRoute };
   });
 
   // Active orders with coordinates
@@ -2254,9 +2277,10 @@ function renderGpsMapAndChips() {
   if (filterBarEl) {
     const filters = [
       { id: "all", label: "Todos", count: validPlaces.length },
-      { id: "orders", label: "🔴 Pedidos", count: pinnedOrders.length },
+      { id: "orders", label: "📦 Pedidos", count: pinnedOrders.length },
       { id: "sold", label: "🟢 Compraron", count: soldCount },
-      { id: "visited", label: "🟡 Visitados", count: visitedCount },
+      { id: "visited", label: "🔴 No compraron", count: visitedCount },
+      { id: "route_pending", label: "🟡 En ruta", count: routePendingCount },
       { id: "pending", label: "⚪ Sin visita", count: pendingCount },
       { id: "stale3d", label: "⏳ +3d s/visita", count: stale3dCount },
       { id: "stale7d", label: "🚨 +7d s/compra", count: stale7dCount },
@@ -2279,9 +2303,10 @@ function renderGpsMapAndChips() {
   }
 
   if (summaryEl) {
+    const unroutedPendingCount = Math.max(0, pendingCount - routePendingCount);
     summaryEl.innerHTML = `
-      <span><strong>🏪 Negocios (${validPlaces.length}):</strong> 🟢 Compraron: <strong>${soldCount}</strong> • 🟡 Visitados s/venta: <strong>${visitedCount}</strong> • ⚪ Sin visita: <strong>${pendingCount}</strong></span>
-      <span><strong>📍 Pedidos Activos en Mapa:</strong> <strong>${pinnedOrders.length}</strong>${unpinnedActiveCount > 0 ? ` (${unpinnedActiveCount} pendientes de ubicar)` : ""}</span>
+      <span><strong>🏪 Negocios (${validPlaces.length}):</strong> 🟢 Compraron: <strong>${soldCount}</strong> • 🔴 No compraron: <strong>${visitedCount}</strong> • 🟡 Pendientes en ruta: <strong>${routePendingCount}</strong> • ⚪ Sin visita: <strong>${unroutedPendingCount}</strong></span>
+      <span><strong>📦 Pedidos Activos en Mapa:</strong> <strong>${pinnedOrders.length}</strong>${unpinnedActiveCount > 0 ? ` (${unpinnedActiveCount} pendientes de ubicar)` : ""}</span>
     `;
   }
 
@@ -2291,32 +2316,22 @@ function renderGpsMapAndChips() {
   mapFocusMarkers.clear();
 
   const boundsPoints = [];
-  const trailColors = ["#15803d", "#0284c7", "#7c3aed", "#b45309"];
-  const placeAssignedMap = new Map();
-  let assignColorIdx = 0;
-  for (const rDoc of allDriverRoutesTodayMap.values()) {
-    const dName = rDoc.driverName || rDoc.id;
-    const dColor = trailColors[assignColorIdx % trailColors.length];
-    assignColorIdx++;
-    const dInitials = getDriverInitials(dName);
-    for (const st of rDoc.stops || []) {
-      if (st.status === "done" || st.kind !== "place" || !st.id) continue;
-      if (!placeAssignedMap.has(st.id)) placeAssignedMap.set(st.id, []);
-      placeAssignedMap.get(st.id).push({ driverName: dName, color: dColor, initials: dInitials });
-    }
-  }
 
   // 1. Registered Places (Tiendas, Carnicerías, Restaurantes, Fruterías)
   const placeStatusById = new Map(placeEvaluations.map((ev) => [ev.place.id, ev.status]));
-  const activeRbStopIds = new Set(rbStops.map((s) => s.id).filter(Boolean));
-  for (const { place, status, stats30d } of placeEvaluations) {
-    if (!placeMatchesMapFilter(place, status, stats30d)) continue;
+  for (const { place, status, stats30d, assignedDrivers, inTodayRoute } of placeEvaluations) {
+    if (!placeMatchesMapFilter(place, status, stats30d, inTodayRoute)) continue;
     boundsPoints.push([place.lat, place.lng]);
     const cat = PLACE_CATEGORIES[place.category] || PLACE_CATEGORIES.tienda;
     const stClass =
-      status.state === "sold" ? "st-sold" : status.state === "visited" ? "st-visited" : "st-pending";
+      status.state === "sold"
+        ? "st-sold"
+        : status.state === "visited"
+          ? "st-visited"
+          : inTodayRoute
+            ? "st-route-pending"
+            : "st-pending";
     const isGoldFrequent = stats30d.salesCount30d >= 3;
-    const assignedDrivers = placeAssignedMap.get(place.id) || [];
     const hasNumberedStopOnPin = activeRbStopIds.has(place.id);
     const assignedTagHtml =
       assignedDrivers.length > 0 && !hasNumberedStopOnPin
@@ -2329,8 +2344,10 @@ function renderGpsMapAndChips() {
       status.state === "sold"
         ? `<div style="margin-top:5px;background:#dcfce7;color:#14532d;padding:4px 7px;border-radius:6px;font-size:0.78rem;font-weight:700;">🟢 Compró hoy: ${status.boxes} caja(s) (${formatCurrency(status.amount)}) • ${escapeHtml(status.driver)}</div>`
         : status.state === "visited"
-          ? `<div style="margin-top:5px;background:#fef9c3;color:#713f12;padding:4px 7px;border-radius:6px;font-size:0.78rem;font-weight:700;">🟡 Visitado hoy por ${escapeHtml(status.driver)}: ${escapeHtml(status.reason)}${status.distanceMeters !== null ? ` (GPS a ${status.distanceMeters} m)` : ""}</div>`
-          : `<div style="margin-top:5px;background:#f1f5f9;color:#475569;padding:4px 7px;border-radius:6px;font-size:0.78rem;">⚪ Aún sin visita registrada en esta fecha</div>`;
+          ? `<div style="margin-top:5px;background:#fee2e2;color:#991b1b;padding:4px 7px;border-radius:6px;font-size:0.78rem;font-weight:700;">🔴 Visitado hoy (no compró) por ${escapeHtml(status.driver)}: ${escapeHtml(status.reason)}${status.distanceMeters !== null ? ` (GPS a ${status.distanceMeters} m)` : ""}</div>`
+          : inTodayRoute
+            ? `<div style="margin-top:5px;background:#fef9c3;color:#713f12;padding:4px 7px;border-radius:6px;font-size:0.78rem;font-weight:700;">🟡 Pendiente de visitar hoy (en ruta)</div>`
+            : `<div style="margin-top:5px;background:#f1f5f9;color:#475569;padding:4px 7px;border-radius:6px;font-size:0.78rem;">⚪ Aún sin visita ni ruta registrada hoy</div>`;
 
     const lastSaleLine = stats30d.lastSaleDate
       ? `🛒 Últ. compra: <strong>${escapeHtml(formatRelativeDaysLabel(stats30d.daysSinceLastSale, stats30d.lastSaleDate))}</strong> • ${stats30d.lastSaleBoxes} caja(s) (${formatCurrency(stats30d.lastSaleAmount)})${stats30d.lastSaleDriver ? ` • ${escapeHtml(stats30d.lastSaleDriver)}` : ""}`
@@ -2362,10 +2379,12 @@ function renderGpsMapAndChips() {
 
     const todayHoverBadge =
       status.state === "sold"
-        ? `<div style="color:#15803d;font-weight:700;">🟢 Hoy: ${status.boxes} caja(s) (${formatCurrency(status.amount)})</div>`
+        ? `<div style="color:#15803d;font-weight:700;">🟢 Hoy: compró ${status.boxes} caja(s) (${formatCurrency(status.amount)})</div>`
         : status.state === "visited"
-          ? `<div style="color:#a16207;font-weight:700;">🟡 Visitado hoy (${escapeHtml(status.driver || "chofer")})</div>`
-          : `<div style="color:#64748b;">⚪ Sin visita hoy</div>`;
+          ? `<div style="color:#dc2626;font-weight:700;">🔴 Visitado hoy — no compró (${escapeHtml(status.driver || "chofer")})</div>`
+          : inTodayRoute
+            ? `<div style="color:#a16207;font-weight:700;">🟡 Pendiente de visitar hoy</div>`
+            : `<div style="color:#64748b;">⚪ Sin visita hoy</div>`;
 
     const tooltipHtml = `
       <div class="salinas-tt-inner">
@@ -2407,7 +2426,7 @@ function renderGpsMapAndChips() {
       </div>
     `;
 
-    const zOff = status.state === "sold" ? 300 : status.state === "visited" ? 200 : isGoldFrequent ? 100 : 0;
+    const zOff = status.state === "sold" ? 300 : status.state === "visited" ? 250 : inTodayRoute ? 200 : isGoldFrequent ? 100 : 0;
     const isTouchMap = isTouchDeviceViewport();
     const m = window.L.marker([place.lat, place.lng], { icon, zIndexOffset: zOff })
       .addTo(mapLayerGroup)
