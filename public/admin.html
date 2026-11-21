@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
-  <link rel="stylesheet" href="css/styles.css?v=pz_17">
+  <link rel="stylesheet" href="css/styles.css?v=pz_20">
 </head>
 <body class="admin-body">
 
@@ -503,27 +503,30 @@
 
           <!-- Panel de Cuadrantes Manuales y KML -->
           <div id="pzQuadrantsPanel" style="display:none;background:#fff;padding:12px;border-radius:10px;border:1px solid #cbd5e1;">
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
               <div>
-                <strong style="font-size:0.9rem;color:#0f172a;">📐 Gestor de Cuadrantes y Polígonos KML</strong>
-                <div style="font-size:0.76rem;color:#64748b;">Dibuja cuadrantes clic por clic en el mapa o importa un archivo <code>.kml</code> de Google My Maps.</div>
+                <strong style="font-size:0.9rem;color:#0f172a;">📐 Catálogo de Zonas, Colonias y Polígonos KML</strong>
+                <div style="font-size:0.76rem;color:#64748b;">Alterna entre las <strong>18 Zonas Operativas</strong> (sin traslapes), las <strong>35 Colonias Comerciales</strong>, dibuja a mano o importa/descarga en <code>.kml</code>.</div>
               </div>
               <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                <button type="button" id="btnStartDrawQuad" class="btn btn-primary btn-sm">✏️ Dibujar Cuadrante</button>
+                <button type="button" id="btnLoadPresetQuads" class="btn btn-primary btn-sm" style="background:#0f766e;border-color:#0f766e;" title="Cargar las 18 Zonas Operativas de Saltillo, Ramos Arizpe y Arteaga">🗺️ 18 Zonas Región</button>
+                <button type="button" id="btnLoadTopColonias" class="btn btn-outline btn-sm" style="border-color:#0284c7;color:#0369a1;" title="Cargar polígonos individuales de las 35 colonias con mayor densidad comercial">🏘️ 35 Colonias Clave</button>
+                <button type="button" id="btnStartDrawQuad" class="btn btn-outline btn-sm">✏️ Dibujar</button>
                 <button type="button" id="btnFinishDrawQuad" class="btn btn-primary btn-sm" style="display:none;background:#0284c7;">✅ Cerrar Polígono</button>
                 <button type="button" id="btnCancelDrawQuad" class="btn btn-outline btn-sm" style="display:none;color:#dc2626;">✕ Cancelar</button>
                 <label class="btn btn-outline btn-sm" style="cursor:pointer;margin:0;">
                   📂 Subir KML
                   <input type="file" id="inpImportKml" accept=".kml,.xml" style="display:none;">
                 </label>
-                <button type="button" id="btnExportKml" class="btn btn-outline btn-sm">💾 Descargar KML</button>
-                <button type="button" id="btnLoadPresetQuads" class="btn btn-outline btn-sm" title="Cargar sectores base de Saltillo y Ramos Arizpe">⚡ Sectores Base</button>
+                <button type="button" id="btnExportKml" class="btn btn-outline btn-sm" title="Descargar en KML los polígonos activos en pantalla">💾 Exportar Activos</button>
+                <a href="data/zonas-colonias-saltillo-ramos-arteaga.kml" download="zonas-colonias-saltillo-ramos-arteaga.kml" class="btn btn-outline btn-sm" title="Descargar archivo KML maestro con las 18 Zonas + 35 Colonias para Google My Maps">📥 KML Maestro</a>
+                <button type="button" id="btnClearAllQuads" class="btn btn-outline btn-sm" style="color:#dc2626;border-color:#fecaca;" title="Vaciar polígonos cargados">🗑️</button>
               </div>
             </div>
             <div id="pzDrawHint" style="display:none;background:#eff6ff;border:1px solid #93c5fd;color:#1e3a8a;padding:8px 10px;border-radius:8px;font-size:0.8rem;font-weight:700;margin-bottom:8px;">
               👆 Haz clic en el mapa para marcar cada esquina del cuadrante (mínimo 3 puntos). Presiona <strong>✅ Cerrar Polígono</strong> cuando termines.
             </div>
-            <div id="pzQuadrantsList" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(235px,1fr));gap:8px;"></div>
+            <div id="pzQuadrantsList" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,235px),1fr));gap:8px;max-height:360px;overflow-y:auto;overflow-x:hidden;"></div>
           </div>
 
           <!-- Panel de Anillos Concéntricos -->
@@ -1282,7 +1285,7 @@
   <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-  <script type="module" src="js/admin.js?v=pz_17"></script>
-  <script type="module" src="js/prospects-zones.js?v=pz_17"></script>
+  <script type="module" src="js/admin.js?v=pz_21"></script>
+  <script type="module" src="js/prospects-zones.js?v=pz_21"></script>
 </body>
 </html>

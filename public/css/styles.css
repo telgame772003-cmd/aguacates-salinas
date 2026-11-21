@@ -2259,6 +2259,21 @@ body.map-fullscreen-open {
   pointer-events: none !important;
 }
 
+/* Modo KML / Cuadrantes activo: solo reaccionan las zonas (los pines de tiendas no roban el clic ni el hover) */
+#adminLiveMap.is-kml-zones-mode .leaflet-marker-pane,
+#adminLiveMap.is-kml-zones-mode .leaflet-marker-pane *,
+#adminLiveMap.is-kml-zones-mode .salinas-place-tooltip {
+  pointer-events: none !important;
+}
+
+#adminLiveMap.is-kml-zones-mode .leaflet-marker-pane {
+  opacity: 0.68;
+}
+
+#adminLiveMap.is-kml-zones-mode .leaflet-overlay-pane path.leaflet-interactive {
+  cursor: pointer !important;
+}
+
 .gps-driver-chips {
   display: flex;
   flex-wrap: nowrap;

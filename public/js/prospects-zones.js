@@ -103,6 +103,7 @@ let showQuadrants = false;
 let showConcentric = false;
 
 let quadrants = [];
+let zonesCatalog = { sectors: [], colonias: [] };
 let concentricRadiiKm = [3, 7, 12, 20];
 
 let prospectClusterGroup = null;
@@ -209,6 +210,31 @@ async function fetchProspectsJson() {
     recomputeDeduplicatedProspects();
   } catch (err) {
     console.warn("No se pudo cargar prospectos DENUE:", err);
+  }
+}
+
+function isBuiltInCatalogQuadId(id) {
+  return typeof id === "string" && (id.startsWith("sec_") || id.startsWith("col_") || id.startsWith("quad_"));
+}
+
+async function fetchZonesCatalogJson() {
+  try {
+    const resp = await fetch(`data/zonas-colonias-saltillo.json?v=${Date.now()}`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    zonesCatalog = {
+      sectors: Array.isArray(data.sectors) ? data.sectors : [],
+      colonias: Array.isArray(data.colonias) ? data.colonias : []
+    };
+    const onlyLegacyPreset =
+      quadrants.length > 0 && quadrants.every((q) => typeof q.id === "string" && q.id.startsWith("quad_"));
+    if ((quadrants.length === 0 || onlyLegacyPreset) && zonesCatalog.sectors.length > 0) {
+      quadrants = structuredClone(zonesCatalog.sectors);
+      updateZoneFilterDropdown();
+      renderQuadrantsUIAndLayer();
+    }
+  } catch (err) {
+    console.warn("No se pudo cargar catálogo de zonas y colonias:", err);
   }
 }
 
@@ -574,11 +600,337 @@ ${placemarksXml}
 </kml>`;
 }
 
+function getPolygonCenterLatLng(polygon) {
+  if (!Array.isArray(polygon) || !polygon.length) return [25.435, -100.975];
+  let sumLat = 0;
+  let sumLng = 0;
+  for (const pt of polygon) {
+    sumLat += pt[0];
+    sumLng += pt[1];
+  }
+  return [sumLat / polygon.length, sumLng / polygon.length];
+}
+
+function getZoneEntities(q) {
+  const bridge = getBridge();
+  const places = (bridge?.getAllPlaces?.() || []).filter(
+    (p) => typeof p.lat === "number" && typeof p.lng === "number" && isPointInPolygon(p.lat, p.lng, q.polygon)
+  );
+  const cat = document.getElementById("pzFilterCat")?.value || "all";
+  const prospectsInZone = activeProspects.filter(
+    (pr) => (cat === "all" || pr.c === cat) && isPointInPolygon(pr.lat, pr.lng, q.polygon)
+  );
+  const highProspects = prospectsInZone.filter((pr) => pr.tier === "alto");
+  return { places, prospectsInZone, highProspects, cat };
+}
+
+function placeToRouteStopObj(p) {
+  const catMeta = CAT_META[p.category] || { emoji: "🏪", label: p.category || "Cliente" };
+  return {
+    id: p.id,
+    kind: "place",
+    name: `${catMeta.emoji} ${p.name}`,
+    phone: p.phone || "",
+    category: p.category || "tienda",
+    address: p.address || "",
+    subtitle: `Cliente • ${p.address || ""}`,
+    lat: p.lat,
+    lng: p.lng,
+    boxes: 0,
+    status: "pending",
+    pinEmoji: "🥑",
+    actionLabel: "➕ Vender / Cobrar",
+    arrivalActionLabel: "➕ Vender Aquí"
+  };
+}
+
+function prospectToRouteStopObj(pr) {
+  const meta = CAT_META[pr.c] || CAT_META.tienda;
+  return {
+    id: `denue_${pr.id}`,
+    kind: "place",
+    name: `${meta.emoji} ${pr.n}`,
+    phone: pr.tel || "",
+    category: pr.c === "comedor" ? "restaurante" : pr.c,
+    address: pr.dir || pr.col || "",
+    subtitle: `Prospecto ${pr.sub} (${pr.sz} emp.) • ${pr.col || pr.mun}`,
+    lat: pr.lat,
+    lng: pr.lng,
+    boxes: 0,
+    status: "pending",
+    pinEmoji: meta.emoji,
+    actionLabel: "➕ Prospectar / Vender",
+    arrivalActionLabel: "➕ Visitar Prospecto"
+  };
+}
+
+function buildZoneStopsForMode(q, mode = "pack28") {
+  const { places, prospectsInZone, highProspects } = getZoneEntities(q);
+  const [cLat, cLng] = getPolygonCenterLatLng(q.polygon);
+
+  const sortedProspects = [...prospectsInZone].sort((a, b) => {
+    const tDiff = (a.tier === "alto" ? 0 : 1) - (b.tier === "alto" ? 0 : 1);
+    if (tDiff !== 0) return tDiff;
+    return haversineM(a.lat, a.lng, cLat, cLng) - haversineM(b.lat, b.lng, cLat, cLng);
+  });
+
+  if (mode === "places") {
+    return places.map(placeToRouteStopObj);
+  }
+  if (mode === "high") {
+    return highProspects.map(prospectToRouteStopObj);
+  }
+  const allCombined = [...places.map(placeToRouteStopObj), ...sortedProspects.map(prospectToRouteStopObj)];
+  if (mode === "all") {
+    return allCombined;
+  }
+  // pack28: paquete manejable de hasta 28 paradas priorizando clientes + prospectos top cercanos
+  return allCombined.slice(0, 28);
+}
+
+function renderZoneDriversListHtml(quadId) {
+  const bridge = getBridge();
+  const summaries = bridge?.getDriversRouteSummary?.() ||
+    (bridge?.getDriversList?.() || []).map((name) => ({ name, totalCount: 0, state: "empty" }));
+
+  if (!summaries.length) {
+    return `<div style="font-size:0.75rem;color:#64748b;padding:6px;">No hay choferes registrados.</div>`;
+  }
+
+  return summaries
+    .map((drv) => {
+      const hasRoute = drv.totalCount > 0;
+      const statusBadge = hasRoute
+        ? `<span style="font-size:0.68rem;font-weight:800;padding:2px 6px;border-radius:999px;background:${
+            drv.state === "sent" ? "#dcfce7" : "#dbeafe"
+          };color:${drv.state === "sent" ? "#15803d" : "#1d4ed8"};">${
+            drv.state === "sent" ? "✅" : "📝"
+          } ${drv.totalCount} paradas</span>`
+        : `<span style="font-size:0.68rem;font-weight:700;padding:2px 6px;border-radius:999px;background:#f1f5f9;color:#64748b;">Sin ruta</span>`;
+
+      const actionTag = hasRoute
+        ? `<span style="font-size:0.72rem;font-weight:900;color:#0f766e;">+ Adicionar</span>`
+        : `<span style="font-size:0.72rem;font-weight:800;color:#15803d;">Asignar</span>`;
+
+      return `
+        <button type="button"
+          onclick="window.__pzAssignZoneToDriver('${esc(quadId)}', '${esc(drv.name)}', this)"
+          style="width:100%;display:flex;justify-content:space-between;align-items:center;gap:6px;padding:7px 9px;border-radius:8px;border:1.5px solid ${
+            hasRoute ? "#99f6e4" : "#e2e8f0"
+          };background:${hasRoute ? "#f0fdfa" : "#ffffff"};cursor:pointer;text-align:left;transition:background 0.15s;">
+          <div style="min-width:0;flex:1;">
+            <div style="font-size:0.79rem;font-weight:800;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🚗 ${esc(drv.name)}</div>
+            <div style="margin-top:2px;">${statusBadge}</div>
+          </div>
+          ${actionTag}
+        </button>
+      `;
+    })
+    .join("");
+}
+
+function buildZoneReactiveModalHtml(q, expandDrivers = false) {
+  const { places, prospectsInZone, highProspects } = getZoneEntities(q);
+  const totalCount = places.length + prospectsInZone.length;
+  const colsHtml = Array.isArray(q.topColonias) && q.topColonias.length
+    ? `<div style="font-size:0.74rem;color:#64748b;margin-top:3px;line-height:1.3;">🏘️ ${esc(q.topColonias.slice(0, 4).join(", "))}</div>`
+    : "";
+
+  const defaultPackLabel =
+    totalCount > 28
+      ? `📦 Paquete sugerido (28 de ${totalCount} paradas)`
+      : `📍 Todos los puntos de la zona (${totalCount})`;
+
+  return `
+    <div style="position:relative;width:100%;box-sizing:border-box;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+        <div style="display:flex;align-items:flex-start;gap:8px;min-width:0;flex:1;">
+          <span style="width:12px;height:12px;border-radius:50%;background:${esc(q.color || "#15803d")};flex-shrink:0;margin-top:4px;"></span>
+          <strong style="font-size:0.96rem;color:#0f172a;line-height:1.25;word-break:break-word;">${esc(q.name)}</strong>
+        </div>
+        <button type="button" onclick="window.__pzCloseZoneModal()" aria-label="Cerrar"
+          style="width:30px;height:30px;border-radius:50%;border:1px solid #cbd5e1;background:#f8fafc;color:#334155;font-size:0.95rem;font-weight:900;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;">
+          ✕
+        </button>
+      </div>
+      ${colsHtml}
+
+      <div style="font-size:0.78rem;color:#334155;margin:9px 0;background:#f8fafc;padding:7px 10px;border-radius:8px;border:1px solid #e2e8f0;">
+        🏪 <strong>${places.length}</strong> clientes &nbsp;•&nbsp; 🎯 <strong>${prospectsInZone.length}</strong> prospectos (${highProspects.length} 🔥)
+      </div>
+
+      <label style="display:block;font-size:0.74rem;font-weight:800;color:#475569;margin-bottom:4px;">Qué puntos sumar:</label>
+      <select id="pzZoneMode_${esc(q.id)}" style="width:100%;max-width:100%;box-sizing:border-box;padding:8px 9px;font-size:0.8rem;font-weight:700;border:1px solid #cbd5e1;border-radius:8px;margin-bottom:10px;background:#fff;">
+        <option value="pack28">${defaultPackLabel}</option>
+        ${totalCount > 28 ? `<option value="all">📍 Toda la zona completa (${totalCount} paradas)</option>` : ""}
+        ${highProspects.length > 0 ? `<option value="high">🔥 Solo Prospectos Alto Potencial (${highProspects.length})</option>` : ""}
+        ${places.length > 0 ? `<option value="places">🏪 Solo Clientes registrados (${places.length})</option>` : ""}
+      </select>
+
+      <div style="display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:7px;">
+        <button type="button"
+          onclick="window.__pzToggleZoneDrivers('${esc(q.id)}')"
+          style="width:100%;border:none;background:#15803d;color:#fff;padding:10px 10px;border-radius:9px;font-size:0.82rem;font-weight:800;cursor:pointer;">
+          ➕ Sumar a Ruta ▾
+        </button>
+        <button type="button"
+          onclick="window.__pzIsolateZoneFromPopup('${esc(q.id)}')"
+          title="Ver solo los pines de esta zona"
+          style="width:100%;border:1px solid #cbd5e1;background:#fff;color:#334155;padding:10px 8px;border-radius:9px;font-size:0.78rem;font-weight:700;cursor:pointer;">
+          🔍 Aislar
+        </button>
+      </div>
+
+      <div id="pzZoneDriversWrap_${esc(q.id)}" style="display:${expandDrivers ? "block" : "none"};margin-top:10px;padding-top:10px;border-top:1px dashed #cbd5e1;">
+        <div style="font-size:0.76rem;font-weight:800;color:#0f172a;margin-bottom:6px;">
+          👷 Elige chofer (asigna o adiciona a su ruta):
+        </div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px;font-size:0.74rem;color:#334155;">
+          <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;font-weight:700;">
+            <input type="checkbox" id="pzZoneOpt_${esc(q.id)}" checked> ⚡ Ordenar ruta
+          </label>
+          <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;font-weight:700;">
+            <input type="checkbox" id="pzZoneSend_${esc(q.id)}"> 📤 Enviar al celular ya
+          </label>
+        </div>
+        <div id="pzZoneDriversList_${esc(q.id)}" style="display:flex;flex-direction:column;gap:6px;max-height:210px;overflow-y:auto;">
+          ${renderZoneDriversListHtml(q.id)}
+        </div>
+      </div>
+
+      <button type="button" onclick="window.__pzCloseZoneModal()"
+        style="margin-top:10px;width:100%;padding:9px;border-radius:9px;border:1px solid #cbd5e1;background:#f8fafc;color:#475569;font-size:0.8rem;font-weight:800;cursor:pointer;">
+        Cancelar / Cerrar
+      </button>
+    </div>
+  `;
+}
+
+function ensureZoneReactiveModalEl() {
+  let backdrop = document.getElementById("pzZoneAssignModal");
+  if (!backdrop) {
+    backdrop = document.createElement("div");
+    backdrop.id = "pzZoneAssignModal";
+    backdrop.style.cssText =
+      "display:none;position:fixed;inset:0;z-index:12000;background:rgba(15,23,42,0.52);backdrop-filter:blur(2px);align-items:center;justify-content:center;padding:12px;box-sizing:border-box;";
+    backdrop.innerHTML = `
+      <div id="pzZoneAssignModalCard" style="background:#ffffff;border-radius:16px;padding:16px 15px;width:100%;max-width:365px;max-height:88dvh;overflow-y:auto;overflow-x:hidden;box-shadow:0 20px 45px rgba(15,23,42,0.32);box-sizing:border-box;"></div>
+    `;
+    backdrop.addEventListener("click", (e) => {
+      if (e.target === backdrop) window.__pzCloseZoneModal();
+    });
+    document.body.appendChild(backdrop);
+  }
+  return backdrop;
+}
+
+window.__pzCloseZoneModal = function () {
+  const backdrop = document.getElementById("pzZoneAssignModal");
+  if (backdrop) backdrop.style.display = "none";
+};
+
+function openZoneReactivePopup(q, _latlng = null, expandDrivers = false) {
+  if (!q) return;
+  getBridge()?.getMap?.()?.closePopup?.();
+  const backdrop = ensureZoneReactiveModalEl();
+  const card = document.getElementById("pzZoneAssignModalCard");
+  if (card) card.innerHTML = buildZoneReactiveModalHtml(q, expandDrivers);
+  backdrop.style.display = "flex";
+}
+
+window.__pzToggleZoneDrivers = function (quadId) {
+  const wrap = document.getElementById(`pzZoneDriversWrap_${quadId}`);
+  const listEl = document.getElementById(`pzZoneDriversList_${quadId}`);
+  if (!wrap) return;
+  const willOpen = wrap.style.display === "none";
+  if (willOpen && listEl) {
+    listEl.innerHTML = renderZoneDriversListHtml(quadId);
+  }
+  wrap.style.display = willOpen ? "block" : "none";
+};
+
+window.__pzIsolateZoneFromPopup = function (quadId) {
+  const q = quadrants.find((x) => x.id === quadId);
+  if (!q) return;
+  window.__pzCloseZoneModal();
+  const sel = document.getElementById("pzFilterZone");
+  if (sel) sel.value = `quad:${q.id}`;
+  showProspects = true;
+  showQuadrants = false;
+  const map = getBridge()?.getMap?.();
+  map?.closePopup?.();
+  renderQuadrantsUIAndLayer();
+  renderProspectsCluster(false);
+  if (map) map.fitBounds(q.polygon, { padding: [24, 24] });
+  getBridge()?.showToast?.(`🔍 Mostrando negocios de "${q.name}" (clic individual habilitado).`);
+};
+
+window.__pzAssignZoneToDriver = async function (quadId, driverName, btnEl) {
+  const q = quadrants.find((x) => x.id === quadId);
+  const bridge = getBridge();
+  if (!q || !driverName || !bridge?.appendStopsToDriver) return;
+
+  const mode = document.getElementById(`pzZoneMode_${quadId}`)?.value || "pack28";
+  const optimize = document.getElementById(`pzZoneOpt_${quadId}`)?.checked !== false;
+  const sendNow = Boolean(document.getElementById(`pzZoneSend_${quadId}`)?.checked);
+  const stopsToAdd = buildZoneStopsForMode(q, mode);
+
+  if (!stopsToAdd.length) {
+    bridge.showToast?.("No hay negocios con este criterio dentro de la zona seleccionada.");
+    return;
+  }
+
+  const prevHtml = btnEl ? btnEl.innerHTML : "";
+  if (btnEl) {
+    btnEl.disabled = true;
+    btnEl.innerHTML = `<span style="font-size:0.76rem;font-weight:800;color:#0f766e;">⏳ Sumando y ordenando para ${esc(driverName)}...</span>`;
+  }
+
+  try {
+    const res = await bridge.appendStopsToDriver(driverName, stopsToAdd, {
+      optimize,
+      sendNow,
+      zoneLabel: q.name
+    });
+
+    const listEl = document.getElementById(`pzZoneDriversList_${quadId}`);
+    if (listEl) {
+      listEl.innerHTML = renderZoneDriversListHtml(quadId);
+    }
+    renderAutoPacksCards();
+    window.__pzCloseZoneModal();
+
+    if (res.addedCount === 0) {
+      bridge.showToast?.(`ℹ️ Esos puntos de "${q.name}" ya estaban en la ruta de ${driverName} (${res.totalCount} paradas).`);
+    } else if (res.previousCount > 0) {
+      bridge.showToast?.(
+        `➕ "${q.name}" (+${res.addedCount} nuevas → ${res.totalCount} paradas totales) adicionada a ${driverName}${
+          res.sent ? " y enviada al celular." : " en su Constructor de Ruta."
+        }`
+      );
+    } else {
+      bridge.showToast?.(
+        `🧭 "${q.name}" (${res.addedCount} paradas) asignada a ${driverName}${
+          res.sent ? " y enviada en vivo." : " (lista para revisar o sumar otra zona)."
+        }`
+      );
+    }
+  } catch (err) {
+    console.error("Error asignando zona a chofer:", err);
+    if (btnEl) {
+      btnEl.disabled = false;
+      btnEl.innerHTML = prevHtml;
+    }
+    bridge.showToast?.("No se pudo sumar la zona a la ruta.");
+  }
+};
+
 function renderQuadrantsUIAndLayer() {
   const map = ensureLayers();
   const listEl = document.getElementById("pzQuadrantsList");
   const panelEl = document.getElementById("pzQuadrantsPanel");
   const btn = document.getElementById("btnToggleQuadrantsLayer");
+  document.getElementById("adminLiveMap")?.classList.toggle("is-kml-zones-mode", Boolean(showQuadrants));
   if (panelEl) panelEl.style.display = showQuadrants ? "block" : "none";
   if (btn) {
     btn.classList.toggle("btn-primary", showQuadrants);
@@ -589,20 +941,42 @@ function renderQuadrantsUIAndLayer() {
     quadrantsLayerGroup.clearLayers();
     if (showQuadrants && map) {
       quadrants.forEach((q) => {
+        const baseColor = q.color || "#15803d";
         const poly = window.L.polygon(q.polygon, {
-          color: q.color || "#15803d",
-          weight: 2.2,
-          fillColor: q.color || "#15803d",
-          fillOpacity: 0.1
+          color: baseColor,
+          weight: 2.3,
+          fillColor: baseColor,
+          fillOpacity: 0.14
         }).addTo(quadrantsLayerGroup);
-        poly.bindTooltip(`📐 ${esc(q.name)}`, { sticky: true });
+        const colsNote = Array.isArray(q.topColonias) && q.topColonias.length
+          ? `<br><span style="font-size:0.72rem;opacity:0.85;">Colonias: ${esc(q.topColonias.slice(0, 4).join(", "))}</span>`
+          : "";
+        const isCoarseTouch = window.matchMedia?.("(pointer: coarse)")?.matches || window.innerWidth <= 900;
+        if (!isCoarseTouch) {
+          poly.bindTooltip(`📐 <strong>${esc(q.name)}</strong><br><span style="font-size:0.71rem;color:#15803d;font-weight:800;">👆 Toca para sumar a un chofer</span>${colsNote}`, {
+            sticky: true
+          });
+        }
+        poly.on("mouseover", () => {
+          if (drawingActive) return;
+          poly.setStyle({ weight: 3.6, fillOpacity: 0.26 });
+        });
+        poly.on("mouseout", () => {
+          if (drawingActive) return;
+          poly.setStyle({ weight: 2.3, fillOpacity: 0.14 });
+        });
+        poly.on("click", (ev) => {
+          if (drawingActive) return;
+          window.L.DomEvent.stopPropagation(ev);
+          openZoneReactivePopup(q, ev.latlng, false);
+        });
       });
     }
   }
 
   if (!listEl) return;
   if (quadrants.length === 0) {
-    listEl.innerHTML = `<div style="font-size:0.8rem;color:#64748b;padding:8px;">No hay cuadrantes cargados. Usa <strong>✏️ Dibujar Cuadrante</strong>, <strong>📂 Subir KML</strong> o <strong>⚡ Sectores Base</strong>.</div>`;
+    listEl.innerHTML = `<div style="font-size:0.8rem;color:#64748b;padding:8px;">No hay polígonos activos. Usa <strong>🗺️ 18 Zonas Región</strong>, <strong>🏘️ 35 Colonias Clave</strong>, <strong>✏️ Dibujar</strong> o <strong>📂 Subir KML</strong>.</div>`;
     return;
   }
 
@@ -614,19 +988,22 @@ function renderQuadrantsUIAndLayer() {
       const inPlaces = places.filter((p) => isPointInPolygon(p.lat, p.lng, q.polygon));
       const inProspects = activeProspects.filter((pr) => isPointInPolygon(pr.lat, pr.lng, q.polygon));
       const highCount = inProspects.filter((pr) => pr.tier === "alto").length;
+      const colsHtml = Array.isArray(q.topColonias) && q.topColonias.length
+        ? `<div style="font-size:0.71rem;color:#64748b;margin-top:2px;line-height:1.25;">🏘️ ${esc(q.topColonias.slice(0, 3).join(", "))}</div>`
+        : "";
       return `
         <div style="border:1px solid #e2e8f0;border-left:4px solid ${esc(q.color || "#15803d")};border-radius:8px;padding:9px 10px;background:#f8fafc;">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">
-            <strong style="font-size:0.85rem;color:#0f172a;">${esc(q.name)}</strong>
+            <strong style="font-size:0.84rem;color:#0f172a;line-height:1.25;">${esc(q.name)}</strong>
             <button type="button" class="btn btn-outline btn-sm" style="padding:2px 6px;font-size:0.7rem;color:#dc2626;border-color:#fecaca;" data-del-quad="${esc(q.id)}" title="Eliminar cuadrante">✕</button>
           </div>
-          <div style="font-size:0.76rem;color:#475569;margin:4px 0 8px;">
+          ${colsHtml}
+          <div style="font-size:0.76rem;color:#475569;margin:5px 0 8px;">
             🏪 <strong>${inPlaces.length}</strong> clientes • 🎯 <strong>${inProspects.length}</strong> prospectos (${highCount} 🔥)
           </div>
           <div style="display:flex;gap:5px;flex-wrap:wrap;">
-            <button type="button" class="btn btn-outline btn-sm" style="padding:4px 8px;font-size:0.72rem;" data-filter-quad="${esc(q.id)}">🔍 Aislar</button>
-            <button type="button" class="btn btn-outline btn-sm" style="padding:4px 8px;font-size:0.72rem;" data-route-quad-places="${esc(q.id)}">🧭 +${inPlaces.length} Clientes</button>
-            <button type="button" class="btn btn-primary btn-sm" style="padding:4px 8px;font-size:0.72rem;" data-route-quad-prospects="${esc(q.id)}">🧭 +Top 15 🔥</button>
+            <button type="button" class="btn btn-primary btn-sm" style="padding:5px 9px;font-size:0.74rem;flex:1;" data-open-quad-assign="${esc(q.id)}">➕ Sumar a Ruta ▾</button>
+            <button type="button" class="btn btn-outline btn-sm" style="padding:5px 8px;font-size:0.72rem;" data-filter-quad="${esc(q.id)}">🔍 Aislar</button>
           </div>
         </div>
       `;
@@ -778,6 +1155,7 @@ window.__pzPromoteProspect = async function (prospectId) {
 function initProspectsZonesModule() {
   loadLocalZonesState();
   fetchProspectsJson();
+  fetchZonesCatalogJson();
 
   window.addEventListener("salinas:places-updated", () => recomputeDeduplicatedProspects());
   window.addEventListener("salinas:map-ready", async () => {
@@ -861,7 +1239,11 @@ function initProspectsZonesModule() {
 
   document.getElementById("btnToggleQuadrantsLayer")?.addEventListener("click", () => {
     showQuadrants = !showQuadrants;
+    ensureLayers()?.closePopup?.();
     renderQuadrantsUIAndLayer();
+    if (showQuadrants) {
+      getBridge()?.showToast?.("📐 Modo Zonas KML activo: toca cualquier zona para asignarla o sumarla a un chofer.");
+    }
   });
 
   document.getElementById("btnToggleConcentricLayer")?.addEventListener("click", () => {
@@ -946,15 +1328,50 @@ function initProspectsZonesModule() {
   });
 
   document.getElementById("btnLoadPresetQuads")?.addEventListener("click", async () => {
-    const existingIds = new Set(quadrants.map((q) => q.id));
-    PRESET_SALTILLO_QUADS.forEach((pq) => {
-      if (!existingIds.has(pq.id)) quadrants.push(structuredClone(pq));
-    });
+    const customOnly = quadrants.filter((q) => !isBuiltInCatalogQuadId(q.id));
+    const baseList = zonesCatalog.sectors.length > 0 ? zonesCatalog.sectors : PRESET_SALTILLO_QUADS;
+    quadrants = [...structuredClone(baseList), ...customOnly];
     showQuadrants = true;
     await persistZonesState();
     updateZoneFilterDropdown();
     renderQuadrantsUIAndLayer();
-    getBridge()?.showToast?.("⚡ 6 sectores base de Saltillo y Ramos Arizpe cargados.");
+    const map = getBridge()?.getMap?.();
+    if (map) map.setView([25.438, -100.965], 12);
+    getBridge()?.showToast?.(`🗺️ ${baseList.length} Zonas Operativas (Saltillo, Ramos Arizpe y Arteaga) cargadas en el mapa.`);
+  });
+
+  document.getElementById("btnLoadTopColonias")?.addEventListener("click", async () => {
+    if (!zonesCatalog.colonias.length) {
+      await fetchZonesCatalogJson();
+    }
+    if (!zonesCatalog.colonias.length) {
+      getBridge()?.showToast?.("No se pudo cargar el catálogo de colonias.");
+      return;
+    }
+    const customOnly = quadrants.filter((q) => !isBuiltInCatalogQuadId(q.id));
+    quadrants = [...structuredClone(zonesCatalog.colonias), ...customOnly];
+    showQuadrants = true;
+    await persistZonesState();
+    updateZoneFilterDropdown();
+    renderQuadrantsUIAndLayer();
+    const map = getBridge()?.getMap?.();
+    if (map) map.setView([25.435, -100.975], 12);
+    getBridge()?.showToast?.(`🏘️ ${zonesCatalog.colonias.length} Colonias Comerciales individuales cargadas en el mapa.`);
+  });
+
+  document.getElementById("btnClearAllQuads")?.addEventListener("click", async () => {
+    if (!quadrants.length) return;
+    if (!window.confirm("¿Vaciar los polígonos activos en pantalla? (Puedes recargar 18 Zonas o 35 Colonias con un clic en cualquier momento).")) {
+      return;
+    }
+    quadrants = [];
+    const sel = document.getElementById("pzFilterZone");
+    if (sel && sel.value.startsWith("quad:")) sel.value = "all";
+    await persistZonesState();
+    updateZoneFilterDropdown();
+    renderProspectsCluster();
+    renderQuadrantsUIAndLayer();
+    getBridge()?.showToast?.("Polígonos limpiados.");
   });
 
   document.getElementById("pzQuadrantsList")?.addEventListener("click", async (e) => {
@@ -966,6 +1383,19 @@ function initProspectsZonesModule() {
       await persistZonesState();
       updateZoneFilterDropdown();
       renderQuadrantsUIAndLayer();
+      return;
+    }
+
+    const openAssignBtn = e.target.closest("button[data-open-quad-assign]");
+    if (openAssignBtn) {
+      const q = quadrants.find((x) => x.id === openAssignBtn.dataset.openQuadAssign);
+      if (!q) return;
+      const map = bridge?.getMap?.();
+      if (map) {
+        map.fitBounds(q.polygon, { padding: [28, 28], maxZoom: 14 });
+        document.getElementById("adminLiveMap")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      setTimeout(() => openZoneReactivePopup(q, null, true), 180);
       return;
     }
 

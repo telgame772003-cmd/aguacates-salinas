@@ -5313,6 +5313,22 @@ checkInitialAuth();
 
 // ================= CONSTRUCTOR INTELIGENTE DE RUTAS (ADMIN TABLET/PC) =================
 let rbStops = [];
+let rbActiveBuilderDriver = "";
+const rbDraftByDriverMap = new Map();
+
+function markCurrentDriverDraftDirty() {
+  const drv = rbActiveBuilderDriver || document.getElementById("rbDriverSelect")?.value || "";
+  if (!drv) return;
+  const slug = rbDriverSlug(drv);
+  rbDraftByDriverMap.set(slug, {
+    driverName: drv,
+    stops: structuredClone(rbStops),
+    distM: rbTotalDistM,
+    durSec: rbTotalDurSec,
+    latLngs: Array.isArray(rbPreviewLatLngs) ? [...rbPreviewLatLngs] : [],
+    dirty: true
+  });
+}
 let rbPreviewLatLngs = [];
 let rbTotalDistM = 0;
 let rbTotalDurSec = 0;
@@ -5400,10 +5416,22 @@ function subscribeAdminBuilderToDriverRoute(driverName) {
     rbRouteUnsub();
     rbRouteUnsub = null;
   }
+  rbActiveBuilderDriver = driverName || "";
   if (!driverName) return;
   updateRbTruckStockBadge(driverName);
-  const docId = `${getLocalDateStr()}_${rbDriverSlug(driverName)}`;
+  const slug = rbDriverSlug(driverName);
+  const docId = `${getLocalDateStr()}_${slug}`;
   rbRouteUnsub = onSnapshot(doc(db, "driver_routes", docId), (snap) => {
+    const localDraft = rbDraftByDriverMap.get(slug);
+    if (localDraft?.dirty) {
+      rbStops = structuredClone(localDraft.stops || []);
+      rbTotalDistM = Number(localDraft.distM) || 0;
+      rbTotalDurSec = Number(localDraft.durSec) || 0;
+      rbPreviewLatLngs = Array.isArray(localDraft.latLngs) ? [...localDraft.latLngs] : [];
+      renderRouteBuilderUI();
+      recalculateAdminBuilderMetrics();
+      return;
+    }
     if (!snap.exists()) {
       rbStops = [];
       rbPreviewLatLngs = [];
@@ -5661,11 +5689,21 @@ window.__salinasAddOrderToRoute = function (orderId) {
 };
 
 document.getElementById("rbDriverSelect")?.addEventListener("change", (e) => {
-  rbStops = [];
-  rbPreviewLatLngs = [];
-  rbTotalDistM = 0;
-  rbTotalDurSec = 0;
-  subscribeAdminBuilderToDriverRoute(e.target.value);
+  const nextDrv = e.target.value;
+  const nextSlug = rbDriverSlug(nextDrv);
+  const savedDraft = rbDraftByDriverMap.get(nextSlug);
+  if (savedDraft?.dirty) {
+    rbStops = structuredClone(savedDraft.stops || []);
+    rbPreviewLatLngs = Array.isArray(savedDraft.latLngs) ? [...savedDraft.latLngs] : [];
+    rbTotalDistM = Number(savedDraft.distM) || 0;
+    rbTotalDurSec = Number(savedDraft.durSec) || 0;
+  } else {
+    rbStops = [];
+    rbPreviewLatLngs = [];
+    rbTotalDistM = 0;
+    rbTotalDurSec = 0;
+  }
+  subscribeAdminBuilderToDriverRoute(nextDrv);
 });
 
 document.getElementById("rbReturnToBaseChk")?.addEventListener("change", () => {
@@ -5856,6 +5894,8 @@ async function saveAdminRouteToFirestore(isLastMinute = false, allowEmpty = fals
       });
   });
 
+  rbDraftByDriverMap.delete(rbDriverSlug(driverName));
+
   showToast(
     rbStops.length === 0
       ? `🗑️ Ruta de ${driverName} limpiada.`
@@ -6017,6 +6057,7 @@ document.getElementById("rbBtnClear")?.addEventListener("click", async () => {
   rbPreviewLatLngs = [];
   rbTotalDistM = 0;
   rbTotalDurSec = 0;
+  if (driverName) rbDraftByDriverMap.delete(rbDriverSlug(driverName));
   renderRouteBuilderUI();
   if (driverName) {
     await saveAdminRouteToFirestore(false, true);
@@ -6044,6 +6085,44 @@ window.__salinasMapBridge = {
   getDriversList() {
     return (storeSettings.drivers || []).map((d) => d.name).filter(Boolean);
   },
+  getDriversRouteSummary() {
+    const activeSel = document.getElementById("rbDriverSelect")?.value || "";
+    const activeSlug = rbDriverSlug(activeSel);
+    return (storeSettings.drivers || [])
+      .map((d) => d?.name)
+      .filter(Boolean)
+      .map((name) => {
+        const slug = rbDriverSlug(name);
+        const docId = `${getLocalDateStr()}_${slug}`;
+        const sentDoc =
+          allDriverRoutesTodayMap.get(docId) ||
+          Array.from(allDriverRoutesTodayMap.values()).find(
+            (r) => (r.driverSlug || rbDriverSlug(r.driverName || "")) === slug
+          );
+        const localDraft = rbDraftByDriverMap.get(slug);
+
+        let stops = [];
+        let state = "empty";
+        if (slug === activeSlug && rbStops.length > 0) {
+          stops = rbStops;
+          state = localDraft?.dirty ? "draft" : sentDoc?.stops?.length ? "sent" : "draft";
+        } else if (localDraft?.dirty && Array.isArray(localDraft.stops) && localDraft.stops.length > 0) {
+          stops = localDraft.stops;
+          state = "draft";
+        } else if (Array.isArray(sentDoc?.stops) && sentDoc.stops.length > 0) {
+          stops = sentDoc.stops;
+          state = "sent";
+        }
+        const pendingCount = stops.filter((s) => s.status !== "done").length;
+        return {
+          name,
+          slug,
+          totalCount: stops.length,
+          pendingCount,
+          state
+        };
+      });
+  },
   selectDriverForBuilder(driverName) {
     const sel = document.getElementById("rbDriverSelect");
     if (!sel || !driverName) return;
@@ -6059,7 +6138,9 @@ window.__salinasMapBridge = {
     return Array.from(allDriverRoutesTodayMap.values());
   },
   addStopToRoute(stopObj, mode = "append") {
-    return addStopToAdminBuilder(stopObj, mode);
+    const res = addStopToAdminBuilder(stopObj, mode);
+    markCurrentDriverDraftDirty();
+    return res;
   },
   addStopsBulkToRoute(stopObjs, replacePending = false) {
     if (!Array.isArray(stopObjs) || !stopObjs.length) return 0;
@@ -6077,12 +6158,128 @@ window.__salinasMapBridge = {
       added++;
     }
     if (added > 0) {
+      markCurrentDriverDraftDirty();
       renderRouteBuilderUI();
       recalculateAdminBuilderMetrics();
       const det = document.getElementById("adminRouteBuilderDetails");
       if (det) det.open = true;
     }
     return added;
+  },
+  async appendStopsToDriver(driverName, newStops, options = {}) {
+    if (!driverName || !Array.isArray(newStops) || !newStops.length) {
+      return { addedCount: 0, previousCount: 0, totalCount: 0 };
+    }
+    const sel = document.getElementById("rbDriverSelect");
+    const currentSel = sel?.value || "";
+    const targetSlug = rbDriverSlug(driverName);
+    const docId = `${getLocalDateStr()}_${targetSlug}`;
+
+    // Si estamos parados en otro chofer con cambios locales, preservarlos antes de cambiar
+    if (currentSel && rbDriverSlug(currentSel) !== targetSlug && rbStops.length > 0) {
+      markCurrentDriverDraftDirty();
+    }
+
+    // Obtener las paradas que ya tiene este chofer hoy (en constructor, en borrador o ya enviadas)
+    let baseStops = [];
+    if (rbDriverSlug(currentSel) === targetSlug && rbStops.length > 0) {
+      baseStops = structuredClone(rbStops);
+    } else if (rbDraftByDriverMap.get(targetSlug)?.dirty) {
+      baseStops = structuredClone(rbDraftByDriverMap.get(targetSlug).stops || []);
+    } else {
+      const cachedSent =
+        allDriverRoutesTodayMap.get(docId) ||
+        Array.from(allDriverRoutesTodayMap.values()).find(
+          (r) => (r.driverSlug || rbDriverSlug(r.driverName || "")) === targetSlug
+        );
+      if (Array.isArray(cachedSent?.stops)) {
+        baseStops = structuredClone(cachedSent.stops);
+      } else {
+        try {
+          const snap = await getDoc(doc(db, "driver_routes", docId));
+          if (snap.exists() && Array.isArray(snap.data().stops)) {
+            baseStops = structuredClone(snap.data().stops);
+          }
+        } catch (_) {}
+      }
+    }
+
+    const previousCount = baseStops.length;
+    const existingKeys = new Set(baseStops.map((s) => `${s.kind}:${s.id}`));
+    let addedCount = 0;
+
+    for (const st of newStops) {
+      if (!st || !Number.isFinite(st.lat) || !Number.isFinite(st.lng)) continue;
+      const key = `${st.kind}:${st.id}`;
+      if (existingKeys.has(key)) continue;
+      const nearDup = baseStops.some(
+        (ex) => Number.isFinite(ex.lat) && Number.isFinite(ex.lng) && haversineMeters(ex.lat, ex.lng, st.lat, st.lng) < 20
+      );
+      if (nearDup) continue;
+      existingKeys.add(key);
+      baseStops.push(structuredClone(st));
+      addedCount++;
+    }
+
+    let finalStops = baseStops;
+    let distM = 0;
+    let durSec = 0;
+    let latLngs = [];
+
+    const doneStops = baseStops.filter((s) => s.status === "done");
+    const pendingStops = baseStops.filter((s) => s.status !== "done");
+    const incBase = document.getElementById("rbReturnToBaseChk")?.checked !== false;
+    const endCoord = incBase ? getStoreBaseLocation() : null;
+    const startCoord = getDriverCurrentOrBaseOrigin(driverName);
+
+    if (options.optimize !== false && pendingStops.length >= 2) {
+      try {
+        const res = await optimizeStopsWithOsrm({ startCoord, stops: pendingStops, endCoord });
+        finalStops = [...doneStops, ...(res.orderedStops || pendingStops)];
+        distM = res.distanceMeters || 0;
+        durSec = res.durationSec || 0;
+        latLngs = res.latLngs || [];
+      } catch (_) {
+        finalStops = [...doneStops, ...pendingStops];
+      }
+    }
+
+    rbDraftByDriverMap.set(targetSlug, {
+      driverName,
+      stops: structuredClone(finalStops),
+      distM,
+      durSec,
+      latLngs,
+      dirty: true
+    });
+
+    rbStops = finalStops;
+    rbTotalDistM = distM;
+    rbTotalDurSec = durSec;
+    rbPreviewLatLngs = latLngs;
+
+    if (sel && sel.value !== driverName) {
+      sel.value = driverName;
+    }
+    subscribeAdminBuilderToDriverRoute(driverName);
+    renderRouteBuilderUI();
+    if (!distM && finalStops.length > 0) {
+      recalculateAdminBuilderMetrics();
+    }
+    const det = document.getElementById("adminRouteBuilderDetails");
+    if (det) det.open = true;
+
+    if (options.sendNow) {
+      await saveAdminRouteToFirestore(previousCount > 0);
+    }
+
+    return {
+      addedCount,
+      previousCount,
+      totalCount: finalStops.length,
+      driverName,
+      sent: Boolean(options.sendNow)
+    };
   },
   async promoteProspectToPlace(item) {
     if (!currentKeyHash) {
