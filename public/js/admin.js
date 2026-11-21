@@ -577,20 +577,6 @@ function startRealtimeListeners() {
   if (ordersUnsub) ordersUnsub();
   if (gpsUnsub) gpsUnsub();
   if (placesUnsub) placesUnsub();
-  if (allRoutesTodayUnsub) allRoutesTodayUnsub();
-
-  const qAllRoutesToday = query(collection(db, "driver_routes"), where("date", "==", getLocalDateStr()));
-  allRoutesTodayUnsub = onSnapshot(qAllRoutesToday, (snap) => {
-    allDriverRoutesTodayMap.clear();
-    snap.docs.forEach((d) => {
-      const data = d.data();
-      if (data && Array.isArray(data.stops) && data.stops.length > 0) {
-        allDriverRoutesTodayMap.set(d.id, { id: d.id, ...data });
-      }
-    });
-    renderGpsMapAndChips();
-    window.dispatchEvent(new CustomEvent("salinas:routes-updated"));
-  });
 
   settingsUnsub = onSnapshot(doc(db, "settings", "store"), (snap) => {
     if (snap.exists()) {
@@ -2158,18 +2144,27 @@ function renderGpsMapAndChips() {
     return activeDriverNamesSet.has(nameKey) || activeDriverSlugsSet.has(idKey);
   });
 
-  // Consider "online" if active === true and updated within last 20 minutes
-  const onlineLocs = validLocs.filter((loc) => {
-    if (!loc.active || !loc.updatedAtIso) return false;
-    return Date.now() - new Date(loc.updatedAtIso).getTime() < 20 * 60 * 1000;
-  });
+  const isViewingToday = selectedRouteDate === getLocalDateStr();
 
-  badgeEl.textContent = `${onlineLocs.length} carro${onlineLocs.length === 1 ? "" : "s"} en vivo`;
+  // Consider "online" if active === true and updated within last 20 minutes (only when viewing today)
+  const onlineLocs = isViewingToday
+    ? validLocs.filter((loc) => {
+        if (!loc.active || !loc.updatedAtIso) return false;
+        return Date.now() - new Date(loc.updatedAtIso).getTime() < 20 * 60 * 1000;
+      })
+    : [];
 
-  const offlineLocs = validLocs.filter((loc) => !onlineLocs.some((o) => o.id === loc.id));
+  badgeEl.textContent = isViewingToday
+    ? `${onlineLocs.length} carro${onlineLocs.length === 1 ? "" : "s"} en vivo`
+    : `Historial ${selectedRouteDate}`;
+
+  const offlineLocs = isViewingToday ? validLocs.filter((loc) => !onlineLocs.some((o) => o.id === loc.id)) : [];
   const showOfflineChips = Boolean(window.__salinasShowOfflineMapChips);
 
-  if (validLocs.length === 0) {
+  if (!isViewingToday) {
+    chipsEl.innerHTML = `<span style="font-size:0.8rem;color:var(--slate-500);">📅 Viendo historial del <strong>${escapeHtml(selectedRouteDate)}</strong> (GPS en vivo oculto).</span>`;
+    if (fsChipsEl) fsChipsEl.innerHTML = `<span class="fs-drv-pill paused">📅 ${escapeHtml(selectedRouteDate)}</span>`;
+  } else if (validLocs.length === 0) {
     chipsEl.innerHTML = `<span style="font-size:0.82rem;color:var(--slate-500);">Aún ningún chofer ha activado su GPS hoy.</span>`;
     if (fsChipsEl) fsChipsEl.innerHTML = `<span class="fs-drv-pill paused">⚪ 0 carros</span>`;
   } else {
@@ -2229,7 +2224,7 @@ function renderGpsMapAndChips() {
       placeAssignedMap.get(st.id).push({ driverName: dName, color: dColor, initials: dInitials });
     }
   }
-  const activeRbStopIds = new Set(rbStops.map((s) => s.id).filter(Boolean));
+  const activeRbStopIds = isViewingToday ? new Set(rbStops.map((s) => s.id).filter(Boolean)) : new Set();
 
   // Compute daily place supervision counts and category counts
   let soldCount = 0;
@@ -2680,7 +2675,7 @@ function renderGpsMapAndChips() {
     mapFocusMarkers.set(`order:${ord.id}`, m);
   }
 
-  if (showAllDriverRoutes && typeof renderRoutePreviewOnAdminMap === "function") {
+  if (isViewingToday && showAllDriverRoutes && typeof renderRoutePreviewOnAdminMap === "function") {
     renderRoutePreviewOnAdminMap(placeStatusById);
   }
 
@@ -3072,14 +3067,29 @@ function subscribeRouteCorteDay(dateStr) {
   if (routeWhUnsub) routeWhUnsub();
   if (routeSalesUnsub) routeSalesUnsub();
   if (routeVisitsUnsub) routeVisitsUnsub();
+  if (allRoutesTodayUnsub) allRoutesTodayUnsub();
 
   selectedRouteDate = dateStr;
+  allDriverRoutesTodayMap.clear();
   routeWhDoc = createEmptyWhDoc(dateStr);
   routeSalesList = [];
   routeVisitsList = [];
   renderRouteCortesAndSales();
   renderGpsMapAndChips();
   renderAdminPlacesDirectory();
+
+  const qAllRoutesDay = query(collection(db, "driver_routes"), where("date", "==", dateStr));
+  allRoutesTodayUnsub = onSnapshot(qAllRoutesDay, (snap) => {
+    allDriverRoutesTodayMap.clear();
+    snap.docs.forEach((d) => {
+      const data = d.data();
+      if (data && Array.isArray(data.stops) && data.stops.length > 0) {
+        allDriverRoutesTodayMap.set(d.id, { id: d.id, ...data });
+      }
+    });
+    renderGpsMapAndChips();
+    window.dispatchEvent(new CustomEvent("salinas:routes-updated"));
+  });
 
   routeWhUnsub = onSnapshot(doc(db, "warehouse_days", dateStr), (snap) => {
     if (snap.exists()) {
