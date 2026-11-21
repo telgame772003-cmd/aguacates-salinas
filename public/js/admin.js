@@ -2384,13 +2384,27 @@ function renderGpsMapAndChips() {
     const m = window.L.marker([place.lat, place.lng], { icon, zIndexOffset: zOff })
       .addTo(mapLayerGroup)
       .bindTooltip(tooltipHtml, {
-        direction: "top",
-        sticky: true,
+        direction: "auto",
+        sticky: false,
         opacity: 0.98,
         className: "salinas-place-tooltip",
-        offset: [0, -10]
+        offset: [0, -8]
       })
       .bindPopup(popupHtml);
+    m.on("tooltipopen", (ev) => {
+      try {
+        const pt = leafletMap.latLngToContainerPoint(m.getLatLng());
+        const mapH = leafletMap.getSize().y || 500;
+        const tt = ev.tooltip;
+        if (!tt || !tt.options) return;
+        const desiredDir = pt.y < Math.min(165, mapH * 0.36) ? "bottom" : "top";
+        if (tt.options.direction !== desiredDir) {
+          tt.options.direction = desiredDir;
+          tt.options.offset = desiredDir === "bottom" ? [0, 12] : [0, -8];
+          tt.update();
+        }
+      } catch (_) {}
+    });
     mapFocusMarkers.set(`place:${place.id}`, m);
   }
 
