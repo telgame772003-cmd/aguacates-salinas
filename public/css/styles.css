@@ -3175,11 +3175,11 @@ body.map-fullscreen-open {
 
 @media (max-width: 640px) {
   .leaflet-popup-content-wrapper {
-    max-width: calc(100vw - 64px) !important;
+    max-width: calc(100vw - 52px) !important;
   }
   .leaflet-popup-content {
     margin: 11px 28px 11px 11px !important;
-    width: auto !important;
+    width: min(260px, calc(100vw - 92px)) !important;
     min-width: 0 !important;
     max-width: 100% !important;
   }
