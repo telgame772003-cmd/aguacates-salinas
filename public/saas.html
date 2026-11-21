@@ -274,6 +274,11 @@
         <div class="saas-kpi-val" id="kpiSaasGmv">$0</div>
         <div class="saas-kpi-sub" id="kpiSaasGmvSub">0 ventas en ruta hoy</div>
       </div>
+      <div class="saas-kpi-card" style="border-color:#065f46;background:linear-gradient(180deg,#1e293b 0%,#0f2922 100%);">
+        <div class="saas-kpi-lbl" style="color:#6ee7b7;">💳 Facturación SaaS</div>
+        <div class="saas-kpi-val" id="kpiSaasMrr" style="color:#34d399;">$0/mes</div>
+        <div class="saas-kpi-sub" id="kpiSaasBillingSub">Anualidades: $0 • 0 por vencer</div>
+      </div>
     </div>
 
     <div class="saas-toolbar-row">
@@ -401,8 +406,30 @@
           <input type="number" id="etMaxDrivers" class="form-control" min="1" max="500">
         </div>
         <div class="form-group">
-          <label class="form-label" for="etMonthlyFee">Mensualidad ($ MXN)</label>
-          <input type="number" id="etMonthlyFee" class="form-control" min="0" step="100">
+          <label class="form-label" for="etMonthlyFee">Renta Base Mensual ($ MXN)</label>
+          <input type="number" id="etMonthlyFee" class="form-control" min="0" step="50">
+        </div>
+      </div>
+
+      <div class="form-row-2" style="gap:10px;">
+        <div class="form-group">
+          <label class="form-label" for="etPerDriverFee">Mensualidad por Chofer ($ MXN)</label>
+          <input type="number" id="etPerDriverFee" class="form-control" min="0" step="50" placeholder="Ej. 250">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="etAnnualFee">Anualidad Plataforma ($ MXN)</label>
+          <input type="number" id="etAnnualFee" class="form-control" min="0" step="100" placeholder="Ej. 5000">
+        </div>
+      </div>
+
+      <div class="form-row-2" style="gap:10px;">
+        <div class="form-group">
+          <label class="form-label" for="etNextMonthlyDue">Próximo Corte Mensual</label>
+          <input type="date" id="etNextMonthlyDue" class="form-control">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="etNextAnnualDue">Vence Anualidad</label>
+          <input type="date" id="etNextAnnualDue" class="form-control">
         </div>
       </div>
 
@@ -434,6 +461,6 @@
   </div>
 
   <div id="toastBox" class="toast-box"></div>
-  <script type="module" src="js/saas.js?v=rpd_1"></script>
+  <script type="module" src="js/saas.js?v=rpd_2"></script>
 </body>
 </html>

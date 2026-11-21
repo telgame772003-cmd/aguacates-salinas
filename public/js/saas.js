@@ -135,6 +135,31 @@ async function loadTenantsAndTelemetry() {
   }
 }
 
+function computeDueStatus(dateStr) {
+  if (!dateStr) return { state: "unset", label: "Sin fecha", color: "#94a3b8", bg: "rgba(148,163,184,0.12)" };
+  const today = new Date();
+  const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const diffDays = Math.round((new Date(dateStr + "T00:00:00") - new Date(todayIso + "T00:00:00")) / 86400000);
+  if (diffDays < 0) {
+    return { state: "overdue", label: `🔴 Vencido (${Math.abs(diffDays)}d)`, color: "#fca5a5", bg: "rgba(239,68,68,0.18)" };
+  }
+  if (diffDays <= 5) {
+    return {
+      state: "soon",
+      label: diffDays === 0 ? "🟡 Vence HOY" : `🟡 En ${diffDays}d`,
+      color: "#fde68a",
+      bg: "rgba(245,158,11,0.18)"
+    };
+  }
+  return { state: "ok", label: `🟢 ${dateStr}`, color: "#6ee7b7", bg: "rgba(16,185,129,0.14)" };
+}
+
+function addMonthsIso(baseIso, months) {
+  const start = baseIso ? new Date(baseIso + "T12:00:00") : new Date();
+  start.setMonth(start.getMonth() + months);
+  return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
+}
+
 function renderKpisAndGrid() {
   const activeCount = allTenants.filter((t) => t.tenantStatus !== "suspended").length;
   const suspCount = allTenants.length - activeCount;
@@ -143,14 +168,31 @@ function renderKpisAndGrid() {
   let totalPlaces = 0;
   let totalGmv = 0;
   let totalSales = 0;
+  let totalMrr = 0;
+  let totalArr = 0;
+  let alertsCount = 0;
 
   for (const t of allTenants) {
     const tel = t.telemetry || {};
+    const drvCount = Number(tel.driversConfigured) || 0;
     onlineTrucks += Number(tel.onlineTrucks) || 0;
-    totalDrivers += Number(tel.driversConfigured) || 0;
+    totalDrivers += drvCount;
     totalPlaces += Number(tel.placesCount) || 0;
     totalGmv += Number(tel.gmvToday) || 0;
     totalSales += Number(tel.salesTodayCount) || 0;
+
+    if (t.tenantStatus !== "suspended") {
+      const baseM = Number(t.plan?.monthlyFeeMxn) || 0;
+      const perDrv = Number(t.plan?.perDriverFeeMxn) || 0;
+      const ann = Number(t.plan?.annualFeeMxn) || 0;
+      totalMrr += baseM + perDrv * drvCount;
+      totalArr += ann;
+    }
+    const mSt = computeDueStatus(t.plan?.nextMonthlyDue);
+    const aSt = computeDueStatus(t.plan?.nextAnnualDue);
+    if (mSt.state === "overdue" || mSt.state === "soon" || aSt.state === "overdue" || aSt.state === "soon") {
+      alertsCount++;
+    }
   }
 
   document.getElementById("kpiSaasTenants").textContent = String(allTenants.length);
@@ -160,6 +202,12 @@ function renderKpisAndGrid() {
   document.getElementById("kpiSaasPlaces").textContent = totalPlaces.toLocaleString("es-MX");
   document.getElementById("kpiSaasGmv").textContent = formatCurrency(totalGmv);
   document.getElementById("kpiSaasGmvSub").textContent = `${totalSales} nota${totalSales === 1 ? "" : "s"} hoy en toda la red`;
+  const mrrEl = document.getElementById("kpiSaasMrr");
+  const billSubEl = document.getElementById("kpiSaasBillingSub");
+  if (mrrEl) mrrEl.textContent = `${formatCurrency(totalMrr)}/mes`;
+  if (billSubEl) {
+    billSubEl.textContent = `Anualidades: ${formatCurrency(totalArr)} • ${alertsCount} por vencer/vencido`;
+  }
 
   const q = document.getElementById("saasSearchInput").value.trim();
   const filtered = allTenants.filter((t) =>
@@ -177,8 +225,20 @@ function renderKpisAndGrid() {
     .map((t) => {
       const isSusp = t.tenantStatus === "suspended";
       const tel = t.telemetry || {};
+      const drvCount = Number(tel.driversConfigured) || 0;
       const maxDrv = t.plan?.maxDrivers || 25;
-      const fee = t.plan?.monthlyFeeMxn ? `${formatCurrency(t.plan.monthlyFeeMxn)}/mes` : "Fundador / Interno";
+      const baseMonthly = Number(t.plan?.monthlyFeeMxn) || 0;
+      const perDriver = Number(t.plan?.perDriverFeeMxn) || 0;
+      const annualFee = Number(t.plan?.annualFeeMxn) || 0;
+      const monthlyTotal = baseMonthly + perDriver * drvCount;
+      const mDue = computeDueStatus(t.plan?.nextMonthlyDue);
+      const aDue = computeDueStatus(t.plan?.nextAnnualDue);
+
+      const feeParts = [];
+      if (baseMonthly > 0) feeParts.push(`${formatCurrency(baseMonthly)}/mes`);
+      if (perDriver > 0) feeParts.push(`${formatCurrency(perDriver)}×${drvCount} chof.`);
+      if (annualFee > 0) feeParts.push(`${formatCurrency(annualFee)}/año`);
+      const fee = feeParts.length ? feeParts.join(" + ") : "Fundador / Interno";
       const qParam = t.tenantSlug === "salinas" ? "" : `?t=${encodeURIComponent(t.tenantSlug)}`;
 
       return `
@@ -197,7 +257,7 @@ function renderKpisAndGrid() {
             <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#0f172a;padding:10px;border-radius:10px;text-align:center;margin:10px 0;">
               <div>
                 <div style="font-size:0.68rem;color:#94a3b8;">CHOFERES</div>
-                <strong style="font-size:0.92rem;color:#fff;">${tel.driversConfigured || 0}/${maxDrv}</strong>
+                <strong style="font-size:0.92rem;color:#fff;">${drvCount}/${maxDrv}</strong>
                 <div style="font-size:0.68rem;color:#34d399;">${tel.onlineTrucks || 0} GPS</div>
               </div>
               <div>
@@ -207,6 +267,21 @@ function renderKpisAndGrid() {
               <div>
                 <div style="font-size:0.68rem;color:#94a3b8;">HOY</div>
                 <strong style="font-size:0.92rem;color:#34d399;">${formatCurrency(tel.gmvToday || 0)}</strong>
+              </div>
+            </div>
+
+            <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:9px 10px;margin-bottom:10px;font-size:0.75rem;">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:5px;">
+                <span style="color:#94a3b8;font-weight:700;">💳 Mensual (${formatCurrency(monthlyTotal)}):</span>
+                <span style="padding:2px 7px;border-radius:999px;font-weight:800;color:${mDue.color};background:${mDue.bg};">${mDue.label}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:7px;">
+                <span style="color:#94a3b8;font-weight:700;">📅 Anual (${formatCurrency(annualFee)}):</span>
+                <span style="padding:2px 7px;border-radius:999px;font-weight:800;color:${aDue.color};background:${aDue.bg};">${aDue.label}</span>
+              </div>
+              <div style="display:flex;gap:6px;">
+                <button type="button" class="btn btn-outline btn-sm" data-saas-pay-month="${escapeHtml(t.tenantSlug)}" style="flex:1;padding:4px 6px;font-size:0.71rem;">✅ Cobrar Mes (+1m)</button>
+                <button type="button" class="btn btn-outline btn-sm" data-saas-pay-year="${escapeHtml(t.tenantSlug)}" style="flex:1;padding:4px 6px;font-size:0.71rem;">✅ Cobrar Año (+1a)</button>
               </div>
             </div>
 
@@ -221,10 +296,10 @@ function renderKpisAndGrid() {
           </div>
 
           <div style="display:flex;justify-content:space-between;gap:8px;padding-top:10px;border-top:1px solid #334155;">
-            <button type="button" class="btn btn-outline btn-sm" data-saas-edit="${escapeHtml(t.tenantSlug)}" style="color:#e2e8f0;border-color:#475569;flex:1;">
+            <button type="button" class="btn btn-outline btn-sm" data-saas-edit="${escapeHtml(t.tenantSlug)}" style="flex:1;">
               ⚙️ Plan / Módulos
             </button>
-            <button type="button" class="btn btn-outline btn-sm" data-saas-toggle="${escapeHtml(t.tenantSlug)}" style="color:${isSusp ? "#34d399" : "#fca5a5"};border-color:${isSusp ? "#059669" : "#7f1d1d"};">
+            <button type="button" class="btn btn-outline btn-sm" data-saas-toggle="${escapeHtml(t.tenantSlug)}" style="color:${isSusp ? "#34d399" : "#fca5a5"} !important;border-color:${isSusp ? "#059669" : "#991b1b"} !important;">
               ${isSusp ? "▶️ Reactivar" : "⏸️ Suspender"}
             </button>
           </div>
@@ -400,6 +475,58 @@ document.getElementById("saasTenantsGrid").addEventListener("click", async (e) =
     return;
   }
 
+  const payMonthBtn = e.target.closest("button[data-saas-pay-month]");
+  if (payMonthBtn) {
+    const slug = payMonthBtn.dataset.saasPayMonth;
+    const t = allTenants.find((x) => x.tenantSlug === slug);
+    if (!t) return;
+    const nextDate = addMonthsIso(t.plan?.nextMonthlyDue, 1);
+    try {
+      await callSaasApi("saasUpdateTenant", {
+        saasKeyHash: currentSaasHash,
+        tenantSlug: slug,
+        updates: {
+          plan: {
+            ...(t.plan || {}),
+            nextMonthlyDue: nextDate,
+            lastPaymentAtIso: new Date().toISOString()
+          }
+        }
+      });
+      showToast(`✅ Pago mensual registrado para ${t.brandName}. Próximo corte: ${nextDate}.`);
+      loadTenantsAndTelemetry();
+    } catch (err) {
+      showToast(err.message);
+    }
+    return;
+  }
+
+  const payYearBtn = e.target.closest("button[data-saas-pay-year]");
+  if (payYearBtn) {
+    const slug = payYearBtn.dataset.saasPayYear;
+    const t = allTenants.find((x) => x.tenantSlug === slug);
+    if (!t) return;
+    const nextDate = addMonthsIso(t.plan?.nextAnnualDue, 12);
+    try {
+      await callSaasApi("saasUpdateTenant", {
+        saasKeyHash: currentSaasHash,
+        tenantSlug: slug,
+        updates: {
+          plan: {
+            ...(t.plan || {}),
+            nextAnnualDue: nextDate,
+            lastAnnualPaymentAtIso: new Date().toISOString()
+          }
+        }
+      });
+      showToast(`✅ Anualidad registrada para ${t.brandName}. Próxima renovación: ${nextDate}.`);
+      loadTenantsAndTelemetry();
+    } catch (err) {
+      showToast(err.message);
+    }
+    return;
+  }
+
   const editBtn = e.target.closest("button[data-saas-edit]");
   if (editBtn) {
     const slug = editBtn.dataset.saasEdit;
@@ -409,6 +536,10 @@ document.getElementById("saasTenantsGrid").addEventListener("click", async (e) =
     document.getElementById("etSlug").value = slug;
     document.getElementById("etMaxDrivers").value = String(t.plan?.maxDrivers || 25);
     document.getElementById("etMonthlyFee").value = String(t.plan?.monthlyFeeMxn || 0);
+    document.getElementById("etPerDriverFee").value = String(t.plan?.perDriverFeeMxn || 0);
+    document.getElementById("etAnnualFee").value = String(t.plan?.annualFeeMxn || 0);
+    document.getElementById("etNextMonthlyDue").value = t.plan?.nextMonthlyDue || "";
+    document.getElementById("etNextAnnualDue").value = t.plan?.nextAnnualDue || "";
     document.getElementById("etBillingNotes").value = t.billingNotes || "";
     document.getElementById("etResetAdminPass").value = "";
     const m = t.modules || {};
@@ -429,7 +560,11 @@ document.getElementById("btnSaveTenantEdit").addEventListener("click", async () 
     plan: {
       ...(t.plan || {}),
       maxDrivers: Math.max(1, Number(document.getElementById("etMaxDrivers").value) || 10),
-      monthlyFeeMxn: Math.max(0, Number(document.getElementById("etMonthlyFee").value) || 0)
+      monthlyFeeMxn: Math.max(0, Number(document.getElementById("etMonthlyFee").value) || 0),
+      perDriverFeeMxn: Math.max(0, Number(document.getElementById("etPerDriverFee").value) || 0),
+      annualFeeMxn: Math.max(0, Number(document.getElementById("etAnnualFee").value) || 0),
+      nextMonthlyDue: document.getElementById("etNextMonthlyDue").value || "",
+      nextAnnualDue: document.getElementById("etNextAnnualDue").value || ""
     },
     modules: {
       onlineStore: document.getElementById("etModOnline").checked,
