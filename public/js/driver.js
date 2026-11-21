@@ -48,7 +48,7 @@ import {
   formatRouteKm,
   formatRouteMin
 } from "./route-optimizer.js?v=rpd_1";
-import { STAFF_MANUALS } from "./manuals-data.js?v=rpd_1";
+import { STAFF_MANUALS } from "./manuals-data.js?v=pz_23";
 
 const DRIVER_SESSION_KEY = tenantScopedStorageKey("salinas_driver_session_v1");
 const RECENT_CLIENTS_KEY = tenantScopedStorageKey("salinas_driver_clients_v1");

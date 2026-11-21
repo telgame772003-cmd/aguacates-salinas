@@ -49,7 +49,7 @@ import {
   formatRouteKm,
   formatRouteMin
 } from "./route-optimizer.js?v=rpd_1";
-import { STAFF_MANUALS } from "./manuals-data.js?v=rpd_1";
+import { STAFF_MANUALS } from "./manuals-data.js?v=pz_23";
 
 const SESSION_HASH_KEY = tenantScopedStorageKey("salinas_admin_hash_v1");
 

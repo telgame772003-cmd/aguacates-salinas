@@ -62,37 +62,37 @@ export const STAFF_MANUALS = {
       },
       {
         num: "5",
-        icon: "🔐",
-        heading: "Gestión de personal de ventas, accesos y respaldos",
+        icon: "🎯",
+        heading: "Prospección DENUE, 18 Zonas KML Reactivas y Paquetes Automáticos",
         bodyHtml:
-          "• En <strong>🚗 Choferes y PIN</strong> es posible dar de alta nuevos ejecutivos de ventas, actualizar números telefónicos, renovar códigos PIN de 4 dígitos y compartir el enlace de acceso mediante <strong>📲 Mandar App</strong>.<br>" +
-          "• El botón superior <strong>💾 Respaldar</strong> permite descargar en cualquier momento una copia íntegra de la base de datos operativa.",
+          "En <strong>🎯 Prospección Aguacatera y Cuadrantes KML</strong> dispone de más de 1,100 negocios filtrados en Saltillo, Ramos Arizpe y Arteaga:<br>" +
+          "• <strong>📐 Zonas y Colonias Reactivas:</strong> Active <strong>📐 Cuadrantes / KML</strong> (alternando entre <strong>🗺️ 18 Zonas Región</strong> o <strong>🏘️ 35 Colonias Clave</strong>) y toque cualquier zona coloreada en el mapa → <strong>➕ Sumar a Ruta ▾</strong> para elegir ahí mismo al chofer. Si elige un chofer que ya tiene paradas, el sistema <strong>adiciona</strong> la nueva zona encima y reordena todo el recorrido con OSRM.<br>" +
+          "• <strong>📦 Paquetes Auto (25–30) y Excel:</strong> Genere rutas agrupadas por perfil (<em>Anaquel, Cocina, Ejecutiva</em>) o descargue prospectos filtrados en <strong>📊 Exportar Excel (.xlsx)</strong>.<br>" +
+          "• <strong>🔒 Mapa fijo en celular:</strong> En pantallas móviles el mapa inicia bloqueado para deslizar la página sin hacer zoom accidental; toque <strong>🔒 Mapa fijo</strong> si desea moverlo.",
         example:
-          "Se recomienda generar y almacenar un respaldo semanal al cierre del día sábado como medida de control institucional."
+          "Puede tocar la Zona República y asignarla a un chofer, y enseguida tocar Parque Centro y elegir '+ Adicionar' al mismo chofer para fusionar ambas zonas en una sola ruta optimizada."
       },
       {
         num: "6",
-        icon: "❄️",
-        heading: "Control de Termos QR, Cuartos Fríos y Dirección / Finanzas",
+        icon: "🔐",
+        heading: "Equipo, Rol Mixto Chofer↔Admin, Horario GPS y Respaldos",
         bodyHtml:
-          "• En la pestaña <strong>❄️ Termos y Lotes QR</strong> cree cada lote entrante (ej. <code>T01</code>) e imprima los <strong>marbetes QR por tarima</strong> para colocarlos en mica plástica.<br>" +
-          "• Vigile el semáforo de antigüedad en <strong>Cuarto 1 a Cuarto 4</strong> (🟢 0–3 días, 🟡 4–6 días, 🔴 7+ días) y la merma acumulada.<br>" +
-          "• En la pestaña protegida <strong>🔐 Dirección / Finanzas</strong> (con clave financiera independiente del dueño) capture los <strong>precios de compra</strong> y <strong>gastos operativos</strong> para consultar en tiempo real el <strong>Balance Neto y Margen %</strong>.",
+          "• En <strong>🚗 Equipo y PINs</strong> gestione vendedores, PINs de 4 dígitos, la casilla <strong>🛡️ Rol Admin</strong> (permite a socios/encargados cambiar entre App Chofer y Panel Admin desde su menú <strong>⋮</strong>) y la hora de <strong>Apagar GPS auto</strong> al finalizar el turno.<br>" +
+          "• En <strong>❄️ Termos y Lotes QR</strong> y <strong>🔐 Dirección / Finanzas</strong> controle marbetes QR por tarima, costos de compra, gastos y utilidad neta, y use <strong>💾 Respaldar</strong> para copia íntegra.",
         example:
-          "Solo quien cuente con la clave de Dirección / Finanzas puede visualizar costos de compra, gastos y utilidad neta."
+          "Al configurar 'Apagar GPS auto' a las 08:00 PM, las unidades reportan ubicación continua durante el turno sin botón de pausa manual y se desconectan automáticamente al concluir la jornada."
       }
     ],
     whatsappText:
       `👑 *MANUAL OPERATIVO: DIRECCIÓN GENERAL — COMERCIALIZADORA SALINAS*\n\n` +
-      `1️⃣ *Supervisión en tiempo real:* El panel abre directo en *🗺️ Ruta, GPS y Cortes* (*⛶ Completa*):\n` +
-      `   • Active *🛣️ Rutas (N)* para comparar ruta planeada vs. recorrido GPS real ajustado a calles.\n` +
-      `   • Estatus e historial 30d: 🟢 Compró hoy | 🟡 Visitado | ⚪ Pendiente | ⭐ Aro dorado (3+ compras/mes).\n` +
-      `   • Filtros rápidos: *⏳ +3d s/visita*, *🚨 +7d s/compra* y *🔥 Frecuentes*.\n\n` +
-      `2️⃣ *Alertas de pedidos nuevos:* Active *🔔 Sonido* en la barra superior. Cada pedido entrante emite alerta sonora y muestra un *🔴 Indicador Rojo* en el mapa para asignación directa a la unidad más cercana.\n\n` +
-      `3️⃣ *Control de precios:* En *🏷️ Precios y Difusión* se establece el Precio Público y el *Mínimo Ruta ($)* autorizado para proteger el margen comercial.\n\n` +
-      `4️⃣ *Conciliación de cortes:* En *Pre-Corte Automático* se cruzan automáticamente los registros de Almacén contra las Ventas en Ruta (inventario a devolver y efectivo exacto a liquidar).\n\n` +
-      `5️⃣ *Termos QR y Superadmin:* En *❄️ Termos y Lotes QR* genere los QRs por tarima; en *🔐 Superadmin* controle precios de compra, gastos y utilidad neta.\n\n` +
-      `6️⃣ *Seguridad y respaldos:* Gestión de personal y PINs en *🚗 Equipo y PINs*, y descarga de base de datos en *💾 Respaldar*.`
+      `1️⃣ *Supervisión en tiempo real:* El panel abre directo en *🗺️ Ruta, GPS y Cortes* (*⛶ Completa* y *🔒 Mapa fijo* en móvil para scroll libre):\n` +
+      `   • Active *🛣️ Rutas (N)* para comparar ruta planeada vs. recorrido GPS real.\n` +
+      `   • Estatus 30d: 🟢 Compró hoy | 🟡 Visitado | ⚪ Pendiente | ⭐ Frecuente.\n\n` +
+      `2️⃣ *Prospección y Zonas KML Reactivas:* En *🎯 Prospección Aguacatera* active *📐 Cuadrantes / KML* (*18 Zonas* o *35 Colonias*), toque una zona -> *➕ Sumar a Ruta ▾* y elija al chofer (permite *+ Adicionar* varias zonas al mismo chofer reordenando con OSRM) o use *📦 Paquetes Auto*.\n\n` +
+      `3️⃣ *Alertas y Control de Precios:* Active *🔔 Sonido* para pedidos nuevos; en *🏷️ Precios y Difusión* ajuste Precio Público, *Mínimo Ruta ($)* y precio por kg.\n\n` +
+      `4️⃣ *Conciliación de Cortes:* En *Pre-Corte Automático* cruce salidas/mezclas de Almacén contra Ventas en Ruta.\n\n` +
+      `5️⃣ *Equipo, Rol Chofer↔Admin y GPS por Turno:* En *🚗 Equipo y PINs* active *🛡️ Rol Admin* para socios en ruta y ajuste la hora de *Apagar GPS auto*.\n\n` +
+      `6️⃣ *Termos QR, Finanzas y Respaldos:* Gestione lotes en *❄️ Termos QR*, utilidad neta en *🔐 Dirección / Finanzas* y copias en *💾 Respaldar*.`
   },
 
   oficina: {
@@ -145,13 +145,12 @@ export const STAFF_MANUALS = {
       {
         num: "4",
         icon: "🧭",
-        heading: "Constructor Inteligente de Rutas (Admin → Chofer) y alta de tiendas",
+        heading: "Zonas KML Reactivas, Paquetes Auto y Constructor de Rutas",
         bodyHtml:
-          "En <strong>🗺️ Ruta, GPS y Cortes</strong> puede armar y enviar rutas en vivo al celular del chofer:<br>" +
-          "1. En <strong>🧭 Constructor Inteligente de Rutas</strong> elija al <strong>Chofer</strong>.<br>" +
-          "2. Sume paradas buscando por nombre/dirección, tocando un pin del mapa → <strong>➕ Sumar a Ruta</strong>, o pulsando <strong>📦 Cargar Pedidos del Chofer</strong>.<br>" +
-          "3. Si la tienda aún no existe en la base de datos, toque <strong>+ Nuevo</strong> ahí mismo (o <strong>+ Punto</strong> arriba del mapa), capture giro, nombre y ubicación (link de Maps o <strong>👆 Elegir en Mapa</strong>) y al guardar se suma directo a la ruta.<br>" +
-          "4. Pulse <strong>⚡ Calcular Mejor Ruta (OSRM)</strong> para optimizar el orden (con regreso a Base opcional) y luego <strong>📤 Enviar Ruta al Chofer</strong>. Para agregados urgentes use <strong>⚡ Sumar Último Minuto</strong>; para vaciarla use <strong>🗑️ Limpiar</strong>.",
+          "En <strong>🗺️ Ruta, GPS y Cortes</strong> puede armar rutas por zona o punto por punto:<br>" +
+          "1. <strong>Por Zona / Colonia KML:</strong> Active <strong>📐 Cuadrantes / KML</strong>, toque cualquier zona coloreada en el mapa → <strong>➕ Sumar a Ruta ▾</strong> y seleccione al chofer (si ya tiene ruta, el botón <strong>+ Adicionar</strong> le suma la nueva zona encima y reordena todo el recorrido).<br>" +
+          "2. <strong>Por Paquetes Auto (25–30 paradas):</strong> En <strong>📦 Paquetes Auto</strong> elija perfil de giro y chofer, y pulse <strong>🧭 Pasar a Ruta</strong>.<br>" +
+          "3. <strong>Manual / Alta rápida:</strong> En <strong>🧭 Constructor Inteligente de Rutas</strong> busque tiendas/pedidos, cree negocios nuevos con <strong>+ Nuevo</strong>, pulse <strong>⚡ Calcular Mejor Ruta (OSRM)</strong> y <strong>📤 Enviar Ruta al Chofer</strong> (o <strong>🔁 Pasar pendientes</strong> para transferir paradas a otra unidad).",
         example:
           "Al enviar la ruta, aparece al instante en el teléfono del chofer (e incluso actualiza su navegador 3D si ya lo lleva abierto)."
       },
@@ -175,7 +174,7 @@ export const STAFF_MANUALS = {
       `1️⃣ *Difusión matutina de precios:* En *🏷️ Precios y Difusión*, actualice tarifas, pulse *📋 Copiar Mensaje de Hoy* y envíelo mediante las Listas de Difusión de WhatsApp Business.\n\n` +
       `2️⃣ *Recepción de pedidos:* Active *🔔 Sonido* al abrir el panel. Cada pedido nuevo emite alerta sonora, muestra aviso superior y coloca un *🔴 Indicador de Pedido Nuevo* en el mapa.\n\n` +
       `3️⃣ *Asignación de entregas:* Seleccione el pedido en el mapa, verifique qué unidad cercana cuenta con el calibre y maduración requeridos, y asígnelo para sincronizarlo en el teléfono del vendedor.\n\n` +
-      `4️⃣ *Constructor de Rutas y Alta de Tiendas:* En *🧭 Constructor Inteligente de Rutas* elija chofer, sume tiendas/pedidos (o cree una tienda nueva con *+ Nuevo*), pulse *⚡ Calcular Mejor Ruta (OSRM)* y *📤 Enviar Ruta al Chofer*.\n\n` +
+      `4️⃣ *Zonas KML, Paquetes Auto y Constructor de Rutas:* Active *📐 Cuadrantes / KML* y toque una zona -> *➕ Sumar a Ruta ▾* para asignarla o *+ Adicionar* otra zona a un chofer, o arme desde *🧭 Constructor Inteligente de Rutas* y pulse *📤 Enviar Ruta al Chofer*.\n\n` +
       `5️⃣ *Liquidación vespertina:* Una vez capturada la devolución física por el Área de Almacén, verifique en *Pre-Corte Automático* el cuadre al 100% de cajas y reciba el monto exacto indicado en *💵 Efectivo a Entregar*.`
   },
 
@@ -216,14 +215,13 @@ export const STAFF_MANUALS = {
       {
         num: "3",
         icon: "🚛",
-        heading: "Carga matutina a unidades de reparto",
+        heading: "Carga a unidades de reparto y Mezcla por Maduración",
         bodyHtml:
           "Al cargar mercancía a las camionetas:<br>" +
-          "1. Escanee el QR de la tarima o sub-lote del cual se toman las cajas.<br>" +
-          "2. Seleccione la pestaña <strong>🚛 Cargar a Chofer</strong>, elija al vendedor/unidad, capture la cantidad de cajas de 10 kg y confirme.<br>" +
-          "3. Si también utilizan el registro diario de piso en <code>/admin.html</code> (<strong>📋 Control de Almacén</strong>), capture ahí la salida de vuelta y las devoluciones al regreso.",
+          "1. Desde <code>/almacen.html</code> escanee el QR de la tarima, elija <strong>🚛 Cargar a Chofer</strong>, seleccione vendedor y cantidad de cajas.<br>" +
+          "2. En <code>/admin.html</code> → <strong>📋 Control de Almacén</strong>, la tarjeta <strong>1. Registrar Salida de Carro</strong> aparece al inicio: si la unidad lleva una sola madurez use el modo rápido; si lleva combinación variada (ej. Sazón, Quebrado y Maduro en distintos calibres), pulse <strong>🎨 Detallar mezcla por tamaño</strong> para capturar la matriz 4×4 y sumar el total en automático.",
         example:
-          "Cada carga queda descontada en tiempo real de la cámara fría y ligada al vendedor que se la llevó."
+          "Cada carga queda descontada en tiempo real y muestra el desglose exacto de madurez tanto en bitácora como en la app del chofer."
       },
       {
         num: "4",
@@ -266,54 +264,52 @@ export const STAFF_MANUALS = {
       {
         num: "1",
         icon: "🛰️",
-        heading: "App Nativa Salinas Reparto: GPS en segundo plano y Geocercas",
+        heading: "App Salinas Reparto: GPS Automático de Turno y Menú (⋮)",
         bodyHtml:
-          "La aplicación nativa (Android APK o iPhone TestFlight) mantiene su ubicación activa incluso con la pantalla apagada o usando otra app:<br>" +
-          "• Al entrar con su usuario y PIN, el botón <strong>🟢 GPS</strong> se activa automáticamente. En la barra superior también tiene <strong>🧭 3D</strong>, <strong>❓ Guía</strong> y <strong>Salir</strong>.<br>" +
-          "• <strong>Permisos recomendados (una sola vez):</strong> Acepte ubicación en <strong>«Permitir todo el tiempo»</strong> y desactive el ahorro de batería para <em>Salinas Reparto</em>.<br>" +
-          "• <strong>Visitas automáticas por geocerca:</strong> Al permanecer ~1 minuto dentro de 55 metros de una tienda registrada (sin venta), el sistema registra la visita automáticamente sin que tenga que capturar nada.",
+          "La aplicación móvil (Android APK o iPhone TestFlight) mantiene su ubicación activa durante su horario laboral aun con la pantalla bloqueada:<br>" +
+          "• <strong>🟢 GPS automático en turno:</strong> Al iniciar sesión dentro de su jornada laboral, el indicador <strong>🟢 GPS</strong> se enciende automáticamente (sin riesgo de apagarlo por accidente en ruta) y se apaga solo al terminar el horario de turno (<strong>🌙 Fin turno</strong>) o al cerrar sesión.<br>" +
+          "• <strong>Menú superior ⋮ :</strong> En la esquina superior derecha encontrará <strong>📖 Guía Rápida</strong>, <strong>🚪 Cerrar sesión</strong> (con confirmación para evitar toques accidentales) y, si cuenta con permiso administrativo autorizado, <strong>🛡️ Cambiar a Admin</strong> (regresando desde Admin con <strong>🚗 Chofer</strong>).<br>" +
+          "• <strong>Permisos recomendados (una sola vez):</strong> Acepte ubicación en <strong>«Permitir todo el tiempo»</strong> y desactive ahorro de batería. Al permanecer ~1 min cerca de una tienda registrada, la visita se marca sola por geocerca.",
         example:
-          "Al concluir la jornada laboral en bodega, toque el botón GPS para pausar el rastreo o toque Salir."
+          "Al terminar su día y liquidar su corte en bodega, abra el menú ⋮ y seleccione 🚪 Cerrar sesión (o deje que el horario automático pase a 🌙 Fin turno)."
       },
       {
         num: "2",
         icon: "🧭",
-        heading: "Sección 1 — 'Mi Ruta': Inventario, Mi Ruta del Día y Navegación 3D",
+        heading: "Sección 1 — 'Mi Ruta': Vista Previa 2D, Ruta del Día y Navegación 3D",
         bodyHtml:
-          "• <strong>Indicador superior de carga:</strong> Muestra las cajas despachadas por Almacén y su disponibilidad actual por calibre (<strong>M, P, E y S</strong>).<br>" +
-          "• <strong>🗺️ Mi Ruta del Día:</strong> Aquí recibe en vivo la ruta armada por Administración, o puede armar/editar la suya con <strong>🗺️ Armar / Editar</strong>.<br>" +
-          "&nbsp;&nbsp;• Para reordenar paradas, mantenga presionado el ícono <strong>⋮⋮</strong> (~0.3 s hasta sentir vibración) o use <strong>▲ / ▼</strong>; toque <strong>✓</strong> para marcar lista, <strong>✕</strong> para quitar una parada o <strong>🗑️ Limpiar</strong> para vaciar la lista (con confirmación).<br>" +
-          "&nbsp;&nbsp;• Pulse <strong>🧭 Iniciar Ruta 3D</strong> para abrir la cabina de navegación giro a giro con alertas de llegada y botón rápido de venta.<br>" +
+          "• <strong>Indicador superior de carga:</strong> Muestra las cajas y mezcla despachadas por Almacén y su disponibilidad actual por calibre (<strong>M, P, E y S</strong>).<br>" +
+          "• <strong>🗺️ Mi Ruta del Día:</strong> Aquí recibe en vivo las zonas/rutas enviadas por Administración, puede ver el trazo completo antes de arrancar con <strong>🗺️ Mapa</strong>, o armar la suya con <strong>🗺️ Armar Ruta</strong>.<br>" +
+          "&nbsp;&nbsp;• Reordene paradas con <strong>⋮⋮</strong> o <strong>▲ / ▼</strong>; marque <strong>✓</strong> al visitar, quite con <strong>✕</strong> o limpie con <strong>🗑️</strong>.<br>" +
+          "&nbsp;&nbsp;• Pulse <strong>🧭 Iniciar Ruta 3D</strong> para abrir la cabina de navegación giro a giro con alertas de llegada y acceso directo a venta.<br>" +
           "• <strong>Pedidos Asignados por Oficina:</strong> Use <strong>📍 Abrir Mapa</strong>, <strong>🚗 Voy en Camino</strong> y <strong>✅ Entregar y Cobrar</strong>.",
         example:
-          "Si Admin agrega una parada de último minuto mientras navega en 3D, la ruta se actualiza en vivo sin cerrar su mapa."
+          "Si Admin adiciona otra zona o parada de último minuto mientras navega en 3D, su ruta se actualiza en vivo sin cerrar el mapa."
       },
       {
         num: "3",
         icon: "🏪",
-        heading: "Sección 2 — 'Clientes': Registro de nuevos negocios y constancia de visita",
+        heading: "Sección 2 — 'Clientes': Alta rápida y Visitas con Nota",
         bodyHtml:
-          "Utilice la pestaña <strong>🏪 Clientes</strong> para gestionar los puntos de compra directamente en el sistema (sin enviar ubicaciones sueltas por mensajería):<br>" +
-          "• <strong>Alta de establecimiento nuevo:</strong> Ubicado frente al negocio, presione <strong>📍 Guardar Nuevo Negocio Aquí (GPS)</strong>, seleccione el giro comercial, indique el nombre del establecimiento y guarde el registro.<br>" +
-          "• <strong>Cliente existente con compra:</strong> Localícelo en el listado y pulse <strong>➕ Venderle</strong> para autocompletar sus datos en el formulario de venta.<br>" +
-          "• <strong>Visita realizada sin venta:</strong> Si acudió al establecimiento pero no requirió producto o se encontraba cerrado, presione <strong>📍 Pasé (Sin venta)</strong> y seleccione el motivo para dejar constancia geolocalizada de su visita.",
+          "Utilice la pestaña <strong>🏪 Clientes</strong> para gestionar puntos de compra directamente en el sistema:<br>" +
+          "• <strong>Alta de establecimiento nuevo:</strong> Frente al negocio, presione <strong>📍 Guardar Nuevo Negocio Aquí (GPS)</strong> (o véndale directo en <strong>➕ Vender</strong> y el sistema guardará el punto nuevo automáticamente).<br>" +
+          "• <strong>Cliente existente con compra:</strong> Localícelo y pulse <strong>➕ Venderle</strong> para cargar sus datos.<br>" +
+          "• <strong>Visita realizada sin venta:</strong> Presione <strong>📍 Pasé (Sin venta)</strong>, elija el motivo y agregue una <strong>nota opcional</strong> (ej. horario en que recibe o encargado) para dejar constancia GPS.",
         example:
-          "El registro de visita sin venta actualiza de inmediato el indicador del cliente en el mapa de supervisión administrativa."
+          "El registro de visita sin venta actualiza de inmediato el indicador amarillo del negocio en el mapa administrativo."
       },
       {
         num: "4",
         icon: "➕",
-        heading: "Sección 3 — 'Vender': Captura de ventas en ruta y comprobante digital",
+        heading: "Sección 3 — 'Vender': Ventas por Caja o Kg y Nota WhatsApp",
         bodyHtml:
           "Para documentar toda venta directa en ruta, ingrese a <strong>➕ Vender</strong>:<br>" +
-          "1. Capture el nombre del cliente o establecimiento.<br>" +
-          "2. Indique la cantidad de cajas entregadas por calibre (<strong>S, E, P o M</strong>). En caso de otorgar precio especial, ajústelo respetando el límite mínimo autorizado por el sistema.<br>" +
-          "3. Seleccione el método de cobro:<br>" +
-          "&nbsp;&nbsp;• <strong>💵 Efectivo</strong> o <strong>🏦 Transferencia</strong>.<br>" +
-          "&nbsp;&nbsp;• <strong>📝 Crédito / Deja Anticipo:</strong> Es obligatorio capturar el teléfono de 10 dígitos del cliente; si entrega un pago parcial en efectivo, regístrelo en el campo <em>Anticipo</em> para calcular automáticamente el saldo pendiente.<br>" +
-          "4. Presione <strong>✅ Registrar Venta</strong> y utilice el botón <strong>📲 Mandar Nota por WhatsApp al Cliente</strong> para enviar el comprobante foliado.",
+          "1. Capture o seleccione el establecimiento (si es prospecto nuevo, puede guardar su giro y GPS ahí mismo).<br>" +
+          "2. Indique la cantidad por calibre (<strong>S, E, P o M</strong>, por caja o modalidad en kg cuando aplique) respetando el precio mínimo autorizado.<br>" +
+          "3. Seleccione el método de cobro: <strong>💵 Efectivo</strong>, <strong>🏦 Transferencia</strong> o <strong>📝 Crédito / Deja Anticipo</strong> (con teléfono de 10 dígitos).<br>" +
+          "4. Presione <strong>✅ Registrar Venta</strong> y envíe el comprobante foliado con <strong>📲 Mandar Nota por WhatsApp al Cliente</strong>.",
         example:
-          "Aun cuando el cliente solicite adicionalmente una nota física impresa, toda operación debe registrarse en la aplicación para mantener cuadrado su inventario y efectivo."
+          "Aun cuando el cliente solicite nota física impresa, toda operación debe registrarse en la aplicación para cuadrar inventario y efectivo."
       },
       {
         num: "5",
@@ -332,16 +328,16 @@ export const STAFF_MANUALS = {
       `🚗 *MANUAL OPERATIVO: VENTAS Y REPARTO EN RUTA — COMERCIALIZADORA SALINAS*\n\n` +
       `👉 *Acceso móvil:* https://aguacates-salinas.web.app/chofer.html\n` +
       `*(Seleccione su usuario e ingrese su PIN personal de 4 dígitos)*\n\n` +
-      `1️⃣ *App Nativa y GPS en segundo plano:*\n` +
-      `• Al iniciar sesión, *🟢 GPS* se activa solo (acepte ubicación *"Permitir todo el tiempo"* y sin ahorro de batería).\n` +
-      `• Al permanecer ~1 min cerca de una tienda registrada, la visita se marca en automático por geocerca.\n\n` +
+      `1️⃣ *GPS automático de turno y Menú (⋮):*\n` +
+      `• Al iniciar sesión, *🟢 GPS* arranca solo durante su horario laboral (acepte ubicación *"Permitir todo el tiempo"* y sin ahorro de batería) y pasa solo a *🌙 Fin turno* al terminar el horario.\n` +
+      `• En el menú superior *⋮* tiene *📖 Guía Rápida*, *🚪 Cerrar sesión* (con confirmación) y, si aplica a su perfil, *🛡️ Cambiar a Admin*.\n` +
+      `• Al permanecer ~1 min cerca de una tienda registrada, la visita se marca sola por geocerca.\n\n` +
       `2️⃣ *🗺️ Mi Ruta del Día y Navegación 3D:*\n` +
-      `• Reciba la ruta de Oficina o ármela con *🗺️ Armar / Editar*.\n` +
-      `• Reordene manteniendo presionado *⋮⋮* (o *▲ / ▼*), marque *✓*, quite con *✕* o vacíe con *🗑️ Limpiar*.\n` +
-      `• Toque *🧭 Iniciar Ruta 3D* para navegar giro a giro con aviso de llegada.\n\n` +
+      `• Revise su trazo con *🗺️ Mapa*, ármela con *🗺️ Armar Ruta* o inicie directo con *🧭 Iniciar Ruta 3D*.\n` +
+      `• Reordene con *⋮⋮* (o *▲ / ▼*), marque *✓*, quite con *✕* o vacíe con *🗑️*.\n\n` +
       `3️⃣ *🏪 Clientes:*\n` +
-      `• *Establecimiento nuevo:* Regístrelo frente al local pulsando *📍 Guardar Nuevo Negocio Aquí (GPS)*.\n` +
-      `• *Visita sin venta:* Seleccione *📍 Pasé (Sin venta)* para dejar constancia GPS de su visita.\n\n` +
+      `• *Negocio nuevo:* Regístrelo con *📍 Guardar Nuevo Negocio Aquí (GPS)* (o directo al venderle por primera vez).\n` +
+      `• *Visita sin venta:* Pulse *📍 Pasé (Sin venta)* con motivo y nota opcional.\n\n` +
       `4️⃣ *➕ Vender:* Capture toda venta realizada en ruta (*Efectivo, Transferencia o Crédito con Anticipo*) y envíe el comprobante foliado con *📲 Mandar Nota por WhatsApp*.\n\n` +
       `5️⃣ *💰 Mi Corte:* Verifique automáticamente las cajas exactas a devolver en Almacén y el efectivo exacto a liquidar en Administración.`
   },
