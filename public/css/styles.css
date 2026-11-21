@@ -3155,3 +3155,18 @@ body.map-fullscreen-open {
 #adminLiveMap.is-scroll-locked .leaflet-tile-pane {
   touch-action: pan-y !important;
 }
+
+#adminLiveMap.has-open-popup ~ .map-mobile-lock-btn,
+#adminLiveMap.has-open-popup ~ .map-corner-fs-btn {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.leaflet-container a.leaflet-popup-close-button {
+  width: 28px;
+  height: 28px;
+  font-size: 19px;
+  line-height: 26px;
+  color: #475569;
+  font-weight: 800;
+}

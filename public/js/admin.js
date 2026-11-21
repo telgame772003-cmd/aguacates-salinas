@@ -1476,6 +1476,13 @@ function ensureLeafletMap() {
     }
   });
 
+  leafletMap.on("popupopen", () => {
+    document.getElementById("adminLiveMap")?.classList.add("has-open-popup");
+  });
+  leafletMap.on("popupclose", () => {
+    document.getElementById("adminLiveMap")?.classList.remove("has-open-popup");
+  });
+
   syncMobileMapInteractionLock();
 }
 
@@ -2390,7 +2397,10 @@ function renderGpsMapAndChips() {
         className: "salinas-place-tooltip",
         offset: [0, -8]
       })
-      .bindPopup(popupHtml);
+      .bindPopup(popupHtml, {
+        autoPanPaddingTopLeft: [14, 52],
+        autoPanPaddingBottomRight: [14, 18]
+      });
     m.on("tooltipopen", (ev) => {
       try {
         const pt = leafletMap.latLngToContainerPoint(m.getLatLng());
@@ -2510,7 +2520,10 @@ function renderGpsMapAndChips() {
 
     const m = window.L.marker([loc.lat, loc.lng], { icon: carIcon, zIndexOffset: 600 })
       .addTo(mapLayerGroup)
-      .bindPopup(popupHtml);
+      .bindPopup(popupHtml, {
+        autoPanPaddingTopLeft: [14, 52],
+        autoPanPaddingBottomRight: [14, 18]
+      });
     m.on("click", () => {
       if (focusedTrailDriverId !== loc.id) {
         focusedTrailDriverId = loc.id;
@@ -2580,7 +2593,10 @@ function renderGpsMapAndChips() {
 
     const m = window.L.marker([coords.lat, coords.lng], { icon: orderAlertIcon, zIndexOffset: 1000 })
       .addTo(mapLayerGroup)
-      .bindPopup(popupHtml);
+      .bindPopup(popupHtml, {
+        autoPanPaddingTopLeft: [14, 52],
+        autoPanPaddingBottomRight: [14, 18]
+      });
     mapFocusMarkers.set(`order:${ord.id}`, m);
   }
 
