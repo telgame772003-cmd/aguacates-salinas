@@ -6,7 +6,7 @@
   <title>Modo Chofer en Ruta | Comercializadora Salinas</title>
   <link rel="icon" type="image/png" href="assets/favicon.png">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="css/styles.css?v=pz_15">
+  <link rel="stylesheet" href="css/styles.css?v=pz_48">
   <script src="js/salinas-debug-logger.js?v=nav3d_6"></script>
 </head>
 <body class="driver-app-body">
@@ -217,7 +217,12 @@
             <input type="tel" id="saleClientPhone" class="form-control" placeholder="10 dígitos" maxlength="20">
           </div>
 
-          <div style="font-size:0.78rem;font-weight:800;color:var(--green-900);margin:14px 0 8px;">CAJAS ENTREGADAS Y PRECIO ($/CAJA)</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin:14px 0 8px;">
+            <div style="font-size:0.78rem;font-weight:800;color:var(--green-900);">CAJAS ENTREGADAS Y PRECIO ($/CAJA)</div>
+            <button type="button" id="btnToggleDrvSaleRipeness" class="btn btn-outline btn-sm" style="padding:4px 9px;font-size:0.74rem;font-weight:800;border-color:#15803d;color:#14532d;background:#ecfdf5;">
+              🎨 Detallar maduración
+            </button>
+          </div>
           <div id="streetSaleCalibersContainer"></div>
 
           <div style="font-size:0.78rem;font-weight:800;color:var(--green-900);margin:14px 0 8px;">FORMA DE COBRO</div>
@@ -343,9 +348,17 @@
 
       <form id="deliverOrderForm">
         <input type="hidden" id="deliverOrderId">
+        <div class="form-group" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:9px 10px;margin-bottom:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <span style="font-size:0.78rem;font-weight:800;color:#334155;">🥑 Cajas entregadas (ajusta si cambió)</span>
+            <strong id="deliverDynamicTotalBadge" style="font-size:0.95rem;color:var(--green-900);">$0</strong>
+          </div>
+          <div id="deliverItemsAdjustWrap" style="display:flex;flex-direction:column;gap:5px;"></div>
+        </div>
         <div class="form-group">
           <label class="form-label">¿Cómo pagó el cliente?</label>
-          <select id="deliverPayMethod" class="form-control">
+          <select id="deliverPayMethod" class="form-control" required>
+            <option value="">— Selecciona cómo pagó el cliente —</option>
             <option value="Efectivo">💵 Pagado en Efectivo</option>
             <option value="Transferencia">🏦 Pagado por Transferencia</option>
             <option value="Credito">📝 Quedó a Crédito / Anticipo</option>
@@ -523,6 +536,6 @@
   <div id="toastBox" class="toast-box"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script type="module" src="js/driver.js?v=pz_23"></script>
+  <script type="module" src="js/driver.js?v=pz_51"></script>
 </body>
 </html>

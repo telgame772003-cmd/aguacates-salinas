@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
-  <link rel="stylesheet" href="css/styles.css?v=pz_32">
+  <link rel="stylesheet" href="css/styles.css?v=pz_48">
 </head>
 <body class="admin-body">
 
@@ -50,7 +50,7 @@
       <form id="loginForm">
         <div class="form-group" style="text-align:left;">
           <label class="form-label" for="adminPasswordInput">Clave de Acceso</label>
-          <input type="password" id="adminPasswordInput" class="form-control" placeholder="••••••••" required>
+          <input type="password" id="adminPasswordInput" class="form-control" placeholder="••••••••" autocomplete="current-password" required>
         </div>
         <label class="remember-check" style="justify-content:flex-start;">
           <input type="checkbox" id="rememberAdminSession" checked>
@@ -103,7 +103,7 @@
         <div class="kpi-sub" id="kpiWarehouseSub">M:0 • P:0 • E:0 • S:0</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">Venta Web Hoy</div>
+        <div class="kpi-label">Venta Total Hoy</div>
         <div class="kpi-value" id="kpiRevenueToday">$0</div>
         <div class="kpi-sub" id="kpiCalibersSub">0 cajas hoy</div>
       </div>
@@ -112,7 +112,7 @@
     <!-- Navigation Tabs -->
     <div class="admin-tabs">
       <button type="button" class="tab-btn active" data-tab="tabRoutes">🗺️ Ruta, GPS y Cortes</button>
-      <button type="button" class="tab-btn" data-tab="tabOrders">📦 Pedidos en Línea</button>
+      <button type="button" class="tab-btn" data-tab="tabOrders">📦 Pedidos<span id="ordersTabHotBadge" class="tab-hot-badge" style="display:none;">0</span></button>
       <button type="button" class="tab-btn" data-tab="tabWarehouse">📋 Control de Almacén</button>
       <button type="button" class="tab-btn" data-tab="tabLots">❄️ Termos y Lotes QR</button>
       <button type="button" class="tab-btn" data-tab="tabCatalog">🏷️ Precios y Difusión</button>
@@ -330,6 +330,8 @@
             <input type="date" id="mapDatePicker" class="form-control" style="width:auto;padding:4px 8px;font-size:0.75rem;font-weight:700;" title="Cambiar fecha del mapa y cortes">
             <button type="button" id="btnFitAllMap" class="btn btn-outline btn-sm" style="padding:5px 9px;font-size:0.75rem;" title="Encuadrar los puntos visibles">🎯 Todo</button>
             <button type="button" id="btnToggleAllRoutes" class="btn btn-outline btn-sm" style="padding:5px 9px;font-size:0.75rem;" title="Mostrar u ocultar rutas planeadas vs. recorrido real de todos los choferes">🛣️ Rutas (<span id="allRoutesCnt">0</span>)</button>
+            <button type="button" id="btnToggleTimelinePanel" class="btn btn-outline btn-sm" style="padding:5px 9px;font-size:0.75rem;border-color:#7c3aed;color:#6d28d9;font-weight:800;" title="Reproducir y auditar en orden cronológico qué ruta y paradas hizo realmente el chofer">🎬 Cronología</button>
+            <button type="button" id="btnSealFullDayRoutes" class="btn btn-outline btn-sm" style="padding:5px 9px;font-size:0.75rem;border-color:#0f766e;color:#0f766e;font-weight:800;" title="Sellar y blindar permanentemente las rutas asignadas, rastro GPS por calle y ventas de esta fecha">🔒 Sellar Día</button>
             <button type="button" id="btnJumpToRouteBuilder" class="btn btn-outline btn-sm" style="padding:5px 9px;font-size:0.75rem;" title="Ir al Constructor de Rutas">🧭 Ruta</button>
             <button type="button" id="btnAdminOpenPlaceModal" class="btn btn-primary btn-sm" style="padding:5px 10px;font-size:0.75rem;">+ Punto</button>
             <button type="button" id="btnToggleMapFullscreen" class="btn btn-outline btn-sm" style="padding:5px 9px;font-size:0.75rem;">⛶ Completa</button>
@@ -339,6 +341,49 @@
         <div id="mapHistoryBanner" style="display:none;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;padding:8px 12px;border-radius:10px;background:#fef3c7;border:1.5px solid #f59e0b;color:#78350f;font-size:0.8rem;font-weight:700;">
           <span id="mapHistoryBannerText">⚠️ Estás viendo el historial de otra fecha (GPS en vivo oculto).</span>
           <button type="button" id="btnMapBannerToday" class="btn btn-sm" style="background:#b45309;color:#fff;border:none;padding:5px 10px;font-size:0.76rem;font-weight:800;border-radius:8px;cursor:pointer;">↩ Volver a hoy</button>
+        </div>
+
+        <!-- Barra Superior Inmediata de Cronología (aparece justo debajo del botón al dar clic) -->
+        <div id="mapTimelinePanel" class="tl-top-dock" style="display:none;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <strong id="tlPanelTitle" style="font-size:0.88rem;color:#4c1d95;">🎬 Auditoría Cronológica</strong>
+              <select id="tlDriverSelect" class="form-control" style="width:auto;padding:4px 10px;font-size:0.8rem;font-weight:800;background:#fff;"></select>
+              <span id="tlSummaryStats" style="font-size:0.75rem;font-weight:800;color:#5b21b6;background:#ede9fe;padding:3px 9px;border-radius:999px;">Elige chofer</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+              <button type="button" id="btnTlSealDriverRoute" class="btn btn-outline btn-sm" style="display:none;padding:3px 9px;font-size:0.74rem;font-weight:800;border-color:#0f766e;color:#0f766e;background:#fff;" title="Sellar y archivar el recorrido GPS, ruta matutina y ventas de este chofer">🔒 Sellar ruta</button>
+              <button type="button" id="btnCloseTimelinePanel" class="btn btn-outline btn-sm" style="padding:3px 9px;font-size:0.74rem;background:#fff;">✕ Cerrar cronología</button>
+            </div>
+          </div>
+
+          <div id="tlDriverPromptBox" style="background:#ffffff;border:1.5px dashed #a78bfa;border-radius:10px;padding:10px 12px;margin-top:8px;">
+            <div style="font-size:0.81rem;font-weight:800;color:#4c1d95;margin-bottom:7px;">
+              👇 ¿De qué chofer quieres ver la ruta cronológica del <span id="tlPromptDateLbl">día</span>?
+            </div>
+            <div id="tlDriverQuickButtons" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+          </div>
+
+          <div id="tlPlayerControlsWrap" style="display:none;margin-top:8px;">
+            <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;background:#ffffff;border:1px solid #ddd6fe;border-radius:10px;padding:6px 10px;">
+              <button type="button" id="btnTlPrev" class="btn btn-outline btn-sm" style="padding:4px 8px;font-weight:800;" title="Paso anterior">⏮</button>
+              <button type="button" id="btnTlPlayPause" class="btn btn-primary btn-sm" style="background:#6d28d9;border-color:#6d28d9;padding:5px 12px;font-weight:800;">▶ Reproducir</button>
+              <button type="button" id="btnTlNext" class="btn btn-outline btn-sm" style="padding:4px 8px;font-weight:800;" title="Siguiente paso">⏭</button>
+              <input type="range" id="tlRangeSlider" min="0" max="0" value="0" style="flex:1;min-width:130px;accent-color:#6d28d9;cursor:pointer;">
+              <strong id="tlCurrentTimeBadge" style="font-size:0.84rem;color:#4c1d95;min-width:94px;text-align:center;background:#f3e8ff;padding:4px 8px;border-radius:8px;">🕒 Día completo</strong>
+              <button type="button" id="btnTlShowFull" class="btn btn-outline btn-sm" style="padding:4px 9px;font-size:0.73rem;font-weight:700;">Ver completo</button>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:6px;padding:2px 4px;font-size:0.74rem;color:#475569;">
+              <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <label style="display:inline-flex;align-items:center;gap:5px;font-weight:800;color:#0369a1;cursor:pointer;">
+                  <input type="checkbox" id="tlShowPlannedRouteChk" checked style="accent-color:#0284c7;">
+                  <span>╌╌ Ruta asignada (azul por calle)</span>
+                </label>
+                <span style="font-weight:800;color:#6d28d9;">━━ Rastro GPS real (morado sólido)</span>
+                <span style="font-weight:700;color:#7c3aed;">┈┈ Ruta entre visitas (morado punteado)</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div style="position:relative;margin-bottom:8px;">
@@ -366,10 +411,25 @@
             </div>
           </div>
 
-          <div class="map-canvas-wrap">
-            <div id="adminLiveMap" data-zoom-tier="far"></div>
-            <button type="button" id="btnMobileMapPanLock" class="map-mobile-lock-btn" title="Desbloquear o fijar mapa para evitar zoom al hacer scroll">🔒 Mapa fijo (toca para mover)</button>
-            <button type="button" id="btnCornerMapFullscreen" class="map-corner-fs-btn" title="Abrir mapa en pantalla completa">⛶</button>
+          <div class="map-stage-split">
+            <div class="map-canvas-wrap">
+              <div id="adminLiveMap" data-zoom-tier="far"></div>
+              <button type="button" id="btnMobileMapPanLock" class="map-mobile-lock-btn" title="Desbloquear o fijar mapa para evitar zoom al hacer scroll">🔒 Mapa fijo (toca para mover)</button>
+              <button type="button" id="btnCornerMapFullscreen" class="map-corner-fs-btn" title="Abrir mapa en pantalla completa">⛶</button>
+            </div>
+
+            <!-- Riel Lateral de Paradas Cronológicas (al lado del mapa sin tener que bajar la pantalla) -->
+            <aside id="tlSideRail" class="tl-side-rail" style="display:none;">
+              <div class="tl-side-rail-head" style="flex-wrap:wrap;">
+                <strong style="font-size:0.8rem;color:#4c1d95;">📋 Bitácora vs. Ruta</strong>
+                <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                  <button type="button" class="btn btn-sm btn-primary" data-tl-evfilter="all" style="padding:2px 7px;font-size:0.69rem;background:#6d28d9;border-color:#6d28d9;">Todas</button>
+                  <button type="button" class="btn btn-sm btn-outline" data-tl-evfilter="skipped" style="padding:2px 7px;font-size:0.69rem;">⏭️ Omitidas</button>
+                  <button type="button" class="btn btn-sm btn-outline" data-tl-evfilter="offroute" style="padding:2px 7px;font-size:0.69rem;">⚠️ Desvíos</button>
+                </div>
+              </div>
+              <div id="tlEventsList" class="tl-side-rail-list"></div>
+            </aside>
           </div>
         </div>
 
@@ -390,7 +450,7 @@
           <div class="pz-actions-bar">
             <div class="pz-toggle-grid">
               <button type="button" id="btnToggleProspectsLayer" class="btn btn-outline btn-sm" style="font-weight:800;border-color:#15803d;color:#14532d;">
-                ⚪ Mostrar Prospectos DENUE
+                ⚪ Mostrar Prospectos
               </button>
               <button type="button" id="btnToggleAutoPacksPanel" class="btn btn-primary btn-sm" style="font-weight:800;">
                 📦 Paquetes Auto (25–30)
@@ -644,29 +704,131 @@
       <div id="routeSalesAdminList"></div>
     </section>
 
-    <!-- ================= TAB 2: ORDERS ================= -->
+    <!-- ================= TAB 2: ORDERS & TELEMARKETING COCKPIT ================= -->
     <section id="tabOrders" class="admin-tab-pane" style="display:none;">
-      <div class="admin-toolbar-card">
-        <div class="toolbar-group" id="statusFilterBar">
-          <button type="button" class="btn btn-sm btn-primary" data-status="todos">Todos</button>
-          <button type="button" class="btn btn-sm btn-outline" data-status="nuevo">Nuevos</button>
-          <button type="button" class="btn btn-sm btn-outline" data-status="confirmado">Confirmados</button>
-          <button type="button" class="btn btn-sm btn-outline" data-status="en_ruta">En Ruta</button>
-          <button type="button" class="btn btn-sm btn-outline" data-status="entregado">Entregados</button>
-          <button type="button" class="btn btn-sm btn-outline" data-status="cancelado">Cancelados</button>
+      <div class="orders-cockpit-bar">
+        <div class="orders-subtabs" id="ordersSubtabBar">
+          <button type="button" class="orders-subtab-btn active" data-orders-subtab="inbox">
+            🔥 Bandeja de Pedidos <span id="subtabActiveOrdersCnt" class="wh-chevron-pill" style="margin-left:2px;">0 activos</span>
+          </button>
+          <button type="button" class="orders-subtab-btn" data-orders-subtab="telemarketing">
+            💬 WhatsApp 1 a 1 y Llamadas <span id="subtabTmTodayCnt" class="wh-chevron-pill" style="margin-left:2px;">0 hoy</span>
+          </button>
         </div>
-
-        <div class="toolbar-group">
-          <select id="dateRangeFilter" class="form-control" style="width:auto;padding:8px 12px;font-size:0.86rem;">
-            <option value="all">Todos los recientes</option>
-            <option value="today">Solo de hoy</option>
-          </select>
-          <input type="search" id="searchOrdersInput" class="form-control" placeholder="Buscar cliente, folio o chofer..." style="width:220px;padding:8px 12px;font-size:0.86rem;">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <button type="button" id="btnOpenManualOrderModal" class="btn btn-primary btn-sm" style="padding:9px 15px;font-weight:900;font-size:0.86rem;">
+            ➕ Capturar Pedido (WhatsApp / Llamada)
+          </button>
         </div>
       </div>
 
-      <div id="ordersAdminContainer">
-        <div class="cart-empty">Cargando pedidos en tiempo real...</div>
+      <!-- SUBPANE A: BANDEJA DE PEDIDOS ("LA PAPA CALIENTE") -->
+      <div id="ordersInboxSubpane">
+        <div class="admin-toolbar-card">
+          <div class="toolbar-group" id="statusFilterBar">
+            <button type="button" class="btn btn-sm btn-primary" data-status="todos">Todos</button>
+            <button type="button" class="btn btn-sm btn-outline" data-status="nuevo">🔴 Sin asignar</button>
+            <button type="button" class="btn btn-sm btn-outline" data-status="confirmado">Confirmados</button>
+            <button type="button" class="btn btn-sm btn-outline" data-status="en_ruta">🔵 En Ruta</button>
+            <button type="button" class="btn btn-sm btn-outline" data-status="entregado">🟢 Entregados</button>
+            <button type="button" class="btn btn-sm btn-outline" data-status="cancelado">Cancelados</button>
+          </div>
+
+          <div class="toolbar-group">
+            <select id="channelOrdersFilter" class="form-control" style="width:auto;padding:8px 11px;font-size:0.84rem;font-weight:700;">
+              <option value="all">Todos los canales</option>
+              <option value="web">🌐 Web</option>
+              <option value="whatsapp">💬 WhatsApp</option>
+              <option value="llamada">📞 Llamada</option>
+              <option value="mostrador">🏪 Bodega / Mostrador</option>
+            </select>
+            <select id="dateRangeFilter" class="form-control" style="width:auto;padding:8px 12px;font-size:0.86rem;">
+              <option value="all">Todos los recientes</option>
+              <option value="today">Solo de hoy</option>
+            </select>
+            <input type="search" id="searchOrdersInput" class="form-control" placeholder="Buscar cliente, folio o chofer..." style="width:210px;padding:8px 12px;font-size:0.86rem;">
+          </div>
+        </div>
+
+        <div id="ordersAdminContainer">
+          <div class="cart-empty">Cargando pedidos en tiempo real...</div>
+        </div>
+      </div>
+
+      <!-- SUBPANE B: TELEMARKETING 1 A 1 (WHATSAPP + LLAMADAS SIN SALIR DE PESTAÑA) -->
+      <div id="ordersTelemarketingSubpane" style="display:none;">
+        <div class="order-admin-card" style="margin-bottom:12px;padding:11px 14px;background:#eff6ff;border:1.5px solid #93c5fd;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+          <div style="flex:1;min-width:240px;">
+            <strong style="font-size:0.88rem;color:#1e3a8a;">📢 Paso 1 Mañanero: Listas de Difusión (Clientes que ya te tienen guardado)</strong>
+            <div style="font-size:0.76rem;color:#1e40af;margin-top:2px;">
+              Manda el aviso general en 5 segundos por Difusión de WhatsApp Business, y usa la lista <strong>1 a 1</strong> de abajo solo para Frecuentes sin pedido, +7d y Prospectos nuevos.
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button type="button" id="btnTmCopyBroadcast" class="btn btn-primary btn-sm" style="background:#1d4ed8;border-color:#1d4ed8;font-weight:800;">
+              📋 Copiar Lista p/ Difusión
+            </button>
+            <button type="button" id="btnTmExportVcf" class="btn btn-outline btn-sm" style="background:#fff;border-color:#1d4ed8;color:#1d4ed8;font-weight:800;" title="Descargar contactos del filtro actual para importarlos a la agenda del celular">
+              📇 Descargar Contactos (.vcf)
+            </button>
+          </div>
+        </div>
+
+        <details class="order-admin-card" style="margin-bottom:14px;background:var(--green-50);border-color:var(--green-600);" open>
+          <summary class="wh-details-summary">
+            <span>💬 Plantilla de Disparo WhatsApp 1 a 1 (usa <code>{negocio}</code> para personalizar)</span>
+            <span class="wh-chevron-pill">Precios del día automáticos ▾</span>
+          </summary>
+          <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--slate-200);">
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
+              <button type="button" class="btn btn-sm btn-primary" data-tm-tpl="clientes">🥑 Precios Hoy (Clientes)</button>
+              <button type="button" class="btn btn-sm btn-outline" data-tm-tpl="prospectos">👋 Presentación (Prospectos Nuevos)</button>
+              <button type="button" class="btn btn-sm btn-outline" data-tm-tpl="recompra">🔄 Seguimiento Rápido</button>
+              <button type="button" id="btnResetTmTemplate" class="btn btn-sm btn-outline" style="margin-left:auto;">↺ Actualizar con precios de hoy</button>
+            </div>
+            <textarea id="tmMessageTemplate" class="form-control" rows="5" style="font-size:0.83rem;line-height:1.4;background:#fff;"></textarea>
+            <div style="font-size:0.75rem;color:var(--slate-500);margin-top:5px;">
+              💡 Al tocar <strong>💬 WhatsApp</strong> en cualquier negocio abajo, se reemplaza <code>{negocio}</code> por su nombre real, se abre su chat listo para enviar y se marca como <strong>✓ Contactado hoy</strong>.
+            </div>
+          </div>
+        </details>
+
+        <div class="order-admin-card" style="margin-bottom:14px;padding:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+            <div id="tmSegmentBar" style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button type="button" class="map-filter-chip active" data-tm-seg="frequent_due">🔥 Frecuentes sin pedido hoy <span class="cnt" id="tmCntFrequent">0</span></button>
+              <button type="button" class="map-filter-chip" data-tm-seg="stale7d">🚨 +7d sin comprar <span class="cnt" id="tmCntStale">0</span></button>
+              <button type="button" class="map-filter-chip" data-tm-seg="followup_due">📅 Llamar hoy <span class="cnt" id="tmCntFollowup">0</span></button>
+              <button type="button" class="map-filter-chip" data-tm-seg="directory_all">🏪 Clientes c/WA <span class="cnt" id="tmCntDir">0</span></button>
+              <button type="button" class="map-filter-chip" data-tm-seg="denue_tel">🆕 Prospectos c/WA <span class="cnt" id="tmCntDenue">0</span></button>
+              <button type="button" class="map-filter-chip" data-tm-seg="landline_only" title="Teléfonos fijos marcados sin WhatsApp (para ronda de llamadas)">☎️ Solo Llamada (Fijos) <span class="cnt" id="tmCntLandline">0</span></button>
+              <button type="button" class="map-filter-chip" data-tm-seg="discarded" title="Números descartados (cerró, equivocado o no maneja aguacate)">🚫 Descartados <span class="cnt" id="tmCntDiscarded">0</span></button>
+            </div>
+            <div id="tmDailyStatsLine" style="font-size:0.79rem;font-weight:800;color:var(--green-900);background:#dcfce7;padding:5px 10px;border-radius:999px;">
+              Hoy: 0 WhatsApps • 0 llamadas
+            </div>
+          </div>
+
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <input type="search" id="tmSearchInput" class="form-control" placeholder="🔍 Buscar negocio, giro, colonia o teléfono..." style="flex:1;min-width:210px;padding:8px 12px;font-size:0.85rem;">
+            <select id="tmCategoryFilter" class="form-control" style="width:auto;padding:8px 10px;font-size:0.83rem;font-weight:700;">
+              <option value="all">Todos los giros</option>
+              <option value="fruteria">🥑 Fruterías</option>
+              <option value="carniceria">🥩 Carnicerías</option>
+              <option value="restaurante">🍽️ Restaurantes</option>
+              <option value="tienda">🏪 Tiendas / Abarrotes</option>
+              <option value="comedor">🏢 Comedores</option>
+            </select>
+            <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.81rem;font-weight:700;color:#334155;cursor:pointer;user-select:none;">
+              <input type="checkbox" id="tmHideContactedToday">
+              Ocultar ya contactados hoy
+            </label>
+          </div>
+        </div>
+
+        <div id="tmContactsContainer">
+          <div class="cart-empty">Cargando lista de clientes y prospectos...</div>
+        </div>
       </div>
     </section>
 
@@ -891,11 +1053,11 @@
           <form id="changePassForm">
             <div class="form-group">
               <label class="form-label" for="newAdminPass1">Nueva Clave (mínimo 6 caracteres)</label>
-              <input type="password" id="newAdminPass1" class="form-control" minlength="6" required>
+              <input type="password" id="newAdminPass1" class="form-control" minlength="6" autocomplete="new-password" required>
             </div>
             <div class="form-group">
               <label class="form-label" for="newAdminPass2">Confirmar Nueva Clave</label>
-              <input type="password" id="newAdminPass2" class="form-control" minlength="6" required>
+              <input type="password" id="newAdminPass2" class="form-control" minlength="6" autocomplete="new-password" required>
             </div>
             <button type="submit" class="btn btn-outline" style="width:100%;margin-top:6px;">Actualizar Clave</button>
           </form>
@@ -973,7 +1135,7 @@
         </p>
         <form id="superadminAuthForm">
           <div class="form-group">
-            <input type="password" id="superadminPinInput" class="form-control" placeholder="Clave de Dirección / Finanzas (mín. 4 caracteres)" minlength="4" required style="text-align:center;font-weight:800;">
+            <input type="password" id="superadminPinInput" class="form-control" placeholder="Clave de Dirección / Finanzas (mín. 4 caracteres)" minlength="4" autocomplete="current-password" required style="text-align:center;font-weight:800;">
           </div>
           <button type="submit" id="btnSuperadminUnlock" class="btn btn-primary" style="width:100%;padding:11px;">
             Desbloquear Finanzas
@@ -1279,6 +1441,172 @@
     </div>
   </div>
 
+  <!-- Modal: Capturar Pedido Manual (WhatsApp / Llamada / Mostrador) -->
+  <div id="adminManualOrderModal" class="modal-backdrop" role="dialog" aria-modal="true" style="z-index:10058;">
+    <div class="modal-card" style="max-width:540px;padding:20px;max-height:92vh;overflow-y:auto;">
+      <button type="button" id="btnCloseManualOrderModal" class="modal-close" aria-label="Cerrar">✕</button>
+      <h3 class="serif-title" style="font-size:1.22rem;color:var(--green-950);margin-bottom:2px;padding-right:28px;">➕ Capturar Pedido</h3>
+      <p style="font-size:0.8rem;color:#475569;margin-bottom:12px;">Registra pedidos recibidos por WhatsApp, llamada o mostrador para darles seguimiento hasta su cobro.</p>
+
+      <form id="adminManualOrderForm">
+        <input type="hidden" id="moPlaceId">
+        <input type="hidden" id="moDenueId">
+        <input type="hidden" id="moLat">
+        <input type="hidden" id="moLng">
+        <input type="hidden" id="moCategory" value="tienda">
+
+        <div class="form-row-2" style="gap:8px;margin-bottom:10px;">
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label" for="moChannel">¿Por dónde pidió? *</label>
+            <select id="moChannel" class="form-control" style="font-weight:800;">
+              <option value="whatsapp">💬 WhatsApp</option>
+              <option value="llamada">📞 Llamada telefónica</option>
+              <option value="mostrador">🏪 Mostrador / Bodega</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label" for="moPaymentMethod">Forma de pago acordada</label>
+            <select id="moPaymentMethod" class="form-control" style="font-weight:700;">
+              <option value="Por definir al entregar" selected>❓ Por definir al entregar</option>
+              <option value="Efectivo">💵 Efectivo al recibir</option>
+              <option value="Transferencia">🏦 Transferencia</option>
+              <option value="Credito">📝 Crédito autorizado</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group" style="position:relative;margin-bottom:10px;">
+          <label class="form-label" for="moCustomerSearch">🔍 Buscar en Clientes o Prospectos (autocompleta datos y GPS)</label>
+          <input type="search" id="moCustomerSearch" class="form-control" placeholder="Escribe nombre del negocio, teléfono o colonia..." autocomplete="off">
+          <div id="moCustomerSuggestions" class="mo-suggest-box" style="display:none;"></div>
+        </div>
+
+        <div id="moGpsPill" style="display:none;margin-bottom:10px;padding:6px 10px;border-radius:8px;background:#dcfce7;color:#14532d;font-size:0.78rem;font-weight:800;justify-content:space-between;align-items:center;gap:8px;">
+          <span id="moGpsPillText">📍 Pin GPS vinculado para ruta</span>
+          <button type="button" id="btnClearMoLinkedPlace" style="border:none;background:transparent;color:#991b1b;font-weight:800;cursor:pointer;font-size:0.75rem;">✕ Limpiar</button>
+        </div>
+
+        <div class="form-row-2" style="gap:8px;margin-bottom:8px;">
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label" for="moCustomerName">Negocio / Cliente *</label>
+            <input type="text" id="moCustomerName" class="form-control" placeholder="Ej. Carnicería La Palma" required>
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label" for="moPhone">Teléfono (10 dígitos)</label>
+            <input type="tel" id="moPhone" class="form-control" placeholder="Ej. 8441234567">
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom:10px;">
+          <label class="form-label" for="moAddress">Dirección / Referencia de entrega *</label>
+          <input type="text" id="moAddress" class="form-control" placeholder="Calle, número y colonia" required>
+        </div>
+
+        <label id="moSaveToDirWrap" style="display:none;align-items:center;gap:7px;font-size:0.79rem;font-weight:700;color:#14532d;background:#f0fdf4;border:1px solid #bbf7d0;padding:6px 10px;border-radius:8px;margin-bottom:10px;cursor:pointer;">
+          <input type="checkbox" id="moSaveToDirCheck" checked>
+          <span>⭐ Guardar también este negocio en el Directorio Oficial de Clientes</span>
+        </label>
+
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px;margin-bottom:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+            <strong style="font-size:0.83rem;color:#0f172a;">🥑 Cajas y Precio Pactado</strong>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <button type="button" id="btnToggleMoRipenessMix" class="btn btn-outline btn-sm" style="padding:3px 9px;font-size:0.74rem;font-weight:800;border-color:#15803d;color:#14532d;background:#ecfdf5;">
+                🎨 Detallar maduración
+              </button>
+              <span id="moTotalSummary" style="font-size:0.95rem;font-weight:900;color:var(--green-900);">0 cajas • $0</span>
+            </div>
+          </div>
+
+          <div id="moCalibersContainer" style="display:flex;flex-direction:column;gap:6px;"></div>
+
+          <!-- Modo Detallado: Mezcla exacta por tamaño x maduración (colapsado por defecto) -->
+          <div id="moMixPanel" style="display:none;background:#ffffff;border:1.5px solid #bbf7d0;border-radius:10px;padding:9px;margin-top:8px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+              <span style="font-size:0.75rem;font-weight:800;color:var(--green-900);">🎨 MEZCLA EXACTA POR TAMAÑO Y MADURACIÓN</span>
+              <button type="button" id="btnClearMoMix" class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:0.71rem;">Limpiar ceros</button>
+            </div>
+            <div id="moMixGridContainer"></div>
+          </div>
+        </div>
+
+        <div class="form-row-2" style="gap:8px;margin-bottom:8px;">
+          <div class="form-group" style="margin-bottom:0;" id="moQuickRipenessWrap">
+            <label class="form-label" for="moRipeness">Maduración solicitada</label>
+            <select id="moRipeness" class="form-control">
+              <option value="Surtido">Surtido (Varios)</option>
+              <option value="Maduro">Maduro</option>
+              <option value="Sazón">Sazón</option>
+              <option value="Quebrado">Quebrado</option>
+              <option value="Verde">Verde</option>
+              <option value="Maduro y Sazón">Maduro y Sazón</option>
+              <option value="Quebrado y Sazón">Quebrado y Sazón</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label" for="moDeliveryWindow">Horario compromiso</label>
+            <input type="text" id="moDeliveryWindow" class="form-control" placeholder="Ej. Antes de las 2 pm" value="Lo antes posible">
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom:10px;">
+          <label class="form-label" for="moAssignedDriver">🚗 ¿A quién le pasas la papa caliente? (Chofer)</label>
+          <select id="moAssignedDriver" class="form-control" style="font-weight:800;"></select>
+          <label id="moAddStopToRouteWrap" style="display:flex;align-items:center;gap:6px;font-size:0.77rem;color:#0369a1;font-weight:700;margin-top:5px;cursor:pointer;">
+            <input type="checkbox" id="moAddStopToRouteCheck" checked>
+            <span>🧭 Sumar también como parada en su ruta activa de hoy (si tiene pin GPS)</span>
+          </label>
+        </div>
+
+        <div class="form-group" style="margin-bottom:12px;">
+          <label class="form-label" for="moNotes">Notas para el chofer (opcional)</label>
+          <input type="text" id="moNotes" class="form-control" placeholder="Ej. Preguntar por Don Chuy, tocar puerta lateral...">
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1.5fr;gap:8px;">
+          <button type="button" id="btnCancelManualOrder" class="btn btn-outline" style="padding:11px;font-weight:700;">Cancelar</button>
+          <button type="submit" id="btnSubmitManualOrder" class="btn btn-primary" style="padding:11px;font-weight:900;">✅ Guardar Pedido</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Registrar Llamada / Seguimiento Telemarketing -->
+  <div id="tmCallNoteModal" class="modal-backdrop" role="dialog" aria-modal="true" style="z-index:10059;">
+    <div class="modal-card" style="max-width:410px;padding:20px;">
+      <button type="button" id="btnCloseTmCallModal" class="modal-close" aria-label="Cerrar">✕</button>
+      <h3 class="serif-title" style="font-size:1.15rem;color:#0f172a;margin-bottom:4px;padding-right:26px;">📞 Registrar Llamada / Seguimiento</h3>
+      <p id="tmCallTargetLabel" style="font-size:0.83rem;color:#475569;font-weight:700;margin-bottom:12px;"></p>
+
+      <input type="hidden" id="tmCallContactKey">
+      <div class="form-group" style="margin-bottom:10px;">
+        <label class="form-label" for="tmCallResultSelect">Resultado rápido</label>
+        <select id="tmCallResultSelect" class="form-control" style="font-weight:700;">
+          <option value="No contestó">📵 No contestó</option>
+          <option value="Todavía tiene aguacate">🥑 Todavía tiene aguacate</option>
+          <option value="Pidió que le marquen después">📅 Pidió que le marquen otro día</option>
+          <option value="Precio alto / compró en otro lado">💲 Vio precio alto / ya surtió</option>
+          <option value="Número equivocado / no compra">🚫 Número inválido / no maneja</option>
+        </select>
+      </div>
+
+      <div class="form-group" style="margin-bottom:10px;">
+        <label class="form-label" for="tmNextFollowupDate">📅 Recordarme volver a contactar el (opcional)</label>
+        <input type="date" id="tmNextFollowupDate" class="form-control">
+      </div>
+
+      <div class="form-group" style="margin-bottom:14px;">
+        <label class="form-label" for="tmCallNotesInput">Nota breve (opcional)</label>
+        <input type="text" id="tmCallNotesInput" class="form-control" placeholder="Ej. Encargado Juan, compra los jueves...">
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <button type="button" id="btnCancelTmCallModal" class="btn btn-outline" style="padding:10px;font-weight:700;">Cancelar</button>
+        <button type="button" id="btnSaveTmCallModal" class="btn btn-primary" style="padding:10px;font-weight:800;">💾 Guardar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Printable Receipt / Warehouse Sheet Container -->
   <div id="printReceiptArea"></div>
 
@@ -1291,7 +1619,7 @@
   <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-  <script type="module" src="js/admin.js?v=pz_36"></script>
-  <script type="module" src="js/prospects-zones.js?v=pz_31"></script>
+  <script type="module" src="js/admin.js?v=pz_54"></script>
+  <script type="module" src="js/prospects-zones.js?v=pz_43"></script>
 </body>
 </html>

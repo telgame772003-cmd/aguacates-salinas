@@ -107,8 +107,11 @@ let isSystemInitialized = true;
 let storeSettings = structuredClone(DEFAULT_STORE_SETTINGS);
 let allOrders = [];
 let statusFilter = "todos";
+let channelFilter = "all";
 let dateFilter = "all";
 let searchQuery = "";
+let crmTouchesMap = {};
+let crmTouchesUnsub = null;
 
 // Live New-Order Alert state
 let soundAlertsEnabled = localStorage.getItem("salinas_sound_alerts") !== "off";
@@ -132,6 +135,9 @@ let allPlaces = [];
 let routeDriverFilterVal = "todos";
 let allRoutesTodayUnsub = null;
 let allDriverRoutesTodayMap = new Map();
+let allDriverRouteDocsRawMap = new Map();
+const autoArchivedGpsLenByDocId = new Map();
+let autoArchiveGpsTimer = null;
 let showAllDriverRoutes = false;
 const allDriverRouteGeomCache = new Map();
 const matchedTrailCache = new Map();
@@ -235,16 +241,36 @@ function escapeHtml(str) {
 // ================= AUTHENTICATION =================
 async function checkInitialAuth() {
   try {
-    const initSnap = await getDoc(doc(db, "settings", "security_init"));
+    const savedHash = localStorage.getItem(SESSION_HASH_KEY) || sessionStorage.getItem(SESSION_HASH_KEY);
+
+    // Entrada instantánea si ya hay sesión y bóveda guardada en este dispositivo, validando en segundo plano
+    if (savedHash && getActiveVaultId()) {
+      await Promise.resolve();
+      currentKeyHash = savedHash;
+      enterDashboard();
+      getDoc(doc(db, "admin_keys", savedHash))
+        .then((keySnap) => {
+          if (!keySnap.exists() || keySnap.data().active !== true) {
+            btnLogout?.click();
+            showToast("Tu sesión expiró o cambió la clave.");
+          }
+        })
+        .catch(() => {});
+      return;
+    }
+
+    const [initSnap, keySnap] = await Promise.all([
+      getDoc(doc(db, "settings", "security_init")),
+      savedHash ? getDoc(doc(db, "admin_keys", savedHash)) : Promise.resolve(null)
+    ]);
+
     isSystemInitialized = initSnap.exists();
     if (!isSystemInitialized) {
       loginSubtitle.textContent = "Configuración inicial: define tu Clave Maestra de Administración.";
       btnLoginSubmit.textContent = "Crear Clave y Activar Panel";
     }
 
-    const savedHash = localStorage.getItem(SESSION_HASH_KEY) || sessionStorage.getItem(SESSION_HASH_KEY);
-    if (savedHash && isSystemInitialized) {
-      const keySnap = await getDoc(doc(db, "admin_keys", savedHash));
+    if (savedHash && isSystemInitialized && keySnap) {
       if (keySnap.exists() && keySnap.data().active === true) {
         currentKeyHash = savedHash;
         enterDashboard();
@@ -446,7 +472,10 @@ btnLogout.addEventListener("click", () => {
   if (routeSalesUnsub) routeSalesUnsub();
   if (routeVisitsUnsub) routeVisitsUnsub();
   if (allRoutesTodayUnsub) allRoutesTodayUnsub();
+  if (crmTouchesUnsub) crmTouchesUnsub();
+  crmTouchesMap = {};
   allDriverRoutesTodayMap.clear();
+  allDriverRouteDocsRawMap.clear();
   historicalSales30d = [];
   historicalVisits30d = [];
   historical30dLoaded = false;
@@ -579,6 +608,13 @@ function startRealtimeListeners() {
   if (ordersUnsub) ordersUnsub();
   if (gpsUnsub) gpsUnsub();
   if (placesUnsub) placesUnsub();
+  if (crmTouchesUnsub) crmTouchesUnsub();
+
+  crmTouchesUnsub = onSnapshot(doc(db, "settings", "crm_touches"), (snap) => {
+    const data = snap.exists() ? snap.data() : {};
+    crmTouchesMap = data && typeof data.touches === "object" && data.touches ? data.touches : {};
+    if (typeof renderTelemarketingQueue === "function") renderTelemarketingQueue();
+  });
 
   settingsUnsub = onSnapshot(doc(db, "settings", "store"), (snap) => {
     if (snap.exists()) {
@@ -640,6 +676,9 @@ function startRealtimeListeners() {
   gpsUnsub = onSnapshot(collection(db, "driver_locations"), (snap) => {
     driverLocations = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     renderGpsMapAndChips();
+    if (typeof scheduleAutoArchiveLiveGpsTrails === "function") {
+      scheduleAutoArchiveLiveGpsTrails();
+    }
     window.dispatchEvent(new CustomEvent("salinas:routes-updated"));
   });
 
@@ -1765,8 +1804,10 @@ function getPlaceDailyStatus(place) {
 
   if (matchingVisits.length > 0) {
     const v = matchingVisits[0];
+    const rawSec = Number(v.dwellSeconds) || 0;
+    const durTxt = rawSec > 0 && rawSec < 60 ? `${Math.round(rawSec)} seg` : `${Math.max(1, Math.round((rawSec || 60) / 60))} min`;
     const autoLabel = v.autoGeofence
-      ? `Visita automática GPS (${Math.max(1, Math.round((Number(v.dwellSeconds) || 60) / 60))} min)`
+      ? `Visita automática GPS (${durTxt})`
       : (v.reason || "Visitado sin venta");
     return {
       state: "visited",
@@ -2315,10 +2356,13 @@ function renderGpsMapAndChips() {
   const boundsPoints = [];
 
   // 1. Registered Places (Tiendas, Carnicerías, Restaurantes, Fruterías)
+  const tlClaimedPlaceIds =
+    typeof getTimelineClaimedPlaceIds === "function" ? getTimelineClaimedPlaceIds() : null;
   const placeStatusById = new Map(placeEvaluations.map((ev) => [ev.place.id, ev.status]));
   for (const { place, status, stats30d, assignedDrivers, inTodayRoute } of placeEvaluations) {
     if (!placeMatchesMapFilter(place, status, stats30d, inTodayRoute)) continue;
     boundsPoints.push([place.lat, place.lng]);
+    if (tlClaimedPlaceIds && tlClaimedPlaceIds.has(place.id)) continue;
     const cat = PLACE_CATEGORIES[place.category] || PLACE_CATEGORIES.tienda;
     const stClass =
       status.state === "sold"
@@ -2339,11 +2383,15 @@ function renderGpsMapAndChips() {
     const assignedLineHtml = assignedDrivers.length > 0
       ? `<div style="margin-top:3px;color:#0369a1;font-weight:800;font-size:0.74rem;">🧭 En ruta ${dayLabel}: ${escapeHtml(assignedDrivers.map((a) => a.driverName).join(", "))}</div>`
       : "";
+    const stTimeStr = status.timeIso
+      ? new Date(status.timeIso).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })
+      : "";
+    const stTimePart = stTimeStr ? ` • 🕒 ${escapeHtml(stTimeStr)}` : "";
     const stBadge =
       status.state === "sold"
-        ? `<div style="margin-top:5px;background:#dcfce7;color:#14532d;padding:4px 7px;border-radius:6px;font-size:0.78rem;font-weight:700;">🟢 Compró ${dayLabel}: ${status.boxes} caja(s) (${formatCurrency(status.amount)}) • ${escapeHtml(status.driver)}</div>`
+        ? `<div style="margin-top:5px;background:#dcfce7;color:#14532d;padding:4px 7px;border-radius:6px;font-size:0.78rem;font-weight:700;">🟢 Compró ${dayLabel}${stTimePart}: ${status.boxes} caja(s) (${formatCurrency(status.amount)}) • ${escapeHtml(status.driver)}</div>`
         : status.state === "visited"
-          ? `<div style="margin-top:5px;background:#fee2e2;color:#991b1b;padding:4px 7px;border-radius:6px;font-size:0.78rem;font-weight:700;">🔴 Visitado ${dayLabel} (no compró) por ${escapeHtml(status.driver)}: ${escapeHtml(status.reason)}${status.distanceMeters !== null ? ` (GPS a ${status.distanceMeters} m)` : ""}</div>`
+          ? `<div style="margin-top:5px;background:#fee2e2;color:#991b1b;padding:4px 7px;border-radius:6px;font-size:0.78rem;font-weight:700;">🔴 Visitado ${dayLabel}${stTimePart} (no compró) por ${escapeHtml(status.driver)}: ${escapeHtml(status.reason)}${status.distanceMeters !== null ? ` (GPS a ${status.distanceMeters} m)` : ""}</div>`
           : inTodayRoute
             ? `<div style="margin-top:5px;background:#fef9c3;color:#713f12;padding:4px 7px;border-radius:6px;font-size:0.78rem;font-weight:700;">🟡 Pendiente de visitar ${dayLabel} (en ruta)</div>`
             : `<div style="margin-top:5px;background:#f1f5f9;color:#475569;padding:4px 7px;border-radius:6px;font-size:0.78rem;">⚪ Aún sin visita ni ruta registrada ${dayLabel}</div>`;
@@ -2378,9 +2426,9 @@ function renderGpsMapAndChips() {
 
     const todayHoverBadge =
       status.state === "sold"
-        ? `<div style="color:#15803d;font-weight:700;">🟢 ${dayCapLabel}: compró ${status.boxes} caja(s) (${formatCurrency(status.amount)})</div>`
+        ? `<div style="color:#15803d;font-weight:700;">🟢 ${dayCapLabel}${stTimePart}: compró ${status.boxes} caja(s) (${formatCurrency(status.amount)})</div>`
         : status.state === "visited"
-          ? `<div style="color:#dc2626;font-weight:700;">🔴 Visitado ${dayLabel} — no compró (${escapeHtml(status.driver || "chofer")})</div>`
+          ? `<div style="color:#dc2626;font-weight:700;">🔴 Visitado ${dayLabel}${stTimePart} — no compró (${escapeHtml(status.driver || "chofer")})</div>`
           : inTodayRoute
             ? `<div style="color:#a16207;font-weight:700;">🟡 Pendiente de visitar ${dayLabel}</div>`
             : `<div style="color:#64748b;">⚪ Sin visita ${dayLabel}</div>`;
@@ -2480,6 +2528,26 @@ function renderGpsMapAndChips() {
       const plannedLatLngs = getOrFetchPlannedRouteLatLngs(routeDoc);
       if (plannedLatLngs.length >= 2) {
         drawStyledRoutePolyline(plannedLatLngs, { color: rColor, kind: "planned" });
+      }
+    }
+  }
+
+  // Si el toggle "Ver todas las rutas" está activo en fecha pasada, dibujar también los rastros GPS archivados
+  if (showAllDriverRoutes && !isViewingToday && allDriverRouteDocsRawMap.size > 0) {
+    let archIdx = 0;
+    for (const rawDoc of allDriverRouteDocsRawMap.values()) {
+      const archTrail = Array.isArray(rawDoc?.archivedGpsTrail) ? rawDoc.archivedGpsTrail : [];
+      const pts = archTrail.filter((pt) => typeof pt?.lat === "number" && typeof pt?.lng === "number");
+      if (pts.length >= 2) {
+        const archColor = trailColors[archIdx % trailColors.length];
+        archIdx++;
+        const rSlug = String(rawDoc.driverSlug || rbDriverSlug(rawDoc.driverName || rawDoc.id || ""));
+        const segs = getOrFetchMatchedTrailSegments(`arch_${selectedRouteDate}_${rSlug}`, pts);
+        for (const seg of segs) {
+          if (seg.length >= 2) {
+            drawStyledRoutePolyline(seg, { color: archColor, kind: "actual" });
+          }
+        }
       }
     }
   }
@@ -2683,6 +2751,23 @@ function renderGpsMapAndChips() {
     renderRoutePreviewOnAdminMap(placeStatusById);
   }
 
+  // Dibujar siempre el ícono de Base / Bodega como referencia fija en el mapa
+  if (typeof getStoreBaseLocation === "function") {
+    const base = getStoreBaseLocation();
+    if (base && Number.isFinite(base.lat) && Number.isFinite(base.lng)) {
+      const baseIcon = window.L.divIcon({
+        className: "salinas-div-icon",
+        html: `<div title="${escapeHtml(base.name || "Base / Bodega")}" style="width:26px;height:26px;border-radius:50%;background:#132615;color:#fff;border:2px solid #34d399;font-size:14px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.45);">🏭</div>`,
+        iconSize: [26, 26],
+        iconAnchor: [13, 13],
+        popupAnchor: [0, -12]
+      });
+      window.L.marker([base.lat, base.lng], { icon: baseIcon, zIndexOffset: 850 })
+        .addTo(mapLayerGroup)
+        .bindPopup(`<div style="font-family:sans-serif;"><strong>🏭 ${escapeHtml(base.name || "Base / Bodega")}</strong>${base.address ? `<div style="font-size:0.78rem;color:#475569;margin-top:2px;">📍 ${escapeHtml(base.address)}</div>` : ""}</div>`);
+    }
+  }
+
   if (!hasCenteredMapOnce && boundsPoints.length > 0) {
     hasCenteredMapOnce = true;
     if (boundsPoints.length === 1) {
@@ -2690,6 +2775,13 @@ function renderGpsMapAndChips() {
     } else {
       leafletMap.fitBounds(boundsPoints, { padding: [36, 36], maxZoom: 15 });
     }
+  }
+
+  if (typeof refreshTimelineOverlayIfOpen === "function") {
+    refreshTimelineOverlayIfOpen();
+  }
+  if (typeof updateDaySealButtonsUI === "function") {
+    updateDaySealButtonsUI();
   }
 }
 
@@ -3097,6 +3189,7 @@ function subscribeRouteCorteDay(dateStr) {
     mapBannerTextEl.textContent = `⚠️ Estás viendo el historial del ${dateStr} (GPS en vivo oculto).`;
   }
   allDriverRoutesTodayMap.clear();
+  allDriverRouteDocsRawMap.clear();
   routeWhDoc = createEmptyWhDoc(dateStr);
   routeSalesList = [];
   routeVisitsList = [];
@@ -3107,13 +3200,23 @@ function subscribeRouteCorteDay(dateStr) {
   const qAllRoutesDay = query(collection(db, "driver_routes"), where("date", "==", dateStr));
   allRoutesTodayUnsub = onSnapshot(qAllRoutesDay, (snap) => {
     allDriverRoutesTodayMap.clear();
+    allDriverRouteDocsRawMap.clear();
     snap.docs.forEach((d) => {
       const data = d.data();
-      if (data && Array.isArray(data.stops) && data.stops.length > 0) {
-        allDriverRoutesTodayMap.set(d.id, { id: d.id, ...data });
+      if (!data) return;
+      const fullDoc = { id: d.id, ...data };
+      allDriverRouteDocsRawMap.set(d.id, fullDoc);
+      const liveStops = Array.isArray(data.stops) ? data.stops : [];
+      const snapStops = Array.isArray(data.morningStopsSnapshot) ? data.morningStopsSnapshot : [];
+      const effectiveStops = liveStops.length > 0 ? liveStops : snapStops;
+      if (effectiveStops.length > 0) {
+        allDriverRoutesTodayMap.set(d.id, { ...fullDoc, stops: effectiveStops });
       }
     });
     renderGpsMapAndChips();
+    if (typeof scheduleAutoArchiveLiveGpsTrails === "function") {
+      scheduleAutoArchiveLiveGpsTrails();
+    }
     window.dispatchEvent(new CustomEvent("salinas:routes-updated"));
   });
 
@@ -3321,7 +3424,7 @@ function renderRouteCortesAndSales() {
       const chipsHtml = (s.items || [])
         .map(
           (i) =>
-            `<span class="cal-chip">${formatBoxesKg(i.qty)} × ${escapeHtml(i.name)} (${formatCurrency(i.unitPrice)})</span>`
+            `<span class="cal-chip">${formatBoxesKg(i.qty)} × ${escapeHtml(i.name)}${i.ripenessSummary ? ` <strong style="color:#15803d;">[${escapeHtml(i.ripenessSummary)}]</strong>` : ""} (${formatCurrency(i.unitPrice || i.price)})</span>`
         )
         .join("");
 
@@ -3563,6 +3666,10 @@ document.getElementById("routeSalesAdminList").addEventListener("click", async (
   if (cancelBtn) {
     const sale = routeSalesList.find((s) => s.id === cancelBtn.dataset.cancelRouteSale);
     if (!sale || isSaleCancelled(sale)) return;
+    if (typeof isDriverRouteSealedForDate === "function" && isDriverRouteSealedForDate(sale.driver, selectedRouteDate)) {
+      showToast(`🔒 El día de ${sale.driver} está sellado. Reabre su sello en 🎬 Cronología si necesitas anular una nota.`);
+      return;
+    }
     const reason = await openCancelSaleModal(sale);
     if (!reason) return;
     try {
@@ -3658,11 +3765,34 @@ function updateKPIs() {
   document.getElementById("kpiRevenueToday").textContent = formatCurrency(webRevToday + streetRevToday);
   document.getElementById("kpiCalibersSub").textContent =
     streetBoxesToday > 0
-      ? `Web: ${webBoxesToday} • Calle: ${streetBoxesToday} cajas`
-      : `Pedidos Web hoy: ${webBoxesToday} caja${webBoxesToday === 1 ? "" : "s"}`;
+      ? `Pedidos: ${webBoxesToday} • Calle: ${streetBoxesToday} cajas`
+      : `Pedidos hoy: ${webBoxesToday} caja${webBoxesToday === 1 ? "" : "s"}`;
+
+  const hotBadge = document.getElementById("ordersTabHotBadge");
+  if (hotBadge) {
+    const totalOpen = newCount + activeCount;
+    if (totalOpen > 0) {
+      hotBadge.style.display = "inline-flex";
+      hotBadge.textContent = String(totalOpen);
+      hotBadge.style.background = newCount > 0 ? "#dc2626" : "#0284c7";
+      hotBadge.title = newCount > 0 ? `${newCount} sin asignar • ${activeCount} en camino` : `${activeCount} en camino`;
+    } else {
+      hotBadge.style.display = "none";
+    }
+  }
+  const subtabCnt = document.getElementById("subtabActiveOrdersCnt");
+  if (subtabCnt) {
+    const totalOpen = newCount + activeCount;
+    subtabCnt.textContent = `${totalOpen} activo${totalOpen === 1 ? "" : "s"}`;
+  }
+  if (typeof renderTelemarketingQueue === "function") renderTelemarketingQueue();
 }
 
 // ================= TAB 2: ORDERS =================
+document.getElementById("channelOrdersFilter")?.addEventListener("change", (e) => {
+  channelFilter = e.target.value;
+  renderOrdersList();
+});
 document.getElementById("statusFilterBar").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-status]");
   if (!btn) return;
@@ -3718,7 +3848,9 @@ function buildClientWhatsAppUrl(ord) {
 function buildDriverWhatsAppUrl(ord) {
   const driverObj = (storeSettings.drivers || []).find((d) => d.name === ord.assignedDriver);
   const driverPhone = driverObj && driverObj.phone ? cleanPhoneForWhatsApp(driverObj.phone) : "";
-  const itemsLines = (ord.items || []).map((i) => `  - ${i.qty} caja(s) ${i.name} [${i.code}]`).join("\n");
+  const itemsLines = (ord.items || [])
+    .map((i) => `  - ${i.qty} caja(s) ${i.name} [${i.code}]${i.ripenessSummary ? ` (${i.ripenessSummary})` : ""}`)
+    .join("\n");
   const coords = resolveOrderCoords(ord);
   const mapLine = coords ? `*Mapa GPS:* https://maps.google.com/?q=${coords.lat},${coords.lng}\n` : "";
 
@@ -3740,11 +3872,31 @@ function buildDriverWhatsAppUrl(ord) {
     : `https://wa.me/?text=${encodeURIComponent(msg)}`;
 }
 
+function getOrderChannelKey(ord) {
+  const ch = String(ord.channel || "").toLowerCase();
+  if (ch === "whatsapp" || ch === "llamada" || ch === "mostrador" || ch === "web") return ch;
+  const f = String(ord.folio || "").toUpperCase();
+  if (f.startsWith("WA-")) return "whatsapp";
+  if (f.startsWith("TEL-")) return "llamada";
+  if (f.startsWith("BOD-")) return "mostrador";
+  return "web";
+}
+
+function getOrderChannelBadgeHtml(ord) {
+  const ch = getOrderChannelKey(ord);
+  if (ch === "whatsapp") return `<span class="channel-pill ch-whatsapp">💬 WhatsApp</span>`;
+  if (ch === "llamada") return `<span class="channel-pill ch-llamada">📞 Llamada</span>`;
+  if (ch === "mostrador") return `<span class="channel-pill ch-mostrador">🏪 Mostrador</span>`;
+  return `<span class="channel-pill ch-web">🌐 Web</span>`;
+}
+
 function renderOrdersList() {
   const container = document.getElementById("ordersAdminContainer");
+  if (!container) return;
 
   const filtered = allOrders.filter((ord) => {
     if (statusFilter !== "todos" && ord.status !== statusFilter) return false;
+    if (channelFilter !== "all" && getOrderChannelKey(ord) !== channelFilter) return false;
     if (dateFilter === "today" && !isSameLocalDay(ord.createdAtIso)) return false;
     if (searchQuery) {
       const hay = `${ord.folio || ""} ${ord.customerName || ""} ${ord.phone || ""} ${ord.address || ""} ${ord.assignedDriver || ""}`;
@@ -3766,15 +3918,29 @@ function renderOrdersList() {
         ? new Date(ord.createdAtIso).toLocaleString("es-MX", { dateStyle: "short", timeStyle: "short" })
         : "";
       const stLabel = STATUS_LABELS[ord.status] || "Nuevo";
+      const channelBadge = getOrderChannelBadgeHtml(ord);
       const coords = resolveOrderCoords(ord);
       const mapBtnHtml = coords
-        ? `<button type="button" class="btn btn-outline btn-sm" data-action="focus-order-map" data-id="${ord.id}" style="border-color:#dc2626;color:#991b1b;">📍 Ver en Mapa</button>`
+        ? `<button type="button" class="btn btn-outline btn-sm" data-action="focus-order-map" data-id="${ord.id}" style="border-color:#0284c7;color:#0369a1;">📍 Ver en Mapa</button>`
         : `<button type="button" class="btn btn-outline btn-sm" data-action="pin-order" data-id="${ord.id}">📍 Ubicar en Mapa</button>`;
+
+      let potatoClass = "in-admin";
+      let potatoText = "🔴 PAPA EN ADMIN: Falta asignar chofer para canalizar esta entrega";
+      if (ord.status === "entregado") {
+        potatoClass = "done";
+        potatoText = `🟢 VENTA CERRADA: Entregado${ord.assignedDriver ? ` por ${escapeHtml(ord.assignedDriver)}` : ""}${ord.paymentMethodFinal ? ` (${escapeHtml(ord.paymentMethodFinal)})` : ""} y sumado al corte`;
+      } else if (ord.status === "cancelado") {
+        potatoClass = "cancelled";
+        potatoText = "⚪ Pedido cancelado";
+      } else if (ord.assignedDriver) {
+        potatoClass = "in-driver";
+        potatoText = `🔵 PAPA EN CHOFER: En manos de ${escapeHtml(ord.assignedDriver)} — pendiente de entregar y cobrar`;
+      }
 
       const chipsHtml = (ord.items || [])
         .map(
           (i) =>
-            `<span class="cal-chip">${i.qty} × ${escapeHtml(i.name)} (${escapeHtml(i.code)}) — ${formatCurrency(i.subtotal)}</span>`
+            `<span class="cal-chip">${i.qty} × ${escapeHtml(i.name)} (${escapeHtml(i.code)})${i.ripenessSummary ? ` <strong style="color:#15803d;">[${escapeHtml(i.ripenessSummary)}]</strong>` : ""} — ${formatCurrency(i.subtotal)}</span>`
         )
         .join("");
 
@@ -3792,6 +3958,10 @@ function renderOrdersList() {
 
       return `
         <article class="order-admin-card ${ord.status === "nuevo" ? "is-new" : ""}" data-id="${ord.id}">
+          <div class="hot-potato-strip ${potatoClass}">
+            <span>${potatoText}</span>
+            ${channelBadge}
+          </div>
           <div class="order-admin-header">
             <div>
               <span style="font-weight:800;font-size:1.08rem;color:var(--green-950);">${escapeHtml(ord.folio || ord.id.slice(0, 6))}</span>
@@ -5471,9 +5641,6 @@ function renderSuperadminDashboard() {
   }
 }
 
-checkSuperadminInit();
-checkInitialAuth();
-
 // ================= CONSTRUCTOR INTELIGENTE DE RUTAS (ADMIN TABLET/PC) =================
 let rbStops = [];
 let rbActiveBuilderDriver = "";
@@ -5729,18 +5896,6 @@ function renderRoutePreviewOnAdminMap(placeStatusById = null) {
         .openOn(leafletMap);
     });
   });
-
-  const base = getStoreBaseLocation();
-  const baseIcon = window.L.divIcon({
-    className: "salinas-div-icon",
-    html: `<div title="${escapeHtml(base.name || "Base / Bodega")}" style="width:24px;height:24px;border-radius:50%;background:#132615;color:#fff;border:2px solid #34d399;font-size:13px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.45);">🏭</div>`,
-    iconSize: [24, 24],
-    iconAnchor: [12, 12],
-    popupAnchor: [0, -12]
-  });
-  window.L.marker([base.lat, base.lng], { icon: baseIcon, zIndexOffset: 850 })
-    .addTo(mapLayerGroup)
-    .bindPopup(`<div style="font-family:sans-serif;"><strong>🏭 ${escapeHtml(base.name || "Base / Bodega")}</strong>${base.address ? `<div style="font-size:0.78rem;color:#475569;margin-top:2px;">📍 ${escapeHtml(base.address)}</div>` : ""}</div>`);
 }
 
 async function recalculateAdminBuilderMetrics() {
@@ -6062,19 +6217,25 @@ async function saveAdminRouteToFirestore(isLastMinute = false, allowEmpty = fals
     showToast("Selecciona un chofer primero.");
     return;
   }
+  const todayStr = getLocalDateStr();
+  if (typeof isDriverRouteSealedForDate === "function" && isDriverRouteSealedForDate(driverName, todayStr)) {
+    showToast(`🔒 La ruta de ${driverName} ya está sellada hoy. Pulsa "🔓 Reabrir" en 🎬 Cronología si necesitas modificarla.`);
+    return;
+  }
   if (rbStops.length === 0 && !allowEmpty) {
     showToast("Agrega al menos 1 parada antes de enviar.");
     return;
   }
-  const docId = `${getLocalDateStr()}_${rbDriverSlug(driverName)}`;
+  const docId = `${todayStr}_${rbDriverSlug(driverName)}`;
   const incBase = document.getElementById("rbReturnToBaseChk")?.checked !== false;
   const payload = {
     driverName,
     driverSlug: rbDriverSlug(driverName),
-    date: getLocalDateStr(),
+    date: todayStr,
     includeReturnToBase: incBase,
     baseLocation: getStoreBaseLocation(),
     stops: rbStops,
+    ...(rbStops.length > 0 ? { morningStopsSnapshot: rbStops } : {}),
     totalDistanceMeters: rbTotalDistM,
     totalDurationSec: rbTotalDurSec,
     createdBy: "admin",
@@ -6251,6 +6412,10 @@ document.getElementById("rbBtnTransferPending")?.addEventListener("click", async
 
 document.getElementById("rbBtnClear")?.addEventListener("click", async () => {
   const driverName = document.getElementById("rbDriverSelect")?.value || "";
+  if (driverName && typeof isDriverRouteSealedForDate === "function" && isDriverRouteSealedForDate(driverName, getLocalDateStr())) {
+    showToast(`🔒 La ruta de ${driverName} ya está sellada hoy. Reábrela en 🎬 Cronología si necesitas limpiarla.`);
+    return;
+  }
   if (rbStops.length > 0) {
     const ok = await showConfirmDialog({
       title: `¿Limpiar la ruta de ${driverName || "este chofer"}?`,
@@ -6551,3 +6716,2653 @@ window.__salinasMapBridge = {
     showToast(msg);
   }
 };
+
+// ================= MESA DE VENTAS: CAPTURA DE PEDIDOS MANUALES Y TELEMARKETING 1 A 1 =================
+let activeOrdersSubtab = "inbox";
+let tmActiveTemplateKey = "clientes";
+let tmActiveSegment = "frequent_due";
+let tmAutoSelectedInitialSeg = false;
+let tmSearchQuery = "";
+let tmCatFilter = "all";
+let tmHideTouchedToday = false;
+let moSuggestCache = [];
+
+function switchOrdersSubtab(subtab) {
+  activeOrdersSubtab = subtab === "telemarketing" ? "telemarketing" : "inbox";
+  const inboxEl = document.getElementById("ordersInboxSubpane");
+  const tmEl = document.getElementById("ordersTelemarketingSubpane");
+  if (inboxEl) inboxEl.style.display = activeOrdersSubtab === "inbox" ? "block" : "none";
+  if (tmEl) tmEl.style.display = activeOrdersSubtab === "telemarketing" ? "block" : "none";
+  document.querySelectorAll("#ordersSubtabBar .orders-subtab-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.ordersSubtab === activeOrdersSubtab);
+  });
+  if (activeOrdersSubtab === "telemarketing") {
+    ensureTmTemplateInitialized();
+    renderTelemarketingQueue();
+  }
+}
+
+document.getElementById("ordersSubtabBar")?.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-orders-subtab]");
+  if (!btn) return;
+  switchOrdersSubtab(btn.dataset.ordersSubtab);
+});
+
+function buildDefaultTmTemplate(tplKey) {
+  const brand = getTenantBranding(storeSettings, ACTIVE_TENANT_SLUG);
+  const units = getUnitConfig(storeSettings);
+  const cals = getOrderedProducts(
+    storeSettings,
+    ACTIVE_TENANT_SLUG === "salinas" ? DEFAULT_STORE_SETTINGS.calibers : {}
+  ).filter((c) => c.available !== false);
+  const priceLines = cals
+    .map((c) => `${brand.pinEmoji} *${c.name}:* ${formatCurrency(c.price)} / ${units.unitSingular}`)
+    .join("\n");
+
+  if (tplKey === "prospectos") {
+    return (
+      `¡Hola, buen día! Les escribimos de *${brand.brandName}* para ponernos a las órdenes de *{negocio}*.\n\n` +
+      `Entregamos aguacate fresco directo a su negocio sin costo de envío. Nuestros precios por ${units.unitSingular} de hoy:\n` +
+      `${priceLines}\n\n` +
+      `¿Les gustaría que pasemos a mostrarles calidad o les cotizamos pedido para hoy?`
+    );
+  }
+  if (tplKey === "recompra") {
+    return (
+      `¡Buen día, *{negocio}*! ☀️ Les saludamos de *${brand.brandName}*.\n` +
+      `Hoy andamos en ruta por su zona. ¿Cómo andan de aguacate para surtirles hoy?\n\n` +
+      `${priceLines}`
+    );
+  }
+  return (
+    `¡Buenos días, *{negocio}*! ☀️ En *${brand.brandName}* ya tenemos lista la fruta del día:\n\n` +
+    `${priceLines}\n\n` +
+    `¿Cuántas ${units.unitPlural} les mandamos hoy con el chofer?`
+  );
+}
+
+function getTmStorageKey(tplKey) {
+  return tenantScopedStorageKey(`salinas_tm_tpl_${tplKey}`);
+}
+
+function ensureTmTemplateInitialized(forceReset = false) {
+  const textarea = document.getElementById("tmMessageTemplate");
+  if (!textarea) return;
+  const saved = !forceReset ? localStorage.getItem(getTmStorageKey(tmActiveTemplateKey)) : null;
+  textarea.value = saved && saved.trim() ? saved : buildDefaultTmTemplate(tmActiveTemplateKey);
+}
+
+document.querySelectorAll("button[data-tm-tpl]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    tmActiveTemplateKey = btn.dataset.tmTpl || "clientes";
+    document.querySelectorAll("button[data-tm-tpl]").forEach((b) => {
+      b.className = b === btn ? "btn btn-sm btn-primary" : "btn btn-sm btn-outline";
+    });
+    ensureTmTemplateInitialized(false);
+  });
+});
+
+document.getElementById("tmMessageTemplate")?.addEventListener("input", (e) => {
+  try {
+    localStorage.setItem(getTmStorageKey(tmActiveTemplateKey), e.target.value);
+  } catch (_) {}
+});
+
+document.getElementById("btnResetTmTemplate")?.addEventListener("click", () => {
+  try {
+    localStorage.removeItem(getTmStorageKey(tmActiveTemplateKey));
+  } catch (_) {}
+  ensureTmTemplateInitialized(true);
+  showToast("Plantilla actualizada con los precios del día.");
+});
+
+function buildPersonalizedWaUrl(rawPhone, businessName) {
+  const digits = cleanPhoneForWhatsApp(rawPhone);
+  if (!digits) return "";
+  const tplEl = document.getElementById("tmMessageTemplate");
+  const rawTpl = tplEl?.value?.trim() || buildDefaultTmTemplate(tmActiveTemplateKey);
+  const cleanName = String(businessName || "su negocio").trim();
+  const msg = rawTpl.replace(/\{negocio\}/gi, cleanName);
+  return `https://api.whatsapp.com/send?phone=${digits}&text=${encodeURIComponent(msg)}`;
+}
+
+async function saveCrmTouchPatch(contactKey, patch) {
+  if (!contactKey || !currentKeyHash) return;
+  const existing = crmTouchesMap[contactKey] || {};
+  const merged = {
+    ...existing,
+    ...patch,
+    updatedAtIso: new Date().toISOString()
+  };
+  crmTouchesMap[contactKey] = merged;
+  renderTelemarketingQueue();
+  try {
+    await executeAdminBatch(currentKeyHash, (batch, proofId) => {
+      batch.set(
+        doc(db, "settings", "crm_touches"),
+        {
+          touches: { [contactKey]: merged },
+          proofId,
+          updatedAt: serverTimestamp()
+        },
+        { merge: true }
+      );
+    });
+  } catch (err) {
+    console.error("Error guardando seguimiento CRM:", err);
+  }
+}
+
+function hasActiveOrTodayOrder(name, phone10, placeId) {
+  const todayStr = getLocalDateStr();
+  for (const o of allOrders) {
+    if (o.status === "cancelado") continue;
+    const isActive = o.status === "nuevo" || o.status === "confirmado" || o.status === "en_ruta";
+    const isToday = String(o.createdAtIso || "").slice(0, 10) === todayStr || isSameLocalDay(o.createdAtIso);
+    if (!isActive && !isToday) continue;
+    if (placeId && o.placeId && o.placeId === placeId) return true;
+    const oPhone = normalizePhone10(o.phone);
+    if (phone10 && oPhone && phone10 === oPhone) return true;
+    if (name && o.customerName && namesMatchPlace(name, o.customerName)) return true;
+  }
+  return false;
+}
+
+function renderTelemarketingQueue() {
+  const container = document.getElementById("tmContactsContainer");
+  if (!container) return;
+
+  const todayStr = getLocalDateStr();
+
+  // Count today's WA & call touches across all contacts
+  let waTodayCount = 0;
+  let callTodayCount = 0;
+  for (const t of Object.values(crmTouchesMap)) {
+    if (t?.lastWaDate === todayStr) waTodayCount++;
+    if (t?.lastCallDate === todayStr) callTodayCount++;
+  }
+  const statsLine = document.getElementById("tmDailyStatsLine");
+  if (statsLine) {
+    statsLine.textContent = `Hoy: 💬 ${waTodayCount} WhatsApp${waTodayCount === 1 ? "" : "s"} • 📞 ${callTodayCount} llamada${callTodayCount === 1 ? "" : "s"}`;
+  }
+  const subtabTmBadge = document.getElementById("subtabTmTodayCnt");
+  if (subtabTmBadge) {
+    subtabTmBadge.textContent = `${waTodayCount + callTodayCount} hoy`;
+  }
+
+  const historyIndex = buildHistory30dIndex();
+  const dirContacts = [];
+  for (const p of allPlaces) {
+    const phone10 = normalizePhone10(p.phone);
+    if (!phone10) continue;
+    const contactKey = `place_${p.id}`;
+    const dailySt = getPlaceDailyStatus(p);
+    const stats30d = computePlace30dStats(p, historyIndex, todayStr);
+    const orderedToday = dailySt.state === "sold" || hasActiveOrTodayOrder(p.name, phone10, p.id);
+    const touch = crmTouchesMap[contactKey] || {};
+    dirContacts.push({
+      contactKey,
+      source: "directory",
+      placeId: p.id,
+      denueId: p.denueId || "",
+      name: p.name || "Negocio",
+      category: p.category || "tienda",
+      phone: p.phone || phone10,
+      phone10,
+      address: p.address || "",
+      lat: typeof p.lat === "number" ? p.lat : null,
+      lng: typeof p.lng === "number" ? p.lng : null,
+      orderedToday,
+      stats30d,
+      touch
+    });
+  }
+
+  const rawDenue = typeof window.__pzGetActiveProspects === "function" ? window.__pzGetActiveProspects() : [];
+  const denueContacts = [];
+  for (const pr of rawDenue) {
+    const phone10 = normalizePhone10(pr.tel);
+    if (!phone10) continue;
+    const contactKey = `denue_${pr.id}`;
+    const touch = crmTouchesMap[contactKey] || {};
+    const orderedToday = hasActiveOrTodayOrder(pr.n, phone10, "");
+    denueContacts.push({
+      contactKey,
+      source: "denue",
+      placeId: "",
+      denueId: String(pr.id),
+      name: pr.n || "Prospecto",
+      category: pr.cat || "tienda",
+      subLabel: pr.sub || "",
+      sizeLabel: pr.sz || "",
+      tier: pr.tier || "",
+      phone: pr.tel || phone10,
+      phone10,
+      address: [pr.dir || pr.col || "", pr.mun || ""].filter(Boolean).join(", "),
+      lat: typeof pr.lat === "number" ? pr.lat : null,
+      lng: typeof pr.lng === "number" ? pr.lng : null,
+      orderedToday,
+      stats30d: null,
+      touch
+    });
+  }
+
+  const allCombinedRaw = [...dirContacts, ...denueContacts];
+  const discardedList = allCombinedRaw.filter((c) => Boolean(c.touch?.discarded));
+  const activeDirContacts = dirContacts.filter((c) => !c.touch?.discarded);
+  const activeDenueContacts = denueContacts.filter((c) => !c.touch?.discarded);
+  const landlineList = allCombinedRaw.filter((c) => !c.touch?.discarded && c.touch?.phoneType === "landline");
+
+  const waDirContacts = activeDirContacts.filter((c) => c.touch?.phoneType !== "landline");
+  const waDenueContacts = activeDenueContacts.filter((c) => c.touch?.phoneType !== "landline");
+
+  const frequentList = activeDirContacts.filter(
+    (c) => !c.orderedToday && c.stats30d && (c.stats30d.salesCount30d >= 1 || c.stats30d.totalTouches30d >= 2)
+  );
+  const stale7dList = activeDirContacts.filter(
+    (c) => !c.orderedToday && c.stats30d && (c.stats30d.daysSinceLastSale === null || c.stats30d.daysSinceLastSale >= 7)
+  );
+  const followupList = allCombinedRaw.filter(
+    (c) => !c.touch?.discarded && c.touch?.nextFollowupDate && c.touch.nextFollowupDate <= todayStr && !c.orderedToday
+  );
+
+  const setCnt = (id, n) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = String(n);
+  };
+  setCnt("tmCntFrequent", frequentList.length);
+  setCnt("tmCntStale", stale7dList.length);
+  setCnt("tmCntFollowup", followupList.length);
+  setCnt("tmCntDir", waDirContacts.length);
+  setCnt("tmCntDenue", waDenueContacts.length);
+  setCnt("tmCntLandline", landlineList.length);
+  setCnt("tmCntDiscarded", discardedList.length);
+
+  if (!tmAutoSelectedInitialSeg && (waDirContacts.length > 0 || waDenueContacts.length > 0)) {
+    tmAutoSelectedInitialSeg = true;
+    if (frequentList.length === 0) {
+      tmActiveSegment = waDirContacts.length > 0 ? "directory_all" : "denue_tel";
+      document.querySelectorAll("#tmSegmentBar button[data-tm-seg]").forEach((b) => {
+        b.classList.toggle("active", b.dataset.tmSeg === tmActiveSegment);
+      });
+    }
+  }
+
+  let baseRows = [];
+  if (tmActiveSegment === "frequent_due") baseRows = frequentList;
+  else if (tmActiveSegment === "stale7d") baseRows = stale7dList;
+  else if (tmActiveSegment === "followup_due") baseRows = followupList;
+  else if (tmActiveSegment === "directory_all") baseRows = waDirContacts;
+  else if (tmActiveSegment === "landline_only") baseRows = landlineList;
+  else if (tmActiveSegment === "discarded") baseRows = discardedList;
+  else baseRows = waDenueContacts;
+
+  const filtered = baseRows.filter((c) => {
+    if (tmCatFilter !== "all" && c.category !== tmCatFilter) return false;
+    const touchedToday = c.touch?.lastWaDate === todayStr || c.touch?.lastCallDate === todayStr;
+    if (tmHideTouchedToday && touchedToday) return false;
+    if (tmSearchQuery) {
+      const hay = `${c.name} ${c.address} ${c.phone} ${c.subLabel || ""} ${c.touch?.notes || ""}`;
+      if (!matchesSmartSearch(hay, tmSearchQuery)) return false;
+    }
+    return true;
+  });
+
+  // Sort untouched today first, then high priority
+  filtered.sort((a, b) => {
+    const aTouched = a.touch?.lastWaDate === todayStr || a.touch?.lastCallDate === todayStr ? 1 : 0;
+    const bTouched = b.touch?.lastWaDate === todayStr || b.touch?.lastCallDate === todayStr ? 1 : 0;
+    if (aTouched !== bTouched) return aTouched - bTouched;
+    if (a.orderedToday !== b.orderedToday) return a.orderedToday ? 1 : -1;
+    if (a.stats30d && b.stats30d) return (b.stats30d.salesCount30d || 0) - (a.stats30d.salesCount30d || 0);
+    if (a.tier === "alto" && b.tier !== "alto") return -1;
+    if (b.tier === "alto" && a.tier !== "alto") return 1;
+    return a.name.localeCompare(b.name, "es");
+  });
+
+  if (filtered.length === 0) {
+    container.innerHTML = `<div class="cart-empty">No hay contactos en este filtro${tmHideTouchedToday ? " pendientes por contactar hoy" : ""}. Prueba otro segmento arriba.</div>`;
+    return;
+  }
+
+  const shown = filtered.slice(0, 120);
+  container.innerHTML =
+    shown
+      .map((c) => {
+        const cat = PLACE_CATEGORIES[c.category] || PLACE_CATEGORIES.tienda;
+        const touchedWaToday = c.touch?.lastWaDate === todayStr;
+        const touchedCallToday = c.touch?.lastCallDate === todayStr;
+        const touchedAnyToday = touchedWaToday || touchedCallToday;
+
+        const isLandline = c.touch?.phoneType === "landline";
+        const isDiscarded = Boolean(c.touch?.discarded);
+
+        const badges = [];
+        if (isDiscarded) {
+          badges.push(`<span style="background:#f1f5f9;color:#475569;padding:2px 7px;border-radius:999px;font-size:0.71rem;font-weight:800;">🚫 Descartado</span>`);
+        } else if (isLandline) {
+          badges.push(`<span style="background:#e0e7ff;color:#3730a3;padding:2px 7px;border-radius:999px;font-size:0.71rem;font-weight:800;">☎️ Teléfono fijo (sin WA)</span>`);
+        }
+        if (c.orderedToday) {
+          badges.push(`<span style="background:#dcfce7;color:#14532d;padding:2px 7px;border-radius:999px;font-size:0.71rem;font-weight:800;">🟢 Ya pidió/compró hoy</span>`);
+        }
+        if (touchedWaToday) {
+          const hhmm = c.touch.lastWaTime || "";
+          badges.push(`<span style="background:#dcfce7;color:#15803d;padding:2px 7px;border-radius:999px;font-size:0.71rem;font-weight:800;">✓ WA enviado hoy${hhmm ? ` ${escapeHtml(hhmm)}` : ""}</span>`);
+        }
+        if (c.touch?.lastCallResult) {
+          const whenLbl = touchedCallToday ? "hoy" : (c.touch.lastCallDate || "");
+          badges.push(`<span style="background:#fef3c7;color:#92400e;padding:2px 7px;border-radius:999px;font-size:0.71rem;font-weight:800;">📞 ${escapeHtml(c.touch.lastCallResult)}${whenLbl ? ` (${escapeHtml(whenLbl)})` : ""}</span>`);
+        }
+        if (c.touch?.nextFollowupDate) {
+          const isDue = c.touch.nextFollowupDate <= todayStr;
+          badges.push(`<span style="background:${isDue ? "#fee2e2" : "#e0f2fe"};color:${isDue ? "#991b1b" : "#0369a1"};padding:2px 7px;border-radius:999px;font-size:0.71rem;font-weight:800;">📅 Llamar: ${escapeHtml(c.touch.nextFollowupDate)}</span>`);
+        }
+
+        let metaHistory = "";
+        if (c.source === "directory" && c.stats30d) {
+          const lastSaleTxt = c.stats30d.lastSaleDate
+            ? `Últ. compra: ${formatRelativeDaysLabel(c.stats30d.daysSinceLastSale, c.stats30d.lastSaleDate)} (${c.stats30d.lastSaleBoxes}c)`
+            : "Sin compras en 30d";
+          metaHistory = `🏪 Cliente • <strong>${escapeHtml(lastSaleTxt)}</strong> • 30d: ${c.stats30d.salesCount30d} compra(s)`;
+        } else {
+          metaHistory = `🆕 Prospecto${c.subLabel ? ` (${escapeHtml(c.subLabel)})` : ""}${c.sizeLabel ? ` • 👥 ${escapeHtml(c.sizeLabel)} emp.` : ""}`;
+        }
+
+        const actionBtnsHtml = isDiscarded
+          ? `
+              <button type="button" class="btn btn-outline btn-sm" data-tm-action="restore" data-tm-key="${escapeHtml(c.contactKey)}" style="padding:7px 11px;font-weight:800;">
+                ↩ Restaurar contacto
+              </button>
+            `
+          : `
+              ${
+                !isLandline
+                  ? `<button type="button" class="btn btn-whatsapp btn-sm" data-tm-action="wa" data-tm-key="${escapeHtml(c.contactKey)}" style="padding:7px 11px;font-weight:800;">
+                      💬 ${touchedWaToday ? "Reenviar WA" : "WhatsApp"}
+                    </button>`
+                  : ""
+              }
+              <button type="button" class="btn btn-outline btn-sm" data-tm-action="call" data-tm-key="${escapeHtml(c.contactKey)}" style="padding:7px 10px;font-weight:700;">
+                📞 Llamé / Nota
+              </button>
+              <button type="button" class="btn btn-primary btn-sm" data-tm-action="order" data-tm-key="${escapeHtml(c.contactKey)}" style="padding:7px 12px;font-weight:900;">
+                🛒 ¡Pidió!
+              </button>
+              <button type="button" class="btn btn-outline btn-sm" data-tm-action="${isLandline ? "mark_mobile" : "mark_landline"}" data-tm-key="${escapeHtml(c.contactKey)}" style="padding:7px 8px;font-size:0.75rem;font-weight:700;color:#475569;" title="${isLandline ? "Volver a activar botón de WhatsApp" : "Marcar como teléfono fijo sin WhatsApp (pasa a Solo Llamada)"}">
+                ${isLandline ? "📱 Sí tiene WA" : "☎️ Sin WA"}
+              </button>
+              <button type="button" class="btn btn-outline btn-sm" data-tm-action="discard" data-tm-key="${escapeHtml(c.contactKey)}" style="padding:7px 8px;font-size:0.75rem;color:#b91c1c;border-color:#fecaca;" title="Descartar (cerró, equivocado o no maneja aguacate)">
+                🚫
+              </button>
+            `;
+
+        return `
+          <div class="tm-contact-row ${touchedAnyToday ? "touched-today" : ""}" data-tm-key="${escapeHtml(c.contactKey)}">
+            <div style="flex:1;min-width:230px;">
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                <strong style="font-size:0.95rem;color:#0f172a;">${cat.emoji} ${escapeHtml(c.name)}</strong>
+                ${badges.join("")}
+              </div>
+              <div style="font-size:0.78rem;color:#475569;margin-top:2px;">
+                📞 <a href="tel:${escapeHtml(c.phone)}" style="font-weight:800;color:#0369a1;text-decoration:underline;">${escapeHtml(c.phone)}</a>
+                ${c.address ? ` • 📍 ${escapeHtml(c.address)}` : ""}
+              </div>
+              <div style="font-size:0.74rem;color:#64748b;margin-top:2px;">
+                ${metaHistory}
+                ${c.touch?.notes ? ` • 📝 <em>${escapeHtml(c.touch.notes)}</em>` : ""}
+              </div>
+            </div>
+            <div class="tm-actions-group">
+              ${actionBtnsHtml}
+            </div>
+          </div>
+        `;
+      })
+      .join("") +
+    (filtered.length > 120
+      ? `<div style="text-align:center;font-size:0.78rem;color:#64748b;padding:8px;">Mostrando primeros 120 de ${filtered.length} contactos. Usa el buscador o activa "Ocultar ya contactados hoy" conforme avances.</div>`
+      : "");
+
+  // Cache rendered lookup for 1-click actions & VCF export
+  window.__salinasTmByKey = new Map(filtered.map((x) => [x.contactKey, x]));
+  window.__salinasTmFilteredList = filtered;
+}
+
+document.getElementById("tmSegmentBar")?.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-tm-seg]");
+  if (!btn) return;
+  tmActiveSegment = btn.dataset.tmSeg;
+  document.querySelectorAll("#tmSegmentBar button[data-tm-seg]").forEach((b) => {
+    b.classList.toggle("active", b === btn);
+  });
+  if (tmActiveSegment === "denue_tel" && tmActiveTemplateKey === "clientes") {
+    const prospBtn = document.querySelector("button[data-tm-tpl='prospectos']");
+    prospBtn?.click();
+  }
+  renderTelemarketingQueue();
+});
+
+document.getElementById("tmSearchInput")?.addEventListener("input", (e) => {
+  tmSearchQuery = e.target.value.trim().toLowerCase();
+  renderTelemarketingQueue();
+});
+
+document.getElementById("tmCategoryFilter")?.addEventListener("change", (e) => {
+  tmCatFilter = e.target.value;
+  renderTelemarketingQueue();
+});
+
+document.getElementById("tmHideContactedToday")?.addEventListener("change", (e) => {
+  tmHideTouchedToday = Boolean(e.target.checked);
+  renderTelemarketingQueue();
+});
+
+window.addEventListener("salinas:prospects-updated", () => {
+  if (activeOrdersSubtab === "telemarketing") renderTelemarketingQueue();
+});
+
+document.getElementById("tmContactsContainer")?.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-tm-action]");
+  if (!btn) return;
+  const key = btn.dataset.tmKey;
+  const item = window.__salinasTmByKey?.get(key);
+  if (!item) return;
+
+  const action = btn.dataset.tmAction;
+  if (action === "wa") {
+    const url = buildPersonalizedWaUrl(item.phone, item.name);
+    if (!url) {
+      showToast("Este contacto no tiene un número válido de 10 dígitos.");
+      return;
+    }
+    window.open(url, "_blank", "noopener");
+    const hhmm = new Date().toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", hour12: false });
+    saveCrmTouchPatch(key, {
+      lastWaDate: getLocalDateStr(),
+      lastWaTime: hhmm,
+      lastWaIso: new Date().toISOString()
+    });
+    return;
+  }
+
+  if (action === "call") {
+    const modal = document.getElementById("tmCallNoteModal");
+    if (!modal) return;
+    document.getElementById("tmCallContactKey").value = key;
+    document.getElementById("tmCallTargetLabel").textContent = `${item.name} • 📞 ${item.phone}`;
+    document.getElementById("tmCallResultSelect").value = item.touch?.lastCallResult || "No contestó";
+    document.getElementById("tmNextFollowupDate").value = item.touch?.nextFollowupDate || "";
+    document.getElementById("tmCallNotesInput").value = item.touch?.notes || "";
+    modal.classList.add("open");
+    return;
+  }
+
+  if (action === "mark_landline") {
+    saveCrmTouchPatch(key, { phoneType: "landline" });
+    showToast(`☎️ "${item.name}" movido a Solo Llamada (sin WhatsApp).`);
+    return;
+  }
+
+  if (action === "mark_mobile") {
+    saveCrmTouchPatch(key, { phoneType: "mobile" });
+    showToast(`📱 "${item.name}" habilitado nuevamente para WhatsApp.`);
+    return;
+  }
+
+  if (action === "discard") {
+    saveCrmTouchPatch(key, { discarded: true });
+    showToast(`🚫 "${item.name}" movido a Descartados.`);
+    return;
+  }
+
+  if (action === "restore") {
+    saveCrmTouchPatch(key, { discarded: false });
+    showToast(`↩ "${item.name}" restaurado a la cartera.`);
+    return;
+  }
+
+  if (action === "order") {
+    openManualOrderModal({
+      channel: item.touch?.lastWaDate === getLocalDateStr() ? "whatsapp" : "llamada",
+      placeId: item.placeId || "",
+      denueId: item.denueId || "",
+      name: item.name || "",
+      phone: item.phone || "",
+      address: item.address || "",
+      category: item.category || "tienda",
+      lat: item.lat,
+      lng: item.lng
+    });
+  }
+});
+
+document.getElementById("btnTmCopyBroadcast")?.addEventListener("click", async () => {
+  const txt = buildMorningBroadcastText();
+  try {
+    await navigator.clipboard.writeText(txt);
+    showToast("📋 Lista de precios copiada para tus Listas de Difusión de WhatsApp.");
+  } catch (_) {
+    showToast("No se pudo copiar automáticamente; revisa permisos del navegador.");
+  }
+});
+
+function escapeVcardField(str) {
+  return String(str || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/\n/g, "\\n")
+    .replace(/;/g, "\\;")
+    .replace(/,/g, "\\,")
+    .trim();
+}
+
+document.getElementById("btnTmExportVcf")?.addEventListener("click", () => {
+  const rows = Array.isArray(window.__salinasTmFilteredList) ? window.__salinasTmFilteredList : [];
+  const valid = rows.filter((c) => !c.touch?.discarded && c.phone10);
+  if (valid.length === 0) {
+    showToast("No hay contactos válidos en el filtro actual para exportar.");
+    return;
+  }
+  const brand = getTenantBranding(storeSettings, ACTIVE_TENANT_SLUG);
+  const seenPhones = new Set();
+  const cards = [];
+  for (const c of valid) {
+    if (seenPhones.has(c.phone10)) continue;
+    seenPhones.add(c.phone10);
+    const cat = PLACE_CATEGORIES[c.category] || PLACE_CATEGORIES.tienda;
+    const displayName =
+      c.source === "directory"
+        ? `${brand.pinEmoji} ${c.name} (${cat.label})`
+        : `🆕 PROSP - ${c.name}`;
+    const orgTxt = c.source === "directory" ? "Cliente Salinas" : `Prospecto (${cat.label})`;
+    const noteTxt = [c.address, c.subLabel].filter(Boolean).join(" • ");
+    cards.push(
+      [
+        "BEGIN:VCARD",
+        "VERSION:3.0",
+        `FN:${escapeVcardField(displayName)}`,
+        `N:${escapeVcardField(displayName)};;;;`,
+        `ORG:${escapeVcardField(orgTxt)}`,
+        `TEL;TYPE=CELL,VOICE:+52${c.phone10}`,
+        ...(c.address ? [`ADR;TYPE=WORK:;;${escapeVcardField(c.address)};;;;`] : []),
+        ...(noteTxt ? [`NOTE:${escapeVcardField(noteTxt)}`] : []),
+        "END:VCARD"
+      ].join("\r\n")
+    );
+  }
+  const vcfContent = cards.join("\r\n") + "\r\n";
+  const blob = new Blob([vcfContent], { type: "text/vcard;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `contactos-salinas-${tmActiveSegment}-${cards.length}.vcf`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 400);
+  showToast(`📇 Descargados ${cards.length} contactos (.vcf) listos para la agenda del celular.`);
+});
+
+// Call Note Modal handlers
+function closeTmCallModal() {
+  document.getElementById("tmCallNoteModal")?.classList.remove("open");
+}
+document.getElementById("btnCloseTmCallModal")?.addEventListener("click", closeTmCallModal);
+document.getElementById("btnCancelTmCallModal")?.addEventListener("click", closeTmCallModal);
+document.getElementById("btnSaveTmCallModal")?.addEventListener("click", async () => {
+  const key = document.getElementById("tmCallContactKey").value;
+  if (!key) return;
+  const result = document.getElementById("tmCallResultSelect").value;
+  const nextDate = document.getElementById("tmNextFollowupDate").value || "";
+  const notes = document.getElementById("tmCallNotesInput").value.trim();
+  closeTmCallModal();
+  await saveCrmTouchPatch(key, {
+    lastCallDate: getLocalDateStr(),
+    lastCallIso: new Date().toISOString(),
+    lastCallResult: result,
+    nextFollowupDate: nextDate,
+    notes
+  });
+  showToast("📞 Registro de llamada guardado.");
+});
+
+// ================= CAPTURADOR DE PEDIDO MANUAL (WHATSAPP / LLAMADA / MOSTRADOR) =================
+function populateManualOrderDrivers(selectedDriver = "") {
+  const sel = document.getElementById("moAssignedDriver");
+  if (!sel) return;
+  const drivers = storeSettings.drivers || [];
+  const opts = [`<option value="">— Dejar sin asignar por ahora (queda en 🔴 Sin asignar) —</option>`];
+  for (const d of drivers) {
+    const loc = driverLocations.find(
+      (l) => String(l.driverName || "").toLowerCase() === String(d.name || "").toLowerCase()
+    );
+    const isLive =
+      loc && loc.active && loc.updatedAtIso && Date.now() - new Date(loc.updatedAtIso).getTime() < 20 * 60 * 1000;
+    const boxesInfo = loc && typeof loc.boxesInCar === "number" ? ` · ${loc.boxesInCar} cajas en carro` : "";
+    const statusTxt = isLive ? ` (🟢 En ruta${boxesInfo})` : boxesInfo ? ` (${boxesInfo.slice(3)})` : "";
+    opts.push(
+      `<option value="${escapeHtml(d.name)}" ${selectedDriver === d.name ? "selected" : ""}>${escapeHtml(d.name)}${escapeHtml(statusTxt)}</option>`
+    );
+  }
+  sel.innerHTML = opts.join("");
+}
+
+let moMixModeOpen = false;
+const MO_RIPENESS_STAGES = ["Verde", "Quebrado", "Sazón", "Maduro"];
+
+function setMoMixMode(open) {
+  moMixModeOpen = Boolean(open);
+  const mixPanel = document.getElementById("moMixPanel");
+  const quickCalWrap = document.getElementById("moCalibersContainer");
+  const quickRipWrap = document.getElementById("moQuickRipenessWrap");
+  const toggleBtn = document.getElementById("btnToggleMoRipenessMix");
+  if (mixPanel) mixPanel.style.display = moMixModeOpen ? "block" : "none";
+  if (quickCalWrap) quickCalWrap.style.display = moMixModeOpen ? "none" : "flex";
+  if (quickRipWrap) quickRipWrap.style.display = moMixModeOpen ? "none" : "block";
+  if (toggleBtn) {
+    toggleBtn.textContent = moMixModeOpen ? "⚡ Modo rápido" : "🎨 Detallar maduración";
+  }
+  if (moMixModeOpen) {
+    // Copiar cantidades actuales del modo rápido a "Sazón" si la matriz estaba en ceros
+    let anyMixVal = false;
+    document.querySelectorAll("#moMixGridContainer .mo-mix-input").forEach((inp) => {
+      if ((Number(inp.value) || 0) > 0) anyMixVal = true;
+    });
+    if (!anyMixVal) {
+      const quickRip = document.getElementById("moRipeness")?.value || "Sazón";
+      const targetStage = MO_RIPENESS_STAGES.includes(quickRip) ? quickRip : "Sazón";
+      document.querySelectorAll("#moCalibersContainer [data-mo-cal-row]").forEach((row) => {
+        const code = row.dataset.moCalRow;
+        const qVal = Number(row.querySelector(".mo-cal-qty")?.value) || 0;
+        const pVal = Number(row.querySelector(".mo-cal-price")?.value) || 0;
+        const pInp = document.querySelector(`#moMixGridContainer .mo-mix-price[data-cal="${code}"]`);
+        if (pInp) pInp.value = String(pVal);
+        if (qVal > 0) {
+          const mInp = document.querySelector(
+            `#moMixGridContainer .mo-mix-input[data-cal="${code}"][data-rip="${targetStage}"]`
+          );
+          if (mInp) mInp.value = String(qVal);
+        }
+      });
+      syncMoMixSubtotals();
+    }
+  } else {
+    // Al volver a modo rápido, reflejar las sumas por calibre
+    document.querySelectorAll("#moMixGridContainer [data-mo-mix-row]").forEach((mRow) => {
+      const code = mRow.dataset.moMixRow;
+      let sum = 0;
+      mRow.querySelectorAll(".mo-mix-input").forEach((inp) => {
+        sum = round1(sum + Math.max(0, Number(inp.value) || 0));
+      });
+      const pVal = Number(mRow.querySelector(".mo-mix-price")?.value) || 0;
+      const qRow = document.querySelector(`#moCalibersContainer [data-mo-cal-row="${code}"]`);
+      if (qRow) {
+        const qInp = qRow.querySelector(".mo-cal-qty");
+        const pInp = qRow.querySelector(".mo-cal-price");
+        if (qInp) qInp.value = String(sum);
+        if (pInp) pInp.value = String(pVal);
+      }
+    });
+  }
+  updateManualOrderSummary();
+}
+
+function syncMoMixSubtotals() {
+  document.querySelectorAll("#moMixGridContainer [data-mo-mix-row]").forEach((mRow) => {
+    const code = mRow.dataset.moMixRow;
+    let sum = 0;
+    mRow.querySelectorAll(".mo-mix-input").forEach((inp) => {
+      sum = round1(sum + Math.max(0, Number(inp.value) || 0));
+    });
+    const badge = document.getElementById(`moMixSub_${code}`);
+    if (badge) badge.textContent = String(sum);
+  });
+}
+
+function renderManualOrderCalibers() {
+  const wrap = document.getElementById("moCalibersContainer");
+  const mixGrid = document.getElementById("moMixGridContainer");
+  if (!wrap) return;
+  const cals = getOrderedProducts(
+    storeSettings,
+    ACTIVE_TENANT_SLUG === "salinas" ? DEFAULT_STORE_SETTINGS.calibers : {}
+  );
+  wrap.innerHTML = cals
+    .map(
+      (c) => `
+        <div style="display:grid;grid-template-columns:1.2fr 92px 110px;gap:8px;align-items:center;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:6px 9px;" data-mo-cal-row="${escapeHtml(c.code)}" data-mo-cal-name="${escapeHtml(c.name)}">
+          <div style="font-size:0.83rem;font-weight:800;color:#0f172a;">
+            ${escapeHtml(c.name)} <span style="color:#64748b;font-weight:700;">[${escapeHtml(c.code)}]</span>
+          </div>
+          <div>
+            <input type="number" min="0" step="0.5" value="0" class="form-control mo-cal-qty" style="padding:5px 7px;font-size:0.85rem;font-weight:800;text-align:center;" placeholder="Cajas">
+          </div>
+          <div style="display:flex;align-items:center;gap:3px;">
+            <span style="font-size:0.78rem;color:#64748b;font-weight:700;">$</span>
+            <input type="number" min="0" step="1" value="${Math.round(Number(c.price) || 0)}" class="form-control mo-cal-price" style="padding:5px 7px;font-size:0.83rem;font-weight:700;" title="Precio pactado por caja">
+          </div>
+        </div>
+      `
+    )
+    .join("");
+
+  if (mixGrid) {
+    mixGrid.innerHTML = `
+      <div style="display:grid;grid-template-columns:62px repeat(4, 1fr) 82px;gap:5px;align-items:center;font-size:0.72rem;font-weight:800;color:#475569;text-align:center;margin-bottom:5px;">
+        <div style="text-align:left;">Tam.</div>
+        <div>Verde</div>
+        <div>Quebr.</div>
+        <div>Sazón</div>
+        <div>Maduro</div>
+        <div>$ Caja</div>
+      </div>
+      ${cals
+        .map(
+          (c) => `
+          <div style="display:grid;grid-template-columns:62px repeat(4, 1fr) 82px;gap:5px;align-items:center;margin-bottom:5px;" data-mo-mix-row="${escapeHtml(c.code)}" data-mo-cal-name="${escapeHtml(c.name)}">
+            <div style="font-size:0.8rem;font-weight:900;color:#0f172a;">
+              ${escapeHtml(c.code)} <span class="wh-mix-sub" id="moMixSub_${escapeHtml(c.code)}">0</span>
+            </div>
+            ${MO_RIPENESS_STAGES.map(
+              (st) =>
+                `<input type="number" min="0" step="0.5" value="0" inputmode="decimal" class="form-control mo-mix-input" data-cal="${escapeHtml(c.code)}" data-rip="${st}" style="padding:4px;font-size:0.8rem;font-weight:800;text-align:center;">`
+            ).join("")}
+            <input type="number" min="0" step="1" value="${Math.round(Number(c.price) || 0)}" class="form-control mo-mix-price" data-cal="${escapeHtml(c.code)}" style="padding:4px 5px;font-size:0.78rem;font-weight:700;text-align:right;" title="Precio por caja">
+          </div>
+        `
+        )
+        .join("")}
+    `;
+  }
+  setMoMixMode(false);
+}
+
+function computeManualOrderTotals() {
+  const items = [];
+  let totalBoxes = 0;
+  let totalAmount = 0;
+  const globalRipParts = [];
+
+  if (moMixModeOpen) {
+    const mixRows = document.querySelectorAll("#moMixGridContainer [data-mo-mix-row]");
+    mixRows.forEach((mRow) => {
+      const code = mRow.dataset.moMixRow;
+      const name = mRow.dataset.moCalName;
+      const price = Math.max(0, Math.round(Number(mRow.querySelector(".mo-mix-price")?.value) || 0));
+      const breakdown = {};
+      const parts = [];
+      let qty = 0;
+      MO_RIPENESS_STAGES.forEach((st) => {
+        const val = Math.max(0, round1(Number(mRow.querySelector(`.mo-mix-input[data-rip="${st}"]`)?.value) || 0));
+        if (val > 0) {
+          breakdown[st] = val;
+          parts.push(`${val} ${st}`);
+          qty = round1(qty + val);
+        }
+      });
+      if (qty > 0) {
+        const subtotal = Math.round(qty * price);
+        const ripenessSummary = parts.join(" + ");
+        globalRipParts.push(`${code}: ${ripenessSummary}`);
+        items.push({ code, name, qty, price, subtotal, ripenessBreakdown: breakdown, ripenessSummary });
+        totalBoxes = round1(totalBoxes + qty);
+        totalAmount += subtotal;
+      }
+    });
+    return { items, totalBoxes, totalAmount, detailedRipenessText: globalRipParts.join(" • ") };
+  }
+
+  const rows = document.querySelectorAll("#moCalibersContainer [data-mo-cal-row]");
+  rows.forEach((row) => {
+    const code = row.dataset.moCalRow;
+    const name = row.dataset.moCalName;
+    const qty = Math.max(0, round1(Number(row.querySelector(".mo-cal-qty")?.value) || 0));
+    const price = Math.max(0, Math.round(Number(row.querySelector(".mo-cal-price")?.value) || 0));
+    if (qty > 0) {
+      const subtotal = Math.round(qty * price);
+      items.push({ code, name, qty, price, subtotal });
+      totalBoxes = round1(totalBoxes + qty);
+      totalAmount += subtotal;
+    }
+  });
+  return { items, totalBoxes, totalAmount, detailedRipenessText: "" };
+}
+
+function updateManualOrderSummary() {
+  const { totalBoxes, totalAmount } = computeManualOrderTotals();
+  const el = document.getElementById("moTotalSummary");
+  if (el) {
+    el.textContent = `${totalBoxes} caja${totalBoxes === 1 ? "" : "s"} • ${formatCurrency(totalAmount)}`;
+  }
+}
+
+document.getElementById("moCalibersContainer")?.addEventListener("input", updateManualOrderSummary);
+document.getElementById("moMixGridContainer")?.addEventListener("input", () => {
+  syncMoMixSubtotals();
+  updateManualOrderSummary();
+});
+document.getElementById("btnToggleMoRipenessMix")?.addEventListener("click", () => {
+  setMoMixMode(!moMixModeOpen);
+});
+document.getElementById("btnClearMoMix")?.addEventListener("click", () => {
+  document.querySelectorAll("#moMixGridContainer .mo-mix-input").forEach((inp) => {
+    inp.value = "0";
+  });
+  syncMoMixSubtotals();
+  updateManualOrderSummary();
+});
+
+function syncManualOrderLinkedGpsUI() {
+  const lat = parseFloat(document.getElementById("moLat")?.value || "");
+  const lng = parseFloat(document.getElementById("moLng")?.value || "");
+  const placeId = document.getElementById("moPlaceId")?.value || "";
+  const pill = document.getElementById("moGpsPill");
+  const pillTxt = document.getElementById("moGpsPillText");
+  const saveDirWrap = document.getElementById("moSaveToDirWrap");
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+  if (pill) {
+    pill.style.display = hasCoords ? "flex" : "none";
+    if (pillTxt && hasCoords) {
+      pillTxt.textContent = placeId
+        ? `📍 Vinculado a cliente del Directorio (GPS listo para mapa y ruta)`
+        : `📍 Coordenadas GPS listas (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+    }
+  }
+  if (saveDirWrap) {
+    saveDirWrap.style.display = !placeId ? "flex" : "none";
+  }
+}
+
+function openManualOrderModal(prefill = null) {
+  const modal = document.getElementById("adminManualOrderModal");
+  if (!modal) return;
+  document.getElementById("moPlaceId").value = prefill?.placeId || "";
+  document.getElementById("moDenueId").value = prefill?.denueId || "";
+  document.getElementById("moLat").value = Number.isFinite(prefill?.lat) ? String(prefill.lat) : "";
+  document.getElementById("moLng").value = Number.isFinite(prefill?.lng) ? String(prefill.lng) : "";
+  document.getElementById("moCategory").value = prefill?.category || "tienda";
+  document.getElementById("moChannel").value = prefill?.channel || "whatsapp";
+  document.getElementById("moPaymentMethod").value = "Por definir al entregar";
+  document.getElementById("moCustomerSearch").value = "";
+  document.getElementById("moCustomerSuggestions").style.display = "none";
+  document.getElementById("moCustomerName").value = prefill?.name || "";
+  document.getElementById("moPhone").value = prefill?.phone || "";
+  document.getElementById("moAddress").value = prefill?.address || "";
+  document.getElementById("moRipeness").value = "Surtido";
+  document.getElementById("moDeliveryWindow").value = "Lo antes posible";
+  document.getElementById("moNotes").value = "";
+  document.getElementById("moSaveToDirCheck").checked = Boolean(!prefill?.placeId && Number.isFinite(prefill?.lat));
+  populateManualOrderDrivers("");
+  renderManualOrderCalibers();
+  syncManualOrderLinkedGpsUI();
+  modal.classList.add("open");
+}
+
+function closeManualOrderModal() {
+  document.getElementById("adminManualOrderModal")?.classList.remove("open");
+}
+
+document.getElementById("btnOpenManualOrderModal")?.addEventListener("click", () => openManualOrderModal(null));
+document.getElementById("btnCloseManualOrderModal")?.addEventListener("click", closeManualOrderModal);
+document.getElementById("btnCancelManualOrder")?.addEventListener("click", closeManualOrderModal);
+
+document.getElementById("btnClearMoLinkedPlace")?.addEventListener("click", () => {
+  document.getElementById("moPlaceId").value = "";
+  document.getElementById("moDenueId").value = "";
+  document.getElementById("moLat").value = "";
+  document.getElementById("moLng").value = "";
+  syncManualOrderLinkedGpsUI();
+});
+
+document.getElementById("moCustomerSearch")?.addEventListener("input", (e) => {
+  const q = e.target.value.trim();
+  const box = document.getElementById("moCustomerSuggestions");
+  if (!box) return;
+  if (q.length < 2) {
+    box.style.display = "none";
+    return;
+  }
+  const matches = [];
+  for (const p of allPlaces) {
+    const hay = `${p.name || ""} ${p.phone || ""} ${p.address || ""}`;
+    if (matchesSmartSearch(hay, q)) {
+      matches.push({
+        source: "directory",
+        placeId: p.id,
+        denueId: p.denueId || "",
+        name: p.name || "",
+        phone: p.phone || "",
+        address: p.address || "",
+        category: p.category || "tienda",
+        lat: typeof p.lat === "number" ? p.lat : null,
+        lng: typeof p.lng === "number" ? p.lng : null
+      });
+      if (matches.length >= 8) break;
+    }
+  }
+  const denueArr = typeof window.__pzGetActiveProspects === "function" ? window.__pzGetActiveProspects() : [];
+  if (matches.length < 12) {
+    for (const pr of denueArr) {
+      const addr = [pr.dir || pr.col || "", pr.mun || ""].filter(Boolean).join(", ");
+      const hay = `${pr.n || ""} ${pr.tel || ""} ${addr}`;
+      if (matchesSmartSearch(hay, q)) {
+        matches.push({
+          source: "denue",
+          placeId: "",
+          denueId: String(pr.id),
+          name: pr.n || "",
+          phone: pr.tel || "",
+          address: addr,
+          category: pr.cat || "tienda",
+          lat: typeof pr.lat === "number" ? pr.lat : null,
+          lng: typeof pr.lng === "number" ? pr.lng : null
+        });
+        if (matches.length >= 12) break;
+      }
+    }
+  }
+  moSuggestCache = matches;
+  if (matches.length === 0) {
+    box.innerHTML = `<div style="padding:9px 11px;font-size:0.8rem;color:#64748b;">Sin coincidencias en directorio. Escribe los datos del cliente abajo.</div>`;
+    box.style.display = "block";
+    return;
+  }
+  box.innerHTML = matches
+    .map((m, idx) => {
+      const cat = PLACE_CATEGORIES[m.category] || PLACE_CATEGORIES.tienda;
+      const tag = m.source === "directory"
+        ? `<span style="background:#dcfce7;color:#14532d;padding:1px 6px;border-radius:999px;font-size:0.68rem;font-weight:800;">Cliente</span>`
+        : `<span style="background:#e0f2fe;color:#0369a1;padding:1px 6px;border-radius:999px;font-size:0.68rem;font-weight:800;">Prospecto</span>`;
+      return `
+        <div class="mo-suggest-item" data-mo-pick="${idx}">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+            <strong>${cat.emoji} ${escapeHtml(m.name)}</strong>
+            ${tag}
+          </div>
+          <div style="font-size:0.74rem;color:#64748b;margin-top:2px;">
+            ${m.phone ? `📞 ${escapeHtml(m.phone)} • ` : ""}${escapeHtml(m.address || "Sin dirección")}
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+  box.style.display = "block";
+});
+
+document.getElementById("moCustomerSuggestions")?.addEventListener("click", (e) => {
+  const row = e.target.closest("[data-mo-pick]");
+  if (!row) return;
+  const m = moSuggestCache[Number(row.dataset.moPick)];
+  if (!m) return;
+  document.getElementById("moPlaceId").value = m.placeId || "";
+  document.getElementById("moDenueId").value = m.denueId || "";
+  document.getElementById("moLat").value = Number.isFinite(m.lat) ? String(m.lat) : "";
+  document.getElementById("moLng").value = Number.isFinite(m.lng) ? String(m.lng) : "";
+  document.getElementById("moCategory").value = m.category || "tienda";
+  document.getElementById("moCustomerName").value = m.name || "";
+  document.getElementById("moPhone").value = m.phone || "";
+  document.getElementById("moAddress").value = m.address || "";
+  document.getElementById("moSaveToDirCheck").checked = Boolean(!m.placeId && Number.isFinite(m.lat));
+  document.getElementById("moCustomerSearch").value = "";
+  document.getElementById("moCustomerSuggestions").style.display = "none";
+  syncManualOrderLinkedGpsUI();
+});
+
+document.getElementById("adminManualOrderForm")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!currentKeyHash) return;
+
+  const customerName = document.getElementById("moCustomerName").value.trim();
+  const phone = document.getElementById("moPhone").value.trim();
+  const address = document.getElementById("moAddress").value.trim();
+  const channel = document.getElementById("moChannel").value || "whatsapp";
+  const paymentMethod = document.getElementById("moPaymentMethod").value || "Efectivo";
+  const ripeness = document.getElementById("moRipeness").value || "Surtido";
+  const deliveryWindow = document.getElementById("moDeliveryWindow").value.trim() || "Lo antes posible";
+  const assignedDriver = document.getElementById("moAssignedDriver").value || "";
+  const notes = document.getElementById("moNotes").value.trim();
+  const addStopToRoute = Boolean(document.getElementById("moAddStopToRouteCheck")?.checked);
+  const saveToDir = Boolean(document.getElementById("moSaveToDirCheck")?.checked);
+
+  if (!customerName || !address) {
+    showToast("Ingresa el nombre del cliente y la dirección de entrega.");
+    return;
+  }
+
+  const { items, totalBoxes, totalAmount, detailedRipenessText } = computeManualOrderTotals();
+  if (totalBoxes <= 0 || items.length === 0) {
+    showToast("Indica al menos 1 caja en los calibres del pedido.");
+    return;
+  }
+  const finalRipeness = detailedRipenessText || ripeness;
+
+  let placeId = document.getElementById("moPlaceId").value || "";
+  const denueId = document.getElementById("moDenueId").value || "";
+  const rawLat = parseFloat(document.getElementById("moLat").value || "");
+  const rawLng = parseFloat(document.getElementById("moLng").value || "");
+  const hasCoords = Number.isFinite(rawLat) && Number.isFinite(rawLng);
+  const category = document.getElementById("moCategory").value || "tienda";
+
+  const prefix = channel === "llamada" ? "TEL" : channel === "mostrador" ? "BOD" : "WA";
+  const randSuffix = String(Math.floor(1000 + Math.random() * 9000));
+  const folio = `${prefix}-${randSuffix}`;
+  const nowIso = new Date().toISOString();
+  const todayStr = getLocalDateStr();
+  const newOrderRef = doc(collection(db, "orders"));
+  const status = assignedDriver ? "confirmado" : "nuevo";
+
+  const btnSubmit = document.getElementById("btnSubmitManualOrder");
+  if (btnSubmit) btnSubmit.disabled = true;
+
+  try {
+    await executeAdminBatch(currentKeyHash, (batch, proofId) => {
+      if (!placeId && saveToDir && hasCoords) {
+        const newPlaceRef = denueId ? doc(db, "places", `denue_${denueId}`) : doc(collection(db, "places"));
+        placeId = newPlaceRef.id;
+        batch.set(
+          newPlaceRef,
+          {
+            name: customerName,
+            category,
+            address,
+            phone,
+            lat: rawLat,
+            lng: rawLng,
+            ...(denueId ? { denueId } : {}),
+            createdBy: "Admin (Pedido)",
+            active: true,
+            createdAtIso: nowIso,
+            updatedAt: serverTimestamp(),
+            proofId
+          },
+          { merge: true }
+        );
+      }
+
+      batch.set(newOrderRef, {
+        folio,
+        channel,
+        status,
+        assignedDriver,
+        customerName,
+        phone,
+        address,
+        ...(placeId ? { placeId } : {}),
+        ...(hasCoords ? { lat: rawLat, lng: rawLng } : {}),
+        items,
+        totalBoxes,
+        totalAmount,
+        paymentMethod,
+        ripeness: finalRipeness,
+        deliveryWindow,
+        notes,
+        createdBy: "Admin",
+        createdAtIso: nowIso,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        proofId
+      });
+
+      if (assignedDriver && addStopToRoute && hasCoords) {
+        const dSlug = rbDriverSlug(assignedDriver);
+        const routeDocId = `${todayStr}_${dSlug}`;
+        const existingRoute = allDriverRoutesTodayMap.get(routeDocId);
+        const existingStops = Array.isArray(existingRoute?.stops) ? [...existingRoute.stops] : [];
+        const alreadyIn = existingStops.some((s) => s.id === newOrderRef.id || (placeId && s.id === placeId));
+        if (!alreadyIn) {
+          existingStops.push({
+            id: newOrderRef.id,
+            kind: "order",
+            name: customerName,
+            address,
+            phone,
+            lat: rawLat,
+            lng: rawLng,
+            subtitle: `${folio} • ${totalBoxes} caja(s) • ${formatCurrency(totalAmount)}`,
+            status: "pending"
+          });
+          batch.set(
+            doc(db, "driver_routes", routeDocId),
+            {
+              date: todayStr,
+              driverName: assignedDriver,
+              driverSlug: dSlug,
+              stops: existingStops,
+              updatedAtIso: nowIso,
+              updatedAt: serverTimestamp(),
+              proofId
+            },
+            { merge: true }
+          );
+        }
+      }
+    });
+
+    closeManualOrderModal();
+    showToast(
+      assignedDriver
+        ? `✅ Pedido ${folio} creado y asignado a ${assignedDriver}.`
+        : `✅ Pedido ${folio} guardado en 🔴 Sin asignar.`
+    );
+    switchAdminTab("tabOrders");
+    switchOrdersSubtab("inbox");
+  } catch (err) {
+    console.error("Error creando pedido manual:", err);
+    showToast("Error al guardar el pedido manual.");
+  } finally {
+    if (btnSubmit) btnSubmit.disabled = false;
+  }
+});
+
+// ================= IDEA 1: AUDITORÍA CRONOLÓGICA DE RECORRIDO REAL (PELÍCULA DEL DÍA) =================
+let tlPanelOpen = false;
+let tlSelectedDriver = "";
+let tlFrames = [];
+let tlStepIndex = -1; // -1 = mostrar día completo
+let tlPlayTimer = null;
+let tlOverlayLayer = null;
+
+function parseHhMmToMinutes(hhmmStr) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(hhmmStr || "").trim());
+  if (!m) return null;
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
+  return hh * 60 + mm;
+}
+
+function isoToLocalHhMmAndMinutes(isoStr) {
+  if (!isoStr) return { hhmm: "", mins: null };
+  const d = new Date(isoStr);
+  if (Number.isNaN(d.getTime())) return { hhmm: "", mins: null };
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return { hhmm: `${hh}:${mm}`, mins: d.getHours() * 60 + d.getMinutes() };
+}
+
+function ensureTlOverlayLayer() {
+  ensureLeafletMap();
+  if (!leafletMap || typeof window.L === "undefined") return null;
+  if (!tlOverlayLayer) {
+    tlOverlayLayer = window.L.layerGroup().addTo(leafletMap);
+  }
+  return tlOverlayLayer;
+}
+
+function stopTlPlayback() {
+  if (tlPlayTimer) {
+    clearInterval(tlPlayTimer);
+    tlPlayTimer = null;
+  }
+  const btn = document.getElementById("btnTlPlayPause");
+  if (btn) btn.textContent = "▶ Reproducir";
+}
+
+function populateTlDriverSelect() {
+  const sel = document.getElementById("tlDriverSelect");
+  const quickBtnsEl = document.getElementById("tlDriverQuickButtons");
+  const promptDateLbl = document.getElementById("tlPromptDateLbl");
+  if (promptDateLbl) {
+    promptDateLbl.textContent = selectedRouteDate === getLocalDateStr() ? "día de hoy" : selectedRouteDate;
+  }
+  if (!sel) return;
+  const driverNames = [];
+  const seen = new Set();
+  const pushDrv = (name) => {
+    const clean = String(name || "").trim();
+    if (!clean) return;
+    const low = clean.toLowerCase();
+    if (seen.has(low)) return;
+    seen.add(low);
+    driverNames.push(clean);
+  };
+  for (const d of storeSettings.drivers || []) pushDrv(d.name);
+  for (const s of routeSalesList) {
+    if (!isSaleCancelled(s)) pushDrv(s.driver);
+  }
+  for (const v of routeVisitsList) pushDrv(v.driver);
+
+  if (driverNames.length === 0) {
+    sel.innerHTML = `<option value="">Sin choferes</option>`;
+    if (quickBtnsEl) quickBtnsEl.innerHTML = `<span style="font-size:0.8rem;color:#64748b;">No hay choferes registrados.</span>`;
+    tlSelectedDriver = "";
+    return;
+  }
+
+  if (tlSelectedDriver && !seen.has(tlSelectedDriver.toLowerCase())) {
+    tlSelectedDriver = "";
+  }
+
+  const drvSummaries = driverNames.map((dn) => {
+    const low = dn.toLowerCase();
+    const sCnt = routeSalesList.filter((s) => !isSaleCancelled(s) && String(s.driver || "").toLowerCase() === low).length;
+    const vCnt = routeVisitsList.filter((v) => String(v.driver || "").toLowerCase() === low).length;
+    const loc = driverLocations.find((l) => String(l.driverName || "").toLowerCase() === low);
+    const rawDoc = getDriverRawRouteDocForSelectedDate(dn);
+    const liveTCnt = loc && loc.trailDate === selectedRouteDate && Array.isArray(loc.trail) ? loc.trail.length : 0;
+    const archTCnt = Array.isArray(rawDoc?.archivedGpsTrail) ? rawDoc.archivedGpsTrail.length : 0;
+    const tCnt = Math.max(liveTCnt, archTCnt);
+    const pCnt = getEffectiveAuditStops(rawDoc).length;
+    const sealed = Boolean(rawDoc?.sealed);
+    return { name: dn, sCnt, vCnt, tCnt, pCnt, sealed, hasAny: sCnt > 0 || vCnt > 0 || tCnt > 0 || pCnt > 0 };
+  });
+
+  sel.innerHTML = [
+    `<option value="" ${!tlSelectedDriver ? "selected" : ""}>— Selecciona chofer —</option>`,
+    ...drvSummaries.map(
+      (d) =>
+        `<option value="${escapeHtml(d.name)}" ${d.name.toLowerCase() === tlSelectedDriver.toLowerCase() ? "selected" : ""}>${d.sealed ? "🔒 " : "🚗 "}${escapeHtml(d.name)} (${d.sCnt}vta · ${d.vCnt}vis)</option>`
+    )
+  ].join("");
+
+  if (quickBtnsEl) {
+    quickBtnsEl.innerHTML = drvSummaries
+      .map(
+        (d) => `
+          <button type="button" class="btn ${d.hasAny ? "btn-primary" : "btn-outline"} btn-sm" data-tl-pick-driver="${escapeHtml(d.name)}" style="${d.hasAny ? "background:#6d28d9;border-color:#6d28d9;" : ""}padding:8px 13px;font-weight:800;">
+            ${d.sealed ? "🔒" : "🚗"} ${escapeHtml(d.name)} <span style="opacity:0.88;font-weight:600;margin-left:4px;">(${d.sCnt} venta${d.sCnt === 1 ? "" : "s"} · ${d.vCnt} visita${d.vCnt === 1 ? "" : "s"})</span>
+          </button>
+        `
+      )
+      .join("");
+  }
+}
+
+function getDriverRawRouteDocForSelectedDate(driverName, dateOverride = null) {
+  if (!driverName) return null;
+  const targetDate = dateOverride || selectedRouteDate;
+  const slug = rbDriverSlug(driverName);
+  const mapToUse = targetDate === selectedRouteDate ? allDriverRouteDocsRawMap : null;
+  if (!mapToUse) return null;
+  let routeDoc = mapToUse.get(`${targetDate}_${slug}`);
+  if (!routeDoc) {
+    for (const r of mapToUse.values()) {
+      if (String(r.driverName || "").toLowerCase() === String(driverName || "").toLowerCase()) {
+        routeDoc = r;
+        break;
+      }
+    }
+  }
+  return routeDoc || null;
+}
+
+function getEffectiveAuditStops(routeDoc) {
+  if (!routeDoc) return [];
+  const snapStops = Array.isArray(routeDoc.morningStopsSnapshot) ? routeDoc.morningStopsSnapshot : [];
+  const liveStops = Array.isArray(routeDoc.stops) ? routeDoc.stops : [];
+  return snapStops.length >= liveStops.length && snapStops.length > 0 ? snapStops : liveStops;
+}
+
+function isDriverRouteSealedForDate(driverName, dateStr) {
+  if (!driverName) return false;
+  const slug = rbDriverSlug(driverName);
+  const docId = `${dateStr}_${slug}`;
+  if (dateStr === selectedRouteDate) {
+    const d = getDriverRawRouteDocForSelectedDate(driverName, dateStr);
+    return Boolean(d?.sealed);
+  }
+  const d = allDriverRouteDocsRawMap.get(docId);
+  return Boolean(d?.sealed);
+}
+
+function findPlannedStopOrderForDriver(driverName, placeId, placeName, lat, lng) {
+  const routeDoc = getDriverRawRouteDocForSelectedDate(driverName) || getDriverPlannedRouteDoc(driverName);
+  const stops = getEffectiveAuditStops(routeDoc);
+  if (stops.length === 0) return { hasRoute: false, stopNumber: null };
+
+  const cleanDenueAlt = placeId ? String(placeId).replace(/^plc_denue_/, "denue_") : "";
+  for (let i = 0; i < stops.length; i++) {
+    const st = stops[i];
+    if (placeId && (st.id === placeId || st.id === cleanDenueAlt)) {
+      return { hasRoute: true, stopNumber: i + 1 };
+    }
+    if (placeName && st.name && namesMatchPlace(placeName, st.name)) {
+      return { hasRoute: true, stopNumber: i + 1 };
+    }
+    if (
+      Number.isFinite(lat) &&
+      Number.isFinite(lng) &&
+      Number.isFinite(Number(st.lat)) &&
+      Number.isFinite(Number(st.lng))
+    ) {
+      const dist = haversineMeters(lat, lng, Number(st.lat), Number(st.lng));
+      if (dist !== null && dist <= 65) {
+        return { hasRoute: true, stopNumber: i + 1 };
+      }
+    }
+  }
+  return { hasRoute: true, stopNumber: null };
+}
+
+function getDriverPlannedRouteDoc(driverName) {
+  const rawDoc = getDriverRawRouteDocForSelectedDate(driverName);
+  if (rawDoc && getEffectiveAuditStops(rawDoc).length > 0) {
+    return rawDoc;
+  }
+  const slug = rbDriverSlug(driverName);
+  let routeDoc = allDriverRoutesTodayMap.get(`${selectedRouteDate}_${slug}`);
+  if (!routeDoc) {
+    for (const r of allDriverRoutesTodayMap.values()) {
+      if (String(r.driverName || "").toLowerCase() === String(driverName || "").toLowerCase()) {
+        routeDoc = r;
+        break;
+      }
+    }
+  }
+  return routeDoc || null;
+}
+
+function buildDriverTimelineData(driverName) {
+  if (!driverName) return { frames: [], events: [], stats: null };
+  const lowName = driverName.toLowerCase();
+  const slug = rbDriverSlug(driverName);
+  const frames = [];
+  const attendedPlannedNums = new Set();
+
+  const rawRouteDoc = getDriverRawRouteDocForSelectedDate(driverName);
+  const routeDoc = getDriverPlannedRouteDoc(driverName);
+  const plannedStops = getEffectiveAuditStops(routeDoc || rawRouteDoc);
+
+  // 1. Puntos de estela GPS (usa el más completo entre el GPS en vivo de esa fecha y el rastro archivado/sellado)
+  const locDoc = driverLocations.find(
+    (l) => l.id === slug || String(l.driverName || "").toLowerCase() === lowName
+  );
+  const liveTrail =
+    locDoc && locDoc.trailDate === selectedRouteDate && Array.isArray(locDoc.trail) ? locDoc.trail : [];
+  const archivedTrail = Array.isArray(rawRouteDoc?.archivedGpsTrail) ? rawRouteDoc.archivedGpsTrail : [];
+  const effectiveTrail = liveTrail.length >= archivedTrail.length ? liveTrail : archivedTrail;
+
+  if (effectiveTrail.length > 0) {
+    effectiveTrail.forEach((pt, idx) => {
+      if (typeof pt?.lat !== "number" || typeof pt?.lng !== "number") return;
+      const mins = parseHhMmToMinutes(pt.t);
+      frames.push({
+        kind: "gps",
+        lat: pt.lat,
+        lng: pt.lng,
+        hhmm: pt.t || "",
+        mins: mins !== null ? mins : idx * 0.1,
+        seqTie: idx * 0.001
+      });
+    });
+  }
+
+  // 2. Visitas sin venta de este chofer
+  const myVisits = routeVisitsList.filter(
+    (v) => String(v.driver || "").trim().toLowerCase() === lowName
+  );
+  myVisits.forEach((v, idx) => {
+    const place =
+      (v.placeId && allPlaces.find((p) => p.id === v.placeId)) ||
+      allPlaces.find((p) => namesMatchPlace(p.name, v.placeName));
+    const lat = typeof place?.lat === "number" ? place.lat : typeof v.driverLat === "number" ? v.driverLat : null;
+    const lng = typeof place?.lng === "number" ? place.lng : typeof v.driverLng === "number" ? v.driverLng : null;
+    if (lat === null || lng === null) return;
+    const { hhmm, mins } = isoToLocalHhMmAndMinutes(v.arrivedAtIso || v.createdAtIso);
+    const planInfo = findPlannedStopOrderForDriver(driverName, place?.id || v.placeId, place?.name || v.placeName, lat, lng);
+    if (planInfo.stopNumber !== null) attendedPlannedNums.add(planInfo.stopNumber);
+    const dwellMin = v.dwellSeconds ? Math.max(1, Math.round(Number(v.dwellSeconds) / 60)) : null;
+    frames.push({
+      kind: "visit",
+      id: v.id,
+      placeId: place?.id || v.placeId || "",
+      name: place?.name || v.placeName || "Negocio visitado",
+      address: place?.address || "",
+      lat,
+      lng,
+      hhmm: hhmm || "--:--",
+      mins: mins !== null ? mins : 720 + idx,
+      seqTie: 0.5 + idx * 0.001,
+      autoGeofence: Boolean(v.autoGeofence),
+      dwellMin,
+      reason: v.reason || "Sin compra",
+      distanceMeters: typeof v.distanceMeters === "number" ? v.distanceMeters : null,
+      inRoute: planInfo.stopNumber !== null,
+      plannedStopNum: planInfo.stopNumber,
+      driverHasRoute: planInfo.hasRoute
+    });
+  });
+
+  // 3. Ventas cerradas de este chofer
+  const mySales = routeSalesList.filter(
+    (s) => !isSaleCancelled(s) && String(s.driver || "").trim().toLowerCase() === lowName
+  );
+  mySales.forEach((s, idx) => {
+    const place =
+      (s.placeId && allPlaces.find((p) => p.id === s.placeId)) ||
+      allPlaces.find((p) => namesMatchPlace(p.name, s.customerName));
+    const lat = typeof place?.lat === "number" ? place.lat : typeof s.saleLat === "number" ? s.saleLat : null;
+    const lng = typeof place?.lng === "number" ? place.lng : typeof s.saleLng === "number" ? s.saleLng : null;
+    if (lat === null || lng === null) return;
+    const { hhmm, mins } = isoToLocalHhMmAndMinutes(s.createdAtIso);
+    const planInfo = findPlannedStopOrderForDriver(driverName, place?.id || s.placeId, place?.name || s.customerName, lat, lng);
+    if (planInfo.stopNumber !== null) attendedPlannedNums.add(planInfo.stopNumber);
+    frames.push({
+      kind: "sale",
+      id: s.id,
+      placeId: place?.id || s.placeId || "",
+      name: s.customerName || place?.name || "Venta",
+      address: place?.address || "",
+      lat,
+      lng,
+      hhmm: hhmm || "--:--",
+      mins: mins !== null ? mins : 720 + idx,
+      seqTie: 0.6 + idx * 0.001,
+      boxes: Number(s.totalBoxes) || 0,
+      amount: Number(s.totalAmount) || 0,
+      folio: s.folio || "",
+      inRoute: planInfo.stopNumber !== null,
+      plannedStopNum: planInfo.stopNumber,
+      driverHasRoute: planInfo.hasRoute
+    });
+  });
+
+  // 4. Detectar Paradas Asignadas en la Mañana que fueron OMITIDAS (pasó cerca vs nunca se acercó)
+  const realMovementFrames = [...frames];
+  let skippedNearCnt = 0;
+  let skippedFarCnt = 0;
+
+  plannedStops.forEach((st, idx) => {
+    const stopNum = idx + 1;
+    if (attendedPlannedNums.has(stopNum)) return;
+    const sLat = Number(st?.lat);
+    const sLng = Number(st?.lng);
+    if (!Number.isFinite(sLat) || !Number.isFinite(sLng)) return;
+
+    let minDist = null;
+    let closestFrame = null;
+    for (const rf of realMovementFrames) {
+      const d = haversineMeters(sLat, sLng, rf.lat, rf.lng);
+      if (d !== null && (minDist === null || d < minDist)) {
+        minDist = d;
+        closestFrame = rf;
+      }
+    }
+
+    if (closestFrame && minDist !== null && minDist <= 380) {
+      skippedNearCnt++;
+      frames.push({
+        kind: "skipped_near",
+        placeId: st.id || "",
+        name: st.name || `Parada #${stopNum}`,
+        address: st.address || "",
+        lat: sLat,
+        lng: sLng,
+        hhmm: closestFrame.hhmm ? `~${closestFrame.hhmm}` : "--:--",
+        mins: closestFrame.mins + 0.04 + idx * 0.001,
+        seqTie: 0.8 + idx * 0.001,
+        plannedStopNum: stopNum,
+        closestMeters: Math.round(minDist)
+      });
+    } else {
+      skippedFarCnt++;
+      frames.push({
+        kind: "skipped_far",
+        placeId: st.id || "",
+        name: st.name || `Parada #${stopNum}`,
+        address: st.address || "",
+        lat: sLat,
+        lng: sLng,
+        hhmm: "Sin ir",
+        mins: 24 * 60 + stopNum,
+        seqTie: 0.9 + idx * 0.001,
+        plannedStopNum: stopNum,
+        closestMeters: minDist !== null ? Math.round(minDist) : null
+      });
+    }
+  });
+
+  frames.sort((a, b) => a.mins - b.mins || a.seqTie - b.seqTie);
+
+  // Numerar eventos comerciales reales (1º, 2º, 3º...) + omitidas + inicio/fin GPS
+  let stopSeq = 0;
+  let salesCnt = 0;
+  let visitsCnt = 0;
+  let offRouteCnt = 0;
+  const events = [];
+
+  const firstRealIdx = frames.findIndex((f) => f.kind === "gps");
+  if (firstRealIdx === 0) {
+    events.push({
+      frameIdx: 0,
+      badge: "▶",
+      hhmm: frames[0].hhmm || "--:--",
+      title: "Inicio de trazo GPS",
+      sub: `Primer punto recibido (${frames[0].lat.toFixed(4)}, ${frames[0].lng.toFixed(4)})`,
+      tone: "neutral",
+      lat: frames[0].lat,
+      lng: frames[0].lng
+    });
+  }
+
+  frames.forEach((f, idx) => {
+    if (f.kind === "visit") {
+      stopSeq++;
+      visitsCnt++;
+      const isOff = f.driverHasRoute && !f.inRoute;
+      if (isOff) offRouteCnt++;
+      f.realSeq = stopSeq;
+      const routeTag = !f.driverHasRoute
+        ? ""
+        : f.inRoute
+          ? `🧭 Parada #${f.plannedStopNum} de ruta`
+          : `⚠️ FUERA DE RUTA`;
+      const dwellTxt = f.dwellMin ? `${f.dwellMin} min detenido` : f.reason;
+      events.push({
+        frameIdx: idx,
+        badge: `${stopSeq}º`,
+        hhmm: f.hhmm,
+        title: f.name,
+        sub: [routeTag, dwellTxt, f.address].filter(Boolean).join(" • "),
+        tone: isOff ? "offroute" : "visit",
+        lat: f.lat,
+        lng: f.lng
+      });
+    } else if (f.kind === "sale") {
+      stopSeq++;
+      salesCnt++;
+      const isOff = f.driverHasRoute && !f.inRoute;
+      if (isOff) offRouteCnt++;
+      f.realSeq = stopSeq;
+      const routeTag = !f.driverHasRoute
+        ? ""
+        : f.inRoute
+          ? `🧭 Parada #${f.plannedStopNum} de ruta`
+          : `⚡ Venta espontánea fuera de ruta`;
+      events.push({
+        frameIdx: idx,
+        badge: `${stopSeq}º`,
+        hhmm: f.hhmm,
+        title: `${f.name} — ${formatCurrency(f.amount)} (${f.boxes}c)`,
+        sub: [routeTag, f.folio, f.address].filter(Boolean).join(" • "),
+        tone: "sale",
+        lat: f.lat,
+        lng: f.lng
+      });
+    } else if (f.kind === "skipped_near") {
+      events.push({
+        frameIdx: idx,
+        badge: "✕",
+        hhmm: f.hhmm,
+        title: `Omitió cerca: ${f.name}`,
+        sub: `Era Parada #${f.plannedStopNum} • Anduvo a ${f.closestMeters} m y no paró${f.address ? ` • ${f.address}` : ""}`,
+        tone: "skipped",
+        lat: f.lat,
+        lng: f.lng
+      });
+    } else if (f.kind === "skipped_far") {
+      const distHint =
+        f.closestMeters !== null
+          ? `Lo más cerca que pasó: ${(f.closestMeters / 1000).toFixed(1)} km`
+          : "Sin acercarse";
+      events.push({
+        frameIdx: idx,
+        badge: "✕",
+        hhmm: "Sin ir",
+        title: `Sin visitar: ${f.name}`,
+        sub: `Era Parada #${f.plannedStopNum} de la mañana • ${distHint}${f.address ? ` • ${f.address}` : ""}`,
+        tone: "skipped",
+        lat: f.lat,
+        lng: f.lng
+      });
+    }
+  });
+
+  // Último punto GPS real
+  let lastGpsIdx = -1;
+  for (let i = frames.length - 1; i >= 0; i--) {
+    if (frames[i].kind === "gps") {
+      lastGpsIdx = i;
+      break;
+    }
+  }
+  if (lastGpsIdx > 0) {
+    const lastF = frames[lastGpsIdx];
+    events.push({
+      frameIdx: lastGpsIdx,
+      badge: "⏹",
+      hhmm: lastF.hhmm || "--:--",
+      title: "Última ubicación GPS del día",
+      sub: `Coordenadas (${lastF.lat.toFixed(4)}, ${lastF.lng.toFixed(4)})`,
+      tone: "neutral",
+      lat: lastF.lat,
+      lng: lastF.lng
+    });
+  }
+
+  const realTimedFrames = frames.filter((f) => f.kind === "gps" || f.kind === "visit" || f.kind === "sale");
+  const firstTime = realTimedFrames[0]?.hhmm || "--:--";
+  const lastTime = realTimedFrames[realTimedFrames.length - 1]?.hhmm || "--:--";
+
+  return {
+    frames,
+    events,
+    stats: {
+      firstTime,
+      lastTime,
+      salesCnt,
+      visitsCnt,
+      offRouteCnt,
+      totalPlanned: plannedStops.length,
+      attendedPlannedCnt: attendedPlannedNums.size,
+      skippedCnt: skippedNearCnt + skippedFarCnt,
+      skippedNearCnt
+    }
+  };
+}
+
+let tlZoomBound = false;
+let tlEventFilterMode = "all";
+let tlShowPlannedRoute = true;
+const tlFullPlannedGeomCache = new Map();
+const tlVisitedStreetGeomCache = new Map();
+
+function getOrFetchFullPlannedRouteForTimeline(routeDoc) {
+  const rawStops = getEffectiveAuditStops(routeDoc);
+  const stops = rawStops.filter((s) => Number.isFinite(Number(s?.lat)) && Number.isFinite(Number(s?.lng)));
+  if (stops.length === 0) return [];
+  const base = routeDoc.baseLocation || getStoreBaseLocation();
+  const cacheKey = `${routeDoc.id}:${stops.map((s) => `${Number(s.lat).toFixed(4)},${Number(s.lng).toFixed(4)}`).join("|")}`;
+  const entry = tlFullPlannedGeomCache.get(routeDoc.id);
+  if (entry && entry.key === cacheKey && Array.isArray(entry.latLngs)) {
+    return entry.latLngs;
+  }
+  const fallbackPts = [
+    ...(base && Number.isFinite(base.lat) && Number.isFinite(base.lng) ? [[base.lat, base.lng]] : []),
+    ...stops.map((s) => [Number(s.lat), Number(s.lng)])
+  ];
+  if (!entry || entry.pendingKey !== cacheKey) {
+    tlFullPlannedGeomCache.set(routeDoc.id, {
+      key: entry?.key || "",
+      pendingKey: cacheKey,
+      latLngs: entry?.latLngs || fallbackPts
+    });
+    const endCoord = routeDoc.includeReturnToBase !== false ? base : null;
+    computeOrderedRouteMetrics({ startCoord: base, stops, endCoord })
+      .then((res) => {
+        const cur = tlFullPlannedGeomCache.get(routeDoc.id);
+        if (cur && cur.pendingKey === cacheKey && Array.isArray(res.latLngs) && res.latLngs.length >= 2) {
+          tlFullPlannedGeomCache.set(routeDoc.id, {
+            key: cacheKey,
+            pendingKey: "",
+            latLngs: res.latLngs
+          });
+          if (tlPanelOpen && tlSelectedDriver) {
+            renderTimelineOnMapAndList();
+          }
+        }
+      })
+      .catch(() => {});
+  }
+  return entry?.latLngs || fallbackPts;
+}
+
+function getOrFetchVisitedStopsStreetGeom(driverKey, stopWaypoints) {
+  if (!Array.isArray(stopWaypoints) || stopWaypoints.length < 2) return [];
+  const cacheKey = `${selectedRouteDate}:${driverKey}:${stopWaypoints.map((w) => `${w.lat.toFixed(4)},${w.lng.toFixed(4)}`).join("|")}`;
+  const entry = tlVisitedStreetGeomCache.get(driverKey);
+  if (entry && entry.key === cacheKey && Array.isArray(entry.latLngs)) {
+    return entry.latLngs;
+  }
+  const fallbackPts = stopWaypoints.map((w) => [w.lat, w.lng]);
+  if (!entry || entry.pendingKey !== cacheKey) {
+    tlVisitedStreetGeomCache.set(driverKey, {
+      key: entry?.key || "",
+      pendingKey: cacheKey,
+      latLngs: entry?.latLngs || fallbackPts
+    });
+    computeOrderedRouteMetrics({
+      startCoord: stopWaypoints[0],
+      stops: stopWaypoints.slice(1),
+      endCoord: null
+    })
+      .then((res) => {
+        const cur = tlVisitedStreetGeomCache.get(driverKey);
+        if (cur && cur.pendingKey === cacheKey && Array.isArray(res.latLngs) && res.latLngs.length >= 2) {
+          tlVisitedStreetGeomCache.set(driverKey, {
+            key: cacheKey,
+            pendingKey: "",
+            latLngs: res.latLngs
+          });
+          if (tlPanelOpen && tlSelectedDriver) {
+            renderTimelineOnMapAndList();
+          }
+        }
+      })
+      .catch(() => {});
+  }
+  return entry?.latLngs || fallbackPts;
+}
+
+function ensureTlZoomHook() {
+  if (tlZoomBound || !leafletMap) return;
+  tlZoomBound = true;
+  leafletMap.on("zoomend", () => {
+    if (tlPanelOpen && tlSelectedDriver) {
+      renderTimelineOnMapAndList();
+    }
+  });
+}
+
+function getTimelineClaimedPlaceIds() {
+  if (!tlPanelOpen || !tlSelectedDriver) return null;
+  const { frames } = buildDriverTimelineData(tlSelectedDriver);
+  const ids = new Set();
+  for (const f of frames) {
+    if (f.kind === "gps") continue;
+    if (f.placeId) {
+      ids.add(f.placeId);
+      if (String(f.placeId).startsWith("denue_")) {
+        ids.add(String(f.placeId).replace(/^denue_/, "plc_denue_"));
+      }
+    }
+  }
+  return ids;
+}
+
+function computeDeclutteredStopLatLngs(stopFrames) {
+  if (!leafletMap || stopFrames.length === 0) {
+    return stopFrames.map((f) => ({ frame: f, displayLat: f.lat, displayLng: f.lng, fanned: false }));
+  }
+  const pts = stopFrames.map((f) => ({
+    frame: f,
+    pt: leafletMap.latLngToContainerPoint([f.lat, f.lng])
+  }));
+  const clusters = [];
+  for (const item of pts) {
+    let matched = null;
+    for (const cl of clusters) {
+      const dx = item.pt.x - cl.cx;
+      const dy = item.pt.y - cl.cy;
+      if (Math.hypot(dx, dy) < 28) {
+        matched = cl;
+        break;
+      }
+    }
+    if (matched) {
+      matched.items.push(item);
+      const n = matched.items.length;
+      matched.cx = matched.items.reduce((s, x) => s + x.pt.x, 0) / n;
+      matched.cy = matched.items.reduce((s, x) => s + x.pt.y, 0) / n;
+    } else {
+      clusters.push({ cx: item.pt.x, cy: item.pt.y, items: [item] });
+    }
+  }
+
+  const out = [];
+  for (const cl of clusters) {
+    if (cl.items.length === 1) {
+      const f = cl.items[0].frame;
+      out.push({ frame: f, displayLat: f.lat, displayLng: f.lng, fanned: false });
+      continue;
+    }
+    const n = cl.items.length;
+    const radiusPx = Math.max(19, Math.min(44, n * 6.5));
+
+    // Calcular ángulo geográfico real desde el centro del grupo para conservar arriba/abajo/izq/der reales
+    const withBearing = cl.items.map((it, idx) => {
+      const dx = it.pt.x - cl.cx;
+      const dy = it.pt.y - cl.cy;
+      const bearing =
+        Math.hypot(dx, dy) > 0.5
+          ? Math.atan2(dy, dx)
+          : (2 * Math.PI * idx) / n - Math.PI / 2;
+      return { it, bearing };
+    });
+    withBearing.sort((a, b) => a.bearing - b.bearing);
+
+    // Relajar ángulos vecinos si están demasiado pegados (< minGap rad) sin invertir su orientación real
+    const angles = withBearing.map((w) => w.bearing);
+    const minGap = Math.min(Math.PI * 0.62, (2 * Math.PI) / n);
+    for (let pass = 0; pass < 8; pass++) {
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n;
+        let diff = angles[j] - angles[i];
+        if (j === 0) diff += 2 * Math.PI;
+        if (diff < minGap) {
+          const push = (minGap - diff) * 0.5;
+          angles[i] -= push;
+          angles[j] += push;
+        }
+      }
+    }
+
+    withBearing.forEach((w, k) => {
+      const ang = angles[k];
+      const ox = cl.cx + radiusPx * Math.cos(ang);
+      const oy = cl.cy + radiusPx * Math.sin(ang);
+      const dispLatLng = leafletMap.containerPointToLatLng([ox, oy]);
+      out.push({
+        frame: w.it.frame,
+        displayLat: dispLatLng.lat,
+        displayLng: dispLatLng.lng,
+        fanned: true
+      });
+    });
+  }
+  return out;
+}
+
+function renderTimelineOnMapAndList() {
+  const layer = ensureTlOverlayLayer();
+  ensureTlZoomHook();
+  if (layer) layer.clearLayers();
+  const listEl = document.getElementById("tlEventsList");
+  const sideRailEl = document.getElementById("tlSideRail");
+  const statsEl = document.getElementById("tlSummaryStats");
+  const sliderEl = document.getElementById("tlRangeSlider");
+  const timeBadgeEl = document.getElementById("tlCurrentTimeBadge");
+
+  const promptBoxEl = document.getElementById("tlDriverPromptBox");
+  const playerWrapEl = document.getElementById("tlPlayerControlsWrap");
+  const titleEl = document.getElementById("tlPanelTitle");
+  const headerBtn = document.getElementById("btnToggleTimelinePanel");
+
+  if (!tlPanelOpen) {
+    if (sideRailEl) sideRailEl.style.display = "none";
+    return;
+  }
+
+  if (!tlSelectedDriver) {
+    tlFrames = [];
+    if (promptBoxEl) promptBoxEl.style.display = "block";
+    if (playerWrapEl) playerWrapEl.style.display = "none";
+    if (sideRailEl && sideRailEl.style.display !== "none") {
+      sideRailEl.style.display = "none";
+      setTimeout(() => leafletMap?.invalidateSize(), 60);
+    }
+    if (titleEl) titleEl.textContent = "🎬 Auditoría Cronológica";
+    if (statsEl) statsEl.textContent = "Elige chofer";
+    if (headerBtn) headerBtn.textContent = "🎬 Cronología";
+    if (typeof updateDaySealButtonsUI === "function") updateDaySealButtonsUI();
+    return;
+  }
+
+  if (promptBoxEl) promptBoxEl.style.display = "none";
+  if (playerWrapEl) playerWrapEl.style.display = "block";
+  if (sideRailEl && sideRailEl.style.display === "none") {
+    sideRailEl.style.display = "flex";
+    setTimeout(() => leafletMap?.invalidateSize(), 60);
+  }
+  const isDrvSealed = Boolean(getDriverRawRouteDocForSelectedDate(tlSelectedDriver)?.sealed);
+  if (titleEl) titleEl.textContent = `${isDrvSealed ? "🔒" : "🎬"} ${tlSelectedDriver}`;
+  if (headerBtn) headerBtn.textContent = `🎬 ${tlSelectedDriver.split(" ")[0]}`;
+  if (typeof updateDaySealButtonsUI === "function") updateDaySealButtonsUI();
+
+  const { frames, events, stats } = buildDriverTimelineData(tlSelectedDriver);
+  tlFrames = frames;
+
+  if (frames.length === 0) {
+    if (statsEl) statsEl.textContent = "Sin registros en esta fecha";
+    if (sliderEl) {
+      sliderEl.min = "0";
+      sliderEl.max = "0";
+      sliderEl.value = "0";
+    }
+    if (timeBadgeEl) timeBadgeEl.textContent = "🕒 --:--";
+    if (listEl) {
+      listEl.innerHTML = `<div style="font-size:0.8rem;color:#64748b;padding:12px;text-align:center;">Sin puntos GPS, visitas ni ventas el ${escapeHtml(selectedRouteDate)}.</div>`;
+    }
+    return;
+  }
+
+  const maxIdx = frames.length - 1;
+  const effectiveIdx = tlStepIndex < 0 || tlStepIndex > maxIdx ? maxIdx : tlStepIndex;
+  const isFullMode = tlStepIndex < 0;
+
+  if (sliderEl) {
+    sliderEl.min = "0";
+    sliderEl.max = String(maxIdx);
+    sliderEl.value = String(effectiveIdx);
+  }
+  if (timeBadgeEl) {
+    timeBadgeEl.textContent = isFullMode
+      ? `🕒 Día completo`
+      : `🕒 ${frames[effectiveIdx]?.hhmm || "--:--"}`;
+  }
+  if (statsEl && stats) {
+    const routePart =
+      stats.totalPlanned > 0
+        ? `🧭 Ruta: ${stats.attendedPlannedCnt}/${stats.totalPlanned} cumplidas${stats.skippedCnt > 0 ? ` (${stats.skippedCnt} sin visitar)` : ""} • `
+        : "";
+    statsEl.textContent = `${routePart}🕒 ${stats.firstTime}–${stats.lastTime} • 🟢 ${stats.salesCnt} vta • 🔴 ${stats.visitsCnt} vis${stats.offRouteCnt > 0 ? ` • ⚠️ ${stats.offRouteCnt} desvío` : ""}`;
+  }
+
+  if (layer && typeof window.L !== "undefined") {
+    // 1. Dibujar Ruta Asignada Completa de la Mañana por calles reales (azul punteado #0284c7)
+    if (tlShowPlannedRoute) {
+      const plannedDoc = getDriverPlannedRouteDoc(tlSelectedDriver);
+      if (plannedDoc) {
+        const plannedLatLngs = getOrFetchFullPlannedRouteForTimeline(plannedDoc);
+        if (plannedLatLngs.length >= 2) {
+          window.L.polyline(plannedLatLngs, {
+            color: "#ffffff",
+            weight: 6,
+            opacity: 0.75,
+            interactive: false
+          }).addTo(layer);
+          window.L.polyline(plannedLatLngs, {
+            color: "#0284c7",
+            weight: 3.5,
+            opacity: 0.85,
+            dashArray: "8, 7",
+            interactive: false
+          }).addTo(layer);
+        }
+      }
+    }
+
+    const sliced = frames.slice(0, effectiveIdx + 1);
+    const baseLoc = getStoreBaseLocation();
+
+    // 2A. Conectar por calles reales (OSRM morado punteado) la secuencia de visitas/ventas hechas antes o entre tramos sin GPS continuo
+    const visitedStopsInSlice = sliced.filter((f) => f.kind === "visit" || f.kind === "sale");
+    if (visitedStopsInSlice.length >= 1) {
+      const waypoints = [
+        ...(baseLoc && Number.isFinite(baseLoc.lat) && Number.isFinite(baseLoc.lng)
+          ? [{ lat: baseLoc.lat, lng: baseLoc.lng }]
+          : []),
+        ...visitedStopsInSlice.map((s) => ({ lat: s.lat, lng: s.lng }))
+      ];
+      if (waypoints.length >= 2) {
+        const streetVisitedLatLngs = getOrFetchVisitedStopsStreetGeom(
+          `${rbDriverSlug(tlSelectedDriver)}_${effectiveIdx === maxIdx ? "full" : effectiveIdx}`,
+          waypoints
+        );
+        if (streetVisitedLatLngs.length >= 2) {
+          window.L.polyline(streetVisitedLatLngs, {
+            color: "#7c3aed",
+            weight: 3,
+            opacity: 0.65,
+            dashArray: "5, 7",
+            interactive: false
+          }).addTo(layer);
+        }
+      }
+    }
+
+    // 2B. Trazo GPS real punto por punto (morado sólido grueso #6d28d9 ajustado a calles)
+    const gpsOnlyFrames = sliced.filter((f) => f.kind === "gps");
+    if (gpsOnlyFrames.length >= 2) {
+      const matchedSegs = getOrFetchMatchedTrailSegments(rbDriverSlug(tlSelectedDriver), gpsOnlyFrames);
+      for (const seg of matchedSegs) {
+        if (Array.isArray(seg) && seg.length >= 2) {
+          window.L.polyline(seg, {
+            color: "#ffffff",
+            weight: 7,
+            opacity: 0.85,
+            interactive: false
+          }).addTo(layer);
+          window.L.polyline(seg, {
+            color: "#6d28d9",
+            weight: 4.5,
+            opacity: 0.96,
+            interactive: false
+          }).addTo(layer);
+        }
+      }
+    }
+
+    // Círculos numerados compactos (1..N) + paradas no visitadas (✕ limpia y discreta) con separación automática en abanico
+    const stopFrames = sliced.filter(
+      (f) =>
+        ((f.kind === "visit" || f.kind === "sale") && f.realSeq) ||
+        f.kind === "skipped_near" ||
+        f.kind === "skipped_far"
+    );
+    const decluttered = computeDeclutteredStopLatLngs(stopFrames);
+
+    for (const { frame: f, displayLat, displayLng, fanned } of decluttered) {
+      const isSkipped = f.kind === "skipped_near" || f.kind === "skipped_far";
+      if (fanned) {
+        window.L.polyline(
+          [
+            [f.lat, f.lng],
+            [displayLat, displayLng]
+          ],
+          { color: "#475569", weight: 1.5, opacity: 0.75 }
+        ).addTo(layer);
+        window.L.circleMarker([f.lat, f.lng], {
+          radius: 3.5,
+          color: "#ffffff",
+          weight: 1,
+          fillColor: "#334155",
+          fillOpacity: 0.9,
+          interactive: false
+        }).addTo(layer);
+      }
+
+      const isSelectedStop = !isFullMode && frames[effectiveIdx] === f;
+      const isOffRoute = !isSkipped && f.driverHasRoute && !f.inRoute;
+
+      if (isSkipped) {
+        const isNearSkip = f.kind === "skipped_near";
+        const skipBg = isNearSkip ? "#ffe4e6" : "#f1f5f9";
+        const skipBorder = isNearSkip ? "#e11d48" : "#64748b";
+        const skipTxtCol = isNearSkip ? "#be123c" : "#475569";
+        const skipIcon = window.L.divIcon({
+          className: "salinas-div-icon",
+          html: `<div class="tl-stop-num-badge ${isSelectedStop ? "is-selected" : ""}" style="width:20px;height:20px;background:${skipBg};color:${skipTxtCol};border:2px solid ${skipBorder};font-size:10px;box-shadow:0 1px 4px rgba(15,23,42,0.28);">✕</div>`,
+          iconSize: [20, 20],
+          iconAnchor: [10, 10]
+        });
+        const skipHint = isNearSkip
+          ? `Omitida al pasar cerca (${f.hhmm}) • Anduvo a ${f.closestMeters} m y no paró`
+          : `Sin visitar en el día • Era Parada #${f.plannedStopNum} de su ruta`;
+        const skipMarker = window.L.marker([displayLat, displayLng], {
+          icon: skipIcon,
+          zIndexOffset: isSelectedStop ? 1440 : 1180
+        }).addTo(layer);
+        skipMarker.bindTooltip(
+          `<div style="font-family:sans-serif;font-size:0.76rem;line-height:1.35;">
+            <strong style="color:${skipTxtCol};">✕ Sin visitar (Parada #${f.plannedStopNum}) — ${escapeHtml(f.name)}</strong><br>
+            <span>${escapeHtml(skipHint)}</span>
+          </div>`,
+          { direction: "top", offset: [0, -10], opacity: 0.97 }
+        );
+        skipMarker.on("click", () => {
+          const svUrl = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${f.lat},${f.lng}`;
+          window.L.popup({ maxWidth: 275 })
+            .setLatLng([f.lat, f.lng])
+            .setContent(
+              `<div style="font-family:sans-serif;">
+                <div style="font-size:0.72rem;font-weight:900;color:${skipTxtCol};">✕ PARADA DE RUTA #${f.plannedStopNum} SIN VISITAR</div>
+                <strong style="font-size:0.93rem;color:#0f172a;display:block;margin-top:2px;">${escapeHtml(f.name)}</strong>
+                ${f.address ? `<div style="font-size:0.76rem;color:#475569;margin-top:2px;">📍 ${escapeHtml(f.address)}</div>` : ""}
+                <div style="font-size:0.77rem;font-weight:800;color:${skipTxtCol};margin-top:4px;">${escapeHtml(skipHint)}</div>
+                <div style="margin-top:6px;">
+                  <a href="${svUrl}" target="_blank" rel="noopener" style="font-size:0.75rem;font-weight:800;color:#6d28d9;text-decoration:underline;">👁️ Ver fachada en Street View ↗</a>
+                </div>
+              </div>`
+            )
+            .openOn(leafletMap);
+        });
+        continue;
+      }
+
+      const bg = f.kind === "sale" ? "#16a34a" : isOffRoute ? "#d97706" : "#b91c1c";
+      const seqIcon = window.L.divIcon({
+        className: "salinas-div-icon",
+        html: `<div class="tl-stop-num-badge ${isSelectedStop ? "is-selected" : ""}" style="background:${bg};">${f.realSeq}</div>`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
+      });
+
+      const routeStatusTxt = !f.driverHasRoute
+        ? "Sin ruta asignada"
+        : f.inRoute
+          ? `🧭 Parada #${f.plannedStopNum} de su ruta`
+          : "⚠️ FUERA DE SU RUTA ASIGNADA";
+      const dwellOrSaleTxt =
+        f.kind === "sale"
+          ? `🟢 Venta: ${formatCurrency(f.amount)} (${f.boxes}c)`
+          : `🔴 Sin compra${f.dwellMin ? ` • ${f.dwellMin} min detenido` : ""}`;
+
+      const seqMarker = window.L.marker([displayLat, displayLng], {
+        icon: seqIcon,
+        zIndexOffset: isSelectedStop ? 1450 : 1250
+      }).addTo(layer);
+
+      seqMarker.bindTooltip(
+        `<div style="font-family:sans-serif;font-size:0.76rem;line-height:1.35;">
+          <strong>#${f.realSeq} · 🕒 ${escapeHtml(f.hhmm)} — ${escapeHtml(f.name)}</strong><br>
+          <span>${escapeHtml(dwellOrSaleTxt)}</span><br>
+          <span style="color:${isOffRoute ? "#b45309" : "#0369a1"};font-weight:800;">${escapeHtml(routeStatusTxt)}</span>
+        </div>`,
+        { direction: "top", offset: [0, -10], opacity: 0.97 }
+      );
+
+      seqMarker.on("click", () => {
+        const svUrl = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${f.lat},${f.lng}`;
+        window.L.popup({ maxWidth: 275 })
+          .setLatLng([f.lat, f.lng])
+          .setContent(
+            `<div style="font-family:sans-serif;">
+              <div style="font-size:0.72rem;font-weight:900;color:#6d28d9;">ORDEN REAL #${f.realSeq} • 🕒 ${escapeHtml(f.hhmm)}</div>
+              <strong style="font-size:0.93rem;color:#0f172a;display:block;margin-top:2px;">${escapeHtml(f.name)}</strong>
+              ${f.address ? `<div style="font-size:0.76rem;color:#475569;margin-top:2px;">📍 ${escapeHtml(f.address)}</div>` : ""}
+              <div style="font-size:0.78rem;font-weight:700;margin-top:4px;color:#334155;">${escapeHtml(dwellOrSaleTxt)}</div>
+              <div style="font-size:0.77rem;font-weight:800;color:${isOffRoute ? "#b45309" : "#0369a1"};margin-top:3px;">
+                ${escapeHtml(routeStatusTxt)}
+              </div>
+              <div style="margin-top:6px;">
+                <a href="${svUrl}" target="_blank" rel="noopener" style="font-size:0.75rem;font-weight:800;color:#6d28d9;text-decoration:underline;">👁️ Ver fachada en Street View ↗</a>
+              </div>
+            </div>`
+          )
+          .openOn(leafletMap);
+      });
+    }
+
+    // Cursor móvil del chofer cuando se reproduce paso a paso
+    if (!isFullMode && frames[effectiveIdx]) {
+      const cur = frames[effectiveIdx];
+      const cursorIcon = window.L.divIcon({
+        className: "salinas-div-icon",
+        html: `<div style="background:#6d28d9;color:#fff;font-size:11.5px;font-weight:900;padding:4px 9px;border-radius:999px;border:2.5px solid #fde047;white-space:nowrap;box-shadow:0 4px 12px rgba(109,40,217,0.65);">🚗 ${escapeHtml(cur.hhmm || "")}</div>`,
+        iconSize: [78, 26],
+        iconAnchor: [39, 13]
+      });
+      window.L.marker([cur.lat, cur.lng], { icon: cursorIcon, zIndexOffset: 1500, interactive: false }).addTo(layer);
+    }
+  }
+
+  // Riel lateral cronológico al lado del mapa
+  if (listEl) {
+    const visibleEvents =
+      tlEventFilterMode === "offroute"
+        ? events.filter((ev) => ev.tone === "offroute")
+        : tlEventFilterMode === "skipped"
+          ? events.filter((ev) => ev.tone === "skipped")
+          : events;
+
+    if (visibleEvents.length === 0) {
+      const emptyMsg =
+        tlEventFilterMode === "skipped"
+          ? "¡Excelente! No omitió ninguna parada de su ruta asignada."
+          : tlEventFilterMode === "offroute"
+            ? "Sin paradas fuera de ruta en esta fecha."
+            : "Sin eventos registrados.";
+      listEl.innerHTML = `<div style="font-size:0.79rem;color:#64748b;padding:14px;text-align:center;">${emptyMsg}</div>`;
+    } else {
+      listEl.innerHTML = visibleEvents
+        .map((ev) => {
+          const isCurrent = !isFullMode && ev.frameIdx === effectiveIdx;
+          const badgeBg =
+            ev.tone === "sale"
+              ? "#16a34a"
+              : ev.tone === "offroute"
+                ? "#d97706"
+                : ev.tone === "skipped"
+                  ? "#64748b"
+                  : ev.tone === "visit"
+                    ? "#b91c1c"
+                    : "#5b21b6";
+          const extraCardStyle =
+            ev.tone === "skipped"
+              ? "border-left:4px solid #94a3b8;background:#f8fafc;"
+              : "";
+          return `
+            <div class="tl-event-card ${isCurrent ? "is-active" : ""} ${ev.tone === "offroute" ? "is-offroute" : ""}" style="${extraCardStyle}" data-tl-jump="${ev.frameIdx}">
+              <span style="min-width:24px;height:24px;padding:0 6px;border-radius:999px;background:${badgeBg};color:#fff;font-size:0.7rem;font-weight:900;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">${escapeHtml(ev.badge.replace("º", ""))}</span>
+              <div style="min-width:0;flex:1;">
+                <div style="font-size:0.79rem;line-height:1.25;">
+                  <strong style="color:${ev.tone === "skipped" ? "#475569" : "#6d28d9"};">${escapeHtml(ev.hhmm)}</strong>
+                  <span style="font-weight:800;color:#0f172a;margin-left:4px;">${escapeHtml(ev.title)}</span>
+                </div>
+                <div style="font-size:0.72rem;color:#475569;margin-top:2px;line-height:1.3;">${escapeHtml(ev.sub)}</div>
+              </div>
+            </div>
+          `;
+        })
+        .join("");
+    }
+  }
+}
+
+function refreshTimelineOverlayIfOpen() {
+  if (!tlPanelOpen) return;
+  populateTlDriverSelect();
+  renderTimelineOnMapAndList();
+}
+
+function setTimelinePanelOpen(open) {
+  tlPanelOpen = Boolean(open);
+  const panel = document.getElementById("mapTimelinePanel");
+  const btn = document.getElementById("btnToggleTimelinePanel");
+  if (panel) panel.style.display = tlPanelOpen ? "block" : "none";
+  if (btn) {
+    btn.classList.toggle("btn-primary", tlPanelOpen);
+    btn.classList.toggle("btn-outline", !tlPanelOpen);
+    btn.style.background = tlPanelOpen ? "#6d28d9" : "";
+    btn.style.color = tlPanelOpen ? "#ffffff" : "#6d28d9";
+  }
+  if (!tlPanelOpen) {
+    stopTlPlayback();
+    tlSelectedDriver = "";
+    const sideRailEl = document.getElementById("tlSideRail");
+    if (sideRailEl) sideRailEl.style.display = "none";
+    if (btn) btn.textContent = "🎬 Cronología";
+    if (tlOverlayLayer) tlOverlayLayer.clearLayers();
+    renderGpsMapAndChips();
+    setTimeout(() => leafletMap?.invalidateSize(), 60);
+    return;
+  }
+  tlSelectedDriver = "";
+  tlStepIndex = -1;
+  populateTlDriverSelect();
+  renderTimelineOnMapAndList();
+}
+
+document.getElementById("btnToggleTimelinePanel")?.addEventListener("click", () => {
+  setTimelinePanelOpen(!tlPanelOpen);
+});
+document.getElementById("btnCloseTimelinePanel")?.addEventListener("click", () => {
+  setTimelinePanelOpen(false);
+});
+document.getElementById("tlDriverQuickButtons")?.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-tl-pick-driver]");
+  if (!btn) return;
+  stopTlPlayback();
+  tlSelectedDriver = btn.dataset.tlPickDriver || "";
+  tlStepIndex = -1;
+  renderGpsMapAndChips();
+  if (tlFrames.length > 1 && leafletMap) {
+    leafletMap.fitBounds(tlFrames.map((f) => [f.lat, f.lng]), { padding: [38, 38], maxZoom: 15 });
+  }
+});
+
+document.getElementById("tlDriverSelect")?.addEventListener("change", (e) => {
+  stopTlPlayback();
+  tlSelectedDriver = e.target.value;
+  tlStepIndex = -1;
+  renderGpsMapAndChips();
+  if (tlFrames.length > 1 && leafletMap) {
+    leafletMap.fitBounds(tlFrames.map((f) => [f.lat, f.lng]), { padding: [38, 38], maxZoom: 15 });
+  }
+});
+document.getElementById("tlRangeSlider")?.addEventListener("input", (e) => {
+  stopTlPlayback();
+  tlStepIndex = Number(e.target.value);
+  renderTimelineOnMapAndList();
+});
+document.getElementById("btnTlShowFull")?.addEventListener("click", () => {
+  stopTlPlayback();
+  tlStepIndex = -1;
+  renderTimelineOnMapAndList();
+});
+document.getElementById("btnTlPrev")?.addEventListener("click", () => {
+  stopTlPlayback();
+  if (tlFrames.length === 0) return;
+  tlStepIndex = tlStepIndex <= 0 ? 0 : tlStepIndex - 1;
+  renderTimelineOnMapAndList();
+});
+document.getElementById("btnTlNext")?.addEventListener("click", () => {
+  stopTlPlayback();
+  if (tlFrames.length === 0) return;
+  tlStepIndex = tlStepIndex < 0 ? 0 : Math.min(tlFrames.length - 1, tlStepIndex + 1);
+  renderTimelineOnMapAndList();
+});
+document.getElementById("btnTlPlayPause")?.addEventListener("click", () => {
+  if (tlPlayTimer) {
+    stopTlPlayback();
+    return;
+  }
+  if (tlFrames.length === 0) return;
+  if (tlStepIndex < 0 || tlStepIndex >= tlFrames.length - 1) {
+    tlStepIndex = 0;
+  }
+  const btn = document.getElementById("btnTlPlayPause");
+  if (btn) btn.textContent = "⏸ Pausa";
+  renderTimelineOnMapAndList();
+  tlPlayTimer = setInterval(() => {
+    if (tlStepIndex >= tlFrames.length - 1) {
+      stopTlPlayback();
+      return;
+    }
+    tlStepIndex++;
+    renderTimelineOnMapAndList();
+  }, 550);
+});
+document.getElementById("tlShowPlannedRouteChk")?.addEventListener("change", (e) => {
+  tlShowPlannedRoute = Boolean(e.target.checked);
+  renderTimelineOnMapAndList();
+});
+
+document.querySelectorAll("button[data-tl-evfilter]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    tlEventFilterMode = btn.dataset.tlEvfilter || "all";
+    document.querySelectorAll("button[data-tl-evfilter]").forEach((b) => {
+      const active = b === btn;
+      b.className = active ? "btn btn-sm btn-primary" : "btn btn-sm btn-outline";
+      b.style.background = active ? "#6d28d9" : "";
+      b.style.borderColor = active ? "#6d28d9" : "";
+    });
+    renderTimelineOnMapAndList();
+  });
+});
+
+document.getElementById("tlEventsList")?.addEventListener("click", (e) => {
+  const row = e.target.closest("[data-tl-jump]");
+  if (!row) return;
+  stopTlPlayback();
+  const idx = Number(row.dataset.tlJump);
+  if (!Number.isFinite(idx) || !tlFrames[idx]) return;
+  tlStepIndex = idx;
+  renderTimelineOnMapAndList();
+  if (leafletMap) {
+    leafletMap.flyTo([tlFrames[idx].lat, tlFrames[idx].lng], Math.max(leafletMap.getZoom(), 15), { duration: 0.5 });
+  }
+});
+
+// ================= AUTO-ARCHIVADO SILENCIOSO DE GPS Y SELLADO HISTÓRICO DEL DÍA =================
+function resolveCanonicalConfiguredDriverName(rawNameOrSlug) {
+  const val = String(rawNameOrSlug || "").trim();
+  if (!val) return "";
+  const slug = rbDriverSlug(val);
+  const match = (storeSettings.drivers || []).find(
+    (d) =>
+      String(d.name || "").trim().toLowerCase() === val.toLowerCase() ||
+      rbDriverSlug(d.name || "") === slug
+  );
+  return match?.name ? String(match.name).trim() : "";
+}
+
+function scheduleAutoArchiveLiveGpsTrails() {
+  if (!currentKeyHash) return;
+  if (autoArchiveGpsTimer) clearTimeout(autoArchiveGpsTimer);
+  autoArchiveGpsTimer = setTimeout(() => {
+    autoArchiveGpsTimer = null;
+    runAutoArchiveLiveGpsTrails().catch((err) => console.warn("Auto-archive GPS:", err));
+  }, 2500);
+}
+
+async function runAutoArchiveLiveGpsTrails() {
+  if (!currentKeyHash || !Array.isArray(driverLocations) || driverLocations.length === 0) return;
+  const toArchive = [];
+  for (const loc of driverLocations) {
+    const tDate = String(loc?.trailDate || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(tDate)) continue;
+    const trail = Array.isArray(loc?.trail)
+      ? loc.trail.filter((pt) => typeof pt?.lat === "number" && typeof pt?.lng === "number")
+      : [];
+    if (trail.length < 2) continue;
+
+    const canonicalName = resolveCanonicalConfiguredDriverName(loc.driverName || loc.id) || String(loc.driverName || "").trim();
+    if (!canonicalName) continue;
+    const slug = rbDriverSlug(canonicalName);
+    const routeDocId = `${tDate}_${slug}`;
+    const lastSavedLen = autoArchivedGpsLenByDocId.get(routeDocId) || 0;
+    if (trail.length <= lastSavedLen) continue;
+
+    let existingArchLen = 0;
+    let existingStopsSnap = null;
+    if (tDate === selectedRouteDate) {
+      const cached = allDriverRouteDocsRawMap.get(routeDocId);
+      existingArchLen = Array.isArray(cached?.archivedGpsTrail) ? cached.archivedGpsTrail.length : 0;
+      if (cached && Array.isArray(cached.stops) && cached.stops.length > 0 && !Array.isArray(cached.morningStopsSnapshot)) {
+        existingStopsSnap = cached.stops;
+      }
+    } else {
+      try {
+        const snap = await getDoc(doc(db, "driver_routes", routeDocId));
+        if (snap.exists()) {
+          const d = snap.data();
+          existingArchLen = Array.isArray(d?.archivedGpsTrail) ? d.archivedGpsTrail.length : 0;
+          if (Array.isArray(d?.stops) && d.stops.length > 0 && !Array.isArray(d?.morningStopsSnapshot)) {
+            existingStopsSnap = d.stops;
+          }
+        }
+      } catch (_) {}
+    }
+
+    autoArchivedGpsLenByDocId.set(routeDocId, Math.max(trail.length, existingArchLen));
+    if (existingArchLen === 0 || trail.length >= existingArchLen + 3) {
+      toArchive.push({
+        routeDocId,
+        tDate,
+        canonicalName,
+        slug,
+        trail,
+        lastPos: typeof loc.lat === "number" && typeof loc.lng === "number"
+          ? { lat: loc.lat, lng: loc.lng, updatedAtIso: loc.updatedAtIso || null }
+          : null,
+        existingStopsSnap
+      });
+    }
+  }
+
+  if (toArchive.length === 0) return;
+
+  await executeAdminBatch(currentKeyHash, (batch, proofId) => {
+    for (const item of toArchive) {
+      batch.set(
+        doc(db, "driver_routes", item.routeDocId),
+        {
+          date: item.tDate,
+          driverName: item.canonicalName,
+          driverSlug: item.slug,
+          archivedGpsTrail: item.trail,
+          ...(item.lastPos ? { archivedLastPos: item.lastPos } : {}),
+          ...(item.existingStopsSnap ? { morningStopsSnapshot: item.existingStopsSnap } : {}),
+          gpsAutoArchivedAtIso: new Date().toISOString(),
+          proofId,
+          updatedAt: serverTimestamp()
+        },
+        { merge: true }
+      );
+    }
+  });
+}
+
+function collectActiveDriversForSelectedDate() {
+  const names = [];
+  const seen = new Set();
+  const add = (raw) => {
+    const clean = resolveCanonicalConfiguredDriverName(raw) || String(raw || "").trim();
+    if (!clean) return;
+    const k = clean.toLowerCase();
+    if (seen.has(k)) return;
+    seen.add(k);
+    names.push(clean);
+  };
+
+  for (const rDoc of allDriverRouteDocsRawMap.values()) {
+    const hasStops = getEffectiveAuditStops(rDoc).length > 0;
+    const hasTrail = Array.isArray(rDoc.archivedGpsTrail) && rDoc.archivedGpsTrail.length > 0;
+    if (hasStops || hasTrail || rDoc.sealed) add(rDoc.driverName);
+  }
+  for (const s of routeSalesList) {
+    if (!isSaleCancelled(s)) add(s.driver);
+  }
+  for (const v of routeVisitsList) {
+    add(v.driver);
+  }
+  for (const loc of driverLocations) {
+    if (loc.trailDate === selectedRouteDate && Array.isArray(loc.trail) && loc.trail.length > 0) {
+      const canonical = resolveCanonicalConfiguredDriverName(loc.driverName || loc.id);
+      if (canonical) add(canonical);
+    }
+  }
+  return names;
+}
+
+function buildDriverDaySealPayload(driverName, dateStr) {
+  const slug = rbDriverSlug(driverName);
+  const lowName = driverName.toLowerCase();
+  const rawDoc = getDriverRawRouteDocForSelectedDate(driverName, dateStr);
+  const liveStops = Array.isArray(rawDoc?.stops) ? rawDoc.stops : [];
+  const morningStops = getEffectiveAuditStops(rawDoc);
+
+  const locDoc = driverLocations.find(
+    (l) => l.id === slug || String(l.driverName || "").toLowerCase() === lowName
+  );
+  const liveTrail =
+    locDoc && locDoc.trailDate === dateStr && Array.isArray(locDoc.trail) ? locDoc.trail : [];
+  const prevArch = Array.isArray(rawDoc?.archivedGpsTrail) ? rawDoc.archivedGpsTrail : [];
+  const finalTrail = liveTrail.length >= prevArch.length ? liveTrail : prevArch;
+
+  const mySales = routeSalesList.filter(
+    (s) => !isSaleCancelled(s) && String(s.driver || "").trim().toLowerCase() === lowName
+  );
+  const myVisits = routeVisitsList.filter(
+    (v) => String(v.driver || "").trim().toLowerCase() === lowName
+  );
+
+  const salesSnapshot = mySales.map((s) => ({
+    id: s.id,
+    folio: s.folio || "",
+    customerName: s.customerName || "",
+    totalBoxes: Number(s.totalBoxes) || 0,
+    totalAmount: Number(s.totalAmount) || 0,
+    paymentMethod: s.paymentMethod || "",
+    createdAtIso: s.createdAtIso || "",
+    placeId: s.placeId || "",
+    saleLat: typeof s.saleLat === "number" ? s.saleLat : null,
+    saleLng: typeof s.saleLng === "number" ? s.saleLng : null
+  }));
+
+  const sealedSummary = {
+    plannedStopsCount: morningStops.length,
+    salesCount: mySales.length,
+    totalBoxesSold: mySales.reduce((acc, s) => acc + (Number(s.totalBoxes) || 0), 0),
+    totalAmountMxn: mySales.reduce((acc, s) => acc + (Number(s.totalAmount) || 0), 0),
+    visitsNoSaleCount: myVisits.length,
+    gpsPointsArchived: finalTrail.length
+  };
+
+  return {
+    docId: `${dateStr}_${slug}`,
+    payload: {
+      date: dateStr,
+      driverName,
+      driverSlug: slug,
+      stops: liveStops,
+      morningStopsSnapshot: morningStops,
+      archivedGpsTrail: finalTrail,
+      sealed: true,
+      sealedAtIso: new Date().toISOString(),
+      sealedBy: "Admin",
+      sealedSummary,
+      sealedSalesSnapshot: salesSnapshot
+    },
+    sealedSummary
+  };
+}
+
+function updateDaySealButtonsUI() {
+  const fullDayBtn = document.getElementById("btnSealFullDayRoutes");
+  if (fullDayBtn) {
+    const activeDrivers = collectActiveDriversForSelectedDate();
+    const sealedCount = activeDrivers.filter((dn) => Boolean(getDriverRawRouteDocForSelectedDate(dn)?.sealed)).length;
+    const allSealed = activeDrivers.length > 0 && sealedCount === activeDrivers.length;
+    if (allSealed) {
+      fullDayBtn.textContent = `🔒 Día Sellado (${sealedCount}) ✓`;
+      fullDayBtn.style.background = "#0f766e";
+      fullDayBtn.style.borderColor = "#0f766e";
+      fullDayBtn.style.color = "#ffffff";
+    } else if (sealedCount > 0) {
+      fullDayBtn.textContent = `🔒 Sellar Día (${sealedCount}/${activeDrivers.length})`;
+      fullDayBtn.style.background = "#f0fdfa";
+      fullDayBtn.style.borderColor = "#0f766e";
+      fullDayBtn.style.color = "#0f766e";
+    } else {
+      fullDayBtn.textContent = "🔒 Sellar Día";
+      fullDayBtn.style.background = "";
+      fullDayBtn.style.borderColor = "#0f766e";
+      fullDayBtn.style.color = "#0f766e";
+    }
+  }
+
+  const drvBtn = document.getElementById("btnTlSealDriverRoute");
+  if (drvBtn) {
+    if (!tlPanelOpen || !tlSelectedDriver) {
+      drvBtn.style.display = "none";
+    } else {
+      drvBtn.style.display = "inline-flex";
+      const rawDoc = getDriverRawRouteDocForSelectedDate(tlSelectedDriver);
+      if (rawDoc?.sealed) {
+        drvBtn.textContent = "🔒 Sellada ✓ (🔓 Reabrir)";
+        drvBtn.style.background = "#0f766e";
+        drvBtn.style.borderColor = "#0f766e";
+        drvBtn.style.color = "#ffffff";
+      } else {
+        drvBtn.textContent = "🔒 Sellar ruta";
+        drvBtn.style.background = "#ffffff";
+        drvBtn.style.borderColor = "#0f766e";
+        drvBtn.style.color = "#0f766e";
+      }
+    }
+  }
+}
+
+document.getElementById("btnTlSealDriverRoute")?.addEventListener("click", async () => {
+  if (!tlSelectedDriver || !currentKeyHash) return;
+  const rawDoc = getDriverRawRouteDocForSelectedDate(tlSelectedDriver);
+  if (rawDoc?.sealed) {
+    const ok = await showConfirmDialog({
+      title: `¿Reabrir ruta sellada de ${tlSelectedDriver}?`,
+      message: `Se quitará temporalmente el candado del ${selectedRouteDate} por si necesitas hacer algún ajuste administrativo (su rastro GPS y foto matutina siguen respaldados).`,
+      confirmText: "🔓 Sí, reabrir"
+    });
+    if (!ok) return;
+    const docId = `${selectedRouteDate}_${rbDriverSlug(tlSelectedDriver)}`;
+    await executeAdminBatch(currentKeyHash, (batch, proofId) => {
+      batch.set(
+        doc(db, "driver_routes", docId),
+        {
+          sealed: false,
+          unsealedAtIso: new Date().toISOString(),
+          proofId,
+          updatedAt: serverTimestamp()
+        },
+        { merge: true }
+      );
+    });
+    showToast(`🔓 Ruta de ${tlSelectedDriver} (${selectedRouteDate}) reabierta.`);
+    return;
+  }
+
+  const { docId, payload, sealedSummary } = buildDriverDaySealPayload(tlSelectedDriver, selectedRouteDate);
+  await executeAdminBatch(currentKeyHash, (batch, proofId) => {
+    batch.set(doc(db, "driver_routes", docId), { ...payload, proofId, updatedAt: serverTimestamp() }, { merge: true });
+  });
+  showToast(
+    `🔒 ${tlSelectedDriver} sellado (${selectedRouteDate}): ${sealedSummary.plannedStopsCount} paradas, ${sealedSummary.salesCount} vtas y ${sealedSummary.gpsPointsArchived} pts GPS archivados.`
+  );
+});
+
+document.getElementById("btnSealFullDayRoutes")?.addEventListener("click", async () => {
+  if (!currentKeyHash) return;
+  let targetDrivers = collectActiveDriversForSelectedDate();
+  if (targetDrivers.length === 0) {
+    targetDrivers = (storeSettings.drivers || []).map((d) => String(d.name || "").trim()).filter(Boolean);
+  }
+  if (targetDrivers.length === 0) {
+    showToast("No hay choferes registrados para sellar en esta fecha.");
+    return;
+  }
+
+  const allAlreadySealed = targetDrivers.every((dn) => Boolean(getDriverRawRouteDocForSelectedDate(dn)?.sealed));
+  if (allAlreadySealed) {
+    const okRefresh = await showConfirmDialog({
+      title: `🔒 El día ${selectedRouteDate} ya está sellado`,
+      message: `Los ${targetDrivers.length} chofer(es) activos ya tienen su ruta, rastro GPS y ventas blindados. ¿Deseas actualizar el sello con los últimos datos del día? (Para desbloquear un chofer específico usa 🎬 Cronología).`,
+      confirmText: "🔒 Actualizar sello"
+    });
+    if (!okRefresh) return;
+  } else {
+    const ok = await showConfirmDialog({
+      title: `🔒 ¿Sellar todas las rutas y datos del ${selectedRouteDate}?`,
+      message: `Se blindarán permanentemente las rutas matutinas, el rastro GPS por calle, las visitas y las ventas de ${targetDrivers.length} chofer(es) (${targetDrivers.join(", ")}) para que nunca se sobrescriban ni se borren al cambiar de día.`,
+      confirmText: "🔒 Sellar Día"
+    });
+    if (!ok) return;
+  }
+
+  let totStops = 0;
+  let totSales = 0;
+  let totGps = 0;
+  const items = targetDrivers.map((dn) => {
+    const item = buildDriverDaySealPayload(dn, selectedRouteDate);
+    totStops += item.sealedSummary.plannedStopsCount;
+    totSales += item.sealedSummary.salesCount;
+    totGps += item.sealedSummary.gpsPointsArchived;
+    return item;
+  });
+
+  await executeAdminBatch(currentKeyHash, (batch, proofId) => {
+    for (const it of items) {
+      batch.set(doc(db, "driver_routes", it.docId), { ...it.payload, proofId, updatedAt: serverTimestamp() }, { merge: true });
+    }
+  });
+
+  showToast(
+    `🔒 Día ${selectedRouteDate} sellado: ${items.length} chofer(es), ${totStops} parada(s), ${totSales} venta(s) y ${totGps} pts GPS guardados para consulta futura.`
+  );
+});
+
+checkSuperadminInit();
+checkInitialAuth();

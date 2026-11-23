@@ -280,6 +280,8 @@ function recomputeDeduplicatedProspects() {
   renderQuadrantsUIAndLayer();
   renderConcentricUIAndLayer();
   buildAndRenderAutoPacks();
+  window.__pzGetActiveProspects = () => activeProspects;
+  window.dispatchEvent(new CustomEvent("salinas:prospects-updated"));
 
   const badge = document.getElementById("pzSummaryBadge");
   if (badge) {
@@ -446,7 +448,7 @@ function renderProspectsCluster(announce = false) {
       btn.style.color = "#fff";
     } else {
       const cnt = activeProspects.length || rawProspects.length;
-      btn.textContent = `⚪ Mostrar Prospectos${cnt ? ` (${cnt.toLocaleString("es-MX")})` : " DENUE"}`;
+      btn.textContent = `⚪ Mostrar Prospectos${cnt ? ` (${cnt.toLocaleString("es-MX")})` : ""}`;
       btn.classList.remove("btn-primary");
       btn.classList.add("btn-outline");
       btn.style.color = "#14532d";
@@ -490,7 +492,7 @@ function renderProspectsCluster(announce = false) {
     const popupHtml = `
       <div style="font-family:sans-serif;min-width:225px;max-width:265px;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:4px;margin-bottom:3px;">
-          <span style="font-size:0.68rem;font-weight:800;color:${meta.color};text-transform:uppercase;">${meta.emoji} ${esc(pr.sub)} • DENUE</span>
+          <span style="font-size:0.68rem;font-weight:800;color:${meta.color};text-transform:uppercase;">${meta.emoji} ${esc(pr.sub)} • Prospecto</span>
           <span style="font-size:0.68rem;font-weight:800;padding:2px 6px;border-radius:999px;background:${isHigh ? "#dcfce7" : "#f1f5f9"};color:${isHigh ? "#14532d" : "#475569"};">${isHigh ? "🔥 Potencial Alto" : "🟡 Medio"}</span>
         </div>
         <strong style="font-size:0.95rem;color:#0f172a;display:block;line-height:1.25;">${esc(pr.n)}</strong>

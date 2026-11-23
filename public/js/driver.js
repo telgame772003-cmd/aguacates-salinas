@@ -154,10 +154,10 @@ let isNav3DOpen = false;
 let pendingNav3DPayload = null;
 const geocodedOrderCoordsCache = new Map();
 
-// Geocerca automática por tienda (entrada <= 55m, salida > 75m, permanencia mínima 60s)
+// Geocerca automática por tienda (entrada <= 55m, salida > 75m, registro inmediato si frena/camina <= 18 km/h)
 const GEOFENCE_ENTER_METERS = 55;
 const GEOFENCE_EXIT_METERS = 75;
-const GEOFENCE_MIN_DWELL_MS = 60 * 1000;
+const GEOFENCE_MAX_ARRIVAL_SPEED_KMH = 18;
 const activeGeofenceDwells = new Map();
 
 // DOM Elements
@@ -493,6 +493,30 @@ async function enterDriverApp() {
       const ld = locSnap.data();
       if (ld.trailDate === getLocalDateStr() && Array.isArray(ld.trail)) {
         myTrailToday = ld.trail;
+      } else if (
+        ld.trailDate &&
+        /^\d{4}-\d{2}-\d{2}$/.test(ld.trailDate) &&
+        Array.isArray(ld.trail) &&
+        ld.trail.length >= 2 &&
+        currentDriverKeyHash
+      ) {
+        // Antes de arrancar un día nuevo, respaldar la estela GPS del día anterior en driver_routes
+        const prevDocId = `${ld.trailDate}_${driverSlug(currentDriverName)}`;
+        executeDriverBatch(currentDriverKeyHash, (batch, proofId) => {
+          batch.set(
+            doc(db, "driver_routes", prevDocId),
+            {
+              date: ld.trailDate,
+              driverName: currentDriverName,
+              driverSlug: driverSlug(currentDriverName),
+              archivedGpsTrail: ld.trail,
+              autoArchivedFromDeviceAtIso: new Date().toISOString(),
+              proofId,
+              updatedAt: serverTimestamp()
+            },
+            { merge: true }
+          );
+        }).catch(() => {});
       }
       if (
         ld.active === true &&
@@ -642,13 +666,17 @@ async function persistAutoGeofenceVisit(place, distMeters, arrivedAtMs, dwellSec
   if (!currentDriverKeyHash || !currentDriverName || !place?.id) return;
   const dateStr = getLocalDateStr();
   const visitDocId = `${dateStr}_${place.id}_${driverSlug(currentDriverName)}`;
+  const durLabel =
+    dwellSeconds >= 60
+      ? `${Math.round(dwellSeconds / 60)} min`
+      : `${Math.max(5, Math.round(dwellSeconds))} seg`;
   const visitPayload = {
     date: dateStr,
     placeId: place.id,
     placeName: place.name || "Tienda",
     driver: currentDriverName,
     autoGeofence: true,
-    reason: `Visita automática por geocerca (${Math.max(1, Math.round(dwellSeconds / 60))} min)`,
+    reason: `Visita automática por geocerca (${durLabel})`,
     driverLat: lastGpsCoords?.lat ?? null,
     driverLng: lastGpsCoords?.lng ?? null,
     distanceMeters: Math.round(distMeters),
@@ -689,56 +717,84 @@ async function persistAutoGeofenceVisit(place, distMeters, arrivedAtMs, dwellSec
 }
 
 function evaluatePlaceGeofences({ lat, lng, speedKmh = 0 }) {
-  if (!currentDriverKeyHash || !currentDriverName || !Array.isArray(allPlaces) || allPlaces.length === 0) {
+  if (!currentDriverKeyHash || !currentDriverName) {
     return;
   }
   const now = Date.now();
   const today = getLocalDateStr();
 
-  for (const place of allPlaces) {
-    if (!place?.id || typeof place.lat !== "number" || typeof place.lng !== "number") continue;
+  // Unificar negocios del directorio + paradas de su ruta activa (incluyendo prospectos)
+  const watchTargets = new Map();
+  if (Array.isArray(allPlaces)) {
+    for (const p of allPlaces) {
+      if (p?.id && typeof p.lat === "number" && typeof p.lng === "number") {
+        watchTargets.set(p.id, p);
+      }
+    }
+  }
+  if (Array.isArray(activeRouteStops)) {
+    for (const st of activeRouteStops) {
+      if (st?.id && Number.isFinite(Number(st.lat)) && Number.isFinite(Number(st.lng)) && !watchTargets.has(st.id)) {
+        watchTargets.set(st.id, {
+          id: st.id,
+          name: st.name || "Parada de ruta",
+          lat: Number(st.lat),
+          lng: Number(st.lng)
+        });
+      }
+    }
+  }
+
+  for (const place of watchTargets.values()) {
     const dist = haversineMeters(lat, lng, place.lat, place.lng);
     if (dist === null) continue;
 
-    const dwell = activeGeofenceDwells.get(place.id);
+    let dwell = activeGeofenceDwells.get(place.id);
 
     if (dist <= GEOFENCE_ENTER_METERS) {
       if (!dwell) {
-        activeGeofenceDwells.set(place.id, {
+        dwell = {
           enteredAt: now,
+          minDist: dist,
           confirmed: false,
           lastSyncAt: 0
-        });
+        };
+        activeGeofenceDwells.set(place.id, dwell);
         window.salinasLog?.("GEOFENCE-ENTER", `${place.name} (dist=${Math.round(dist)}m, spd=${Math.round(speedKmh)}km/h)`);
-        continue;
+      } else if (dist < dwell.minDist) {
+        dwell.minDist = dist;
       }
 
       const dwellMs = now - dwell.enteredAt;
-      if (dwellMs >= GEOFENCE_MIN_DWELL_MS) {
-        const alreadyManualOrConfirmedToday = visitsToday.some(
+      // Confirmar de inmediato (sin esperar 60s) si llegó caminando/frenando (<= 18 km/h), o si ya lleva >= 15s en el radio
+      const isStoppedOrWalking = (Number(speedKmh) || 0) <= GEOFENCE_MAX_ARRIVAL_SPEED_KMH;
+      if (isStoppedOrWalking || dwellMs >= 15000) {
+        const alreadyManualToday = visitsToday.some(
           (v) =>
             v.placeId === place.id &&
             v.date === today &&
             String(v.driver || "").toLowerCase() === String(currentDriverName || "").toLowerCase() &&
             !v.autoGeofence
         );
-        if (alreadyManualOrConfirmedToday) {
+        if (alreadyManualToday) {
           dwell.confirmed = true;
           continue;
         }
 
-        const shouldSync = !dwell.confirmed || now - dwell.lastSyncAt >= 60000;
+        const shouldSync = !dwell.confirmed || now - dwell.lastSyncAt >= 45000;
         if (shouldSync) {
           dwell.confirmed = true;
           dwell.lastSyncAt = now;
-          const dwellSec = Math.round(dwellMs / 1000);
-          window.salinasLog?.("GEOFENCE-VISIT-OK", `${place.name} confirmada (${dwellSec}s, dist=${Math.round(dist)}m)`);
-          persistAutoGeofenceVisit(place, dist, dwell.enteredAt, dwellSec);
+          const dwellSec = Math.max(5, Math.round(dwellMs / 1000));
+          window.salinasLog?.("GEOFENCE-VISIT-OK", `${place.name} confirmada (${dwellSec}s, dist=${Math.round(dwell.minDist)}m)`);
+          persistAutoGeofenceVisit(place, dwell.minDist, dwell.enteredAt, dwellSec);
         }
       }
     } else if (dwell && dist > GEOFENCE_EXIT_METERS) {
-      if (!dwell.confirmed) {
-        window.salinasLog?.("GEOFENCE-SKIP", `${place.name} descartada (salió en ${Math.round((now - dwell.enteredAt) / 1000)}s < 60s)`);
+      const totalDwellSec = Math.round((now - dwell.enteredAt) / 1000);
+      // Al salir del radio, actualizar duración final real (o confirmar si estuvo >= 15s quieto sin segundo ping intermedio)
+      if (dwell.confirmed || totalDwellSec >= 15) {
+        persistAutoGeofenceVisit(place, dwell.minDist ?? dist, dwell.enteredAt, Math.max(5, totalDwellSec));
       }
       activeGeofenceDwells.delete(place.id);
     }
@@ -785,8 +841,28 @@ async function publishDriverLocationUpdate({
 
   const currDate = getLocalDateStr();
   if (currDate !== todayStr) {
+    const prevDate = todayStr;
+    const prevTrail = Array.isArray(myTrailToday) ? [...myTrailToday] : [];
     todayStr = currDate;
     myTrailToday = [];
+    if (prevDate && /^\d{4}-\d{2}-\d{2}$/.test(prevDate) && prevTrail.length >= 2) {
+      const prevDocId = `${prevDate}_${driverSlug(currentDriverName)}`;
+      executeDriverBatch(currentDriverKeyHash, (batch, proofId) => {
+        batch.set(
+          doc(db, "driver_routes", prevDocId),
+          {
+            date: prevDate,
+            driverName: currentDriverName,
+            driverSlug: driverSlug(currentDriverName),
+            archivedGpsTrail: prevTrail,
+            autoArchivedFromDeviceAtIso: new Date().toISOString(),
+            proofId,
+            updatedAt: serverTimestamp()
+          },
+          { merge: true }
+        );
+      }).catch(() => {});
+    }
   }
 
   const lastTrailPt = myTrailToday[myTrailToday.length - 1];
@@ -797,8 +873,8 @@ async function publishDriverLocationUpdate({
   if (!lastTrailPt || (distFromLastTrail !== null && distFromLastTrail >= 35)) {
     const hhmm = new Date().toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", hour12: false });
     myTrailToday.push({ lat: cleanLat, lng: cleanLng, t: hhmm });
-    if (myTrailToday.length > 120) {
-      myTrailToday = myTrailToday.slice(-120);
+    if (myTrailToday.length > 600) {
+      myTrailToday = myTrailToday.slice(-600);
     }
   }
 
@@ -1823,17 +1899,82 @@ function buildOrderNavStop(ord, coords) {
   };
 }
 
+function computeAdjustedDeliverOrderItems(ord) {
+  const wrap = document.getElementById("deliverItemsAdjustWrap");
+  if (!wrap) {
+    return {
+      items: ord.items || [],
+      totalBoxes: Number(ord.totalBoxes) || 0,
+      totalAmount: Number(ord.totalAmount) || 0
+    };
+  }
+  const rows = wrap.querySelectorAll("[data-deliv-code]");
+  const items = [];
+  let totalBoxes = 0;
+  let totalAmount = 0;
+  rows.forEach((row) => {
+    const code = row.dataset.delivCode;
+    const name = row.dataset.delivName;
+    const price = Math.max(0, Math.round(Number(row.dataset.delivPrice) || 0));
+    const qty = Math.max(0, round1(Number(row.querySelector(".deliv-qty-input")?.value) || 0));
+    if (qty > 0) {
+      const subtotal = Math.round(qty * price);
+      items.push({ code, name, qty, price, subtotal });
+      totalBoxes = round1(totalBoxes + qty);
+      totalAmount += subtotal;
+    }
+  });
+  return { items, totalBoxes, totalAmount };
+}
+
+function updateDeliverDynamicTotalBadge(ord) {
+  const { totalBoxes, totalAmount } = computeAdjustedDeliverOrderItems(ord);
+  const badge = document.getElementById("deliverDynamicTotalBadge");
+  if (badge) {
+    badge.textContent = `${totalBoxes} caja${totalBoxes === 1 ? "" : "s"} • ${formatCurrency(totalAmount)}`;
+  }
+}
+
 function openDeliverOrderModalForOrder(ord) {
   if (!ord) return;
   document.getElementById("deliverOrderId").value = ord.id;
   document.getElementById("deliverOrderSubtitle").textContent =
-    `${ord.customerName} • ${ord.totalBoxes} cajas • Total: ${formatCurrency(ord.totalAmount)}`;
+    `${ord.customerName} • Pedido original: ${ord.totalBoxes} cajas (${formatCurrency(ord.totalAmount)})`;
 
-  const prefPay = (ord.paymentMethod || "").toLowerCase().includes("transf")
-    ? "Transferencia"
-    : "Efectivo";
+  const wrap = document.getElementById("deliverItemsAdjustWrap");
+  if (wrap) {
+    const cals = getOrderedProducts(
+      storeSettings,
+      ACTIVE_TENANT_SLUG === "salinas" ? DEFAULT_STORE_SETTINGS.calibers : {}
+    );
+    const orderedMap = new Map((ord.items || []).map((it) => [it.code, it]));
+    wrap.innerHTML = cals
+      .map((c) => {
+        const existing = orderedMap.get(c.code);
+        const qty = existing ? Number(existing.qty) || 0 : 0;
+        const unitPrice = existing && existing.price ? Number(existing.price) : Number(c.price) || 0;
+        return `
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;background:#fff;border:1px solid #e2e8f0;border-radius:7px;padding:5px 8px;" data-deliv-code="${escapeHtml(c.code)}" data-deliv-name="${escapeHtml(c.name)}" data-deliv-price="${Math.round(unitPrice)}">
+            <span style="font-size:0.8rem;font-weight:700;color:#0f172a;">${escapeHtml(c.name)} (${formatCurrency(unitPrice)})</span>
+            <input type="number" min="0" step="0.5" value="${qty}" class="form-control deliv-qty-input" style="width:76px;padding:4px 6px;font-weight:800;text-align:center;">
+          </div>
+        `;
+      })
+      .join("");
+    wrap.oninput = () => updateDeliverDynamicTotalBadge(ord);
+    updateDeliverDynamicTotalBadge(ord);
+  }
+
+  const rawPay = (ord.paymentMethod || "").toLowerCase();
+  const prefPay = rawPay.includes("por definir")
+    ? ""
+    : rawPay.includes("transf")
+      ? "Transferencia"
+      : rawPay.includes("cred")
+        ? "Credito"
+        : "Efectivo";
   deliverPayMethod.value = prefPay;
-  deliverCreditWrap.style.display = "none";
+  deliverCreditWrap.style.display = prefPay === "Credito" ? "block" : "none";
   deliverAdvanceInput.value = "0";
   deliverOrderModal.classList.add("open");
 }
@@ -2106,7 +2247,10 @@ function renderAssignedOrders() {
         ? `https://www.google.com/maps/dir/?api=1&destination=${resolvedCoords.lat},${resolvedCoords.lng}`
         : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ord.address || "")}`;
       const itemsHtml = (ord.items || [])
-        .map((i) => `<span class="cal-chip">${i.qty} × ${escapeHtml(i.name)} (${escapeHtml(i.code)})</span>`)
+        .map(
+          (i) =>
+            `<span class="cal-chip">${i.qty} × ${escapeHtml(i.name)} (${escapeHtml(i.code)})${i.ripenessSummary ? ` <strong style="color:#15803d;">[${escapeHtml(i.ripenessSummary)}]</strong>` : ""}</span>`
+        )
         .join("");
       const isEnRuta = ord.status === "en_ruta";
 
@@ -2257,8 +2401,18 @@ document.getElementById("deliverOrderForm").addEventListener("submit", async (e)
     return;
   }
 
+  const adjusted = computeAdjustedDeliverOrderItems(ord);
+  if (adjusted.totalBoxes <= 0 || adjusted.items.length === 0) {
+    showToast("Indica al menos media caja entregada.");
+    return;
+  }
+
   const payMethod = deliverPayMethod.value;
-  const totalAmount = Number(ord.totalAmount) || 0;
+  if (!payMethod) {
+    showToast("Selecciona cómo pagó el cliente.");
+    return;
+  }
+  const totalAmount = adjusted.totalAmount;
   let cashCollected = 0;
   let transferCollected = 0;
   let creditBalance = 0;
@@ -2274,13 +2428,11 @@ document.getElementById("deliverOrderForm").addEventListener("submit", async (e)
   }
 
   const boxesByCaliber = { M: 0, P: 0, E: 0, S: 0 };
-  for (const item of ord.items || []) {
-    if (boxesByCaliber[item.code] !== undefined) {
-      boxesByCaliber[item.code] += Number(item.qty) || 0;
-    }
+  for (const item of adjusted.items) {
+    boxesByCaliber[item.code] = round1((boxesByCaliber[item.code] || 0) + (Number(item.qty) || 0));
   }
 
-  const matchedPlace = findMatchingPlace(ord.customerName, ord.phone);
+  const matchedPlace = (ord.placeId && allPlaces.find((p) => p.id === ord.placeId)) || findMatchingPlace(ord.customerName, ord.phone);
 
   const saleRecord = {
     folio: ord.folio || "WEB-" + ord.id.slice(0, 5).toUpperCase(),
@@ -2290,16 +2442,16 @@ document.getElementById("deliverOrderForm").addEventListener("submit", async (e)
     driver: currentDriverName,
     customerName: ord.customerName,
     phone: ord.phone || "",
-    ...(matchedPlace ? { placeId: matchedPlace.id } : {}),
-    items: ord.items || [],
+    ...(matchedPlace ? { placeId: matchedPlace.id } : ord.placeId ? { placeId: ord.placeId } : {}),
+    items: adjusted.items,
     boxesByCaliber,
-    totalBoxes: Number(ord.totalBoxes) || 0,
+    totalBoxes: adjusted.totalBoxes,
     totalAmount,
     paymentMethod: payMethod,
     cashCollected,
     transferCollected,
     creditBalance,
-    notes: ord.notes || "Pedido en línea entregado",
+    notes: ord.notes || "Pedido entregado",
     createdAtIso: new Date().toISOString(),
     createdAt: serverTimestamp()
   };
@@ -2308,6 +2460,9 @@ document.getElementById("deliverOrderForm").addEventListener("submit", async (e)
     await executeDriverBatch(currentDriverKeyHash, (batch, proofId) => {
       batch.update(doc(db, "orders", ord.id), {
         status: "entregado",
+        items: adjusted.items,
+        totalBoxes: adjusted.totalBoxes,
+        totalAmount,
         deliveredAtIso: new Date().toISOString(),
         paymentMethodFinal: payMethod,
         proofId,
@@ -2329,6 +2484,40 @@ document.getElementById("deliverOrderForm").addEventListener("submit", async (e)
 });
 
 // ================= VIEW 2: STREET SALE FORM =================
+let drvSaleMixOpen = false;
+let saleRipenessMix = {};
+const DRV_RIPENESS_STAGES = ["Verde", "Quebrado", "Sazón", "Maduro"];
+
+function syncSaleQtyFromRipenessMix(code) {
+  const mix = saleRipenessMix[code] || {};
+  let sum = 0;
+  for (const st of DRV_RIPENESS_STAGES) {
+    sum += Math.max(0, Math.floor(Number(mix[st]) || 0));
+  }
+  saleQtys[code] = sum;
+  return sum;
+}
+
+document.getElementById("btnToggleDrvSaleRipeness")?.addEventListener("click", () => {
+  drvSaleMixOpen = !drvSaleMixOpen;
+  const btn = document.getElementById("btnToggleDrvSaleRipeness");
+  if (btn) {
+    btn.textContent = drvSaleMixOpen ? "⚡ Modo rápido" : "🎨 Detallar maduración";
+  }
+  if (drvSaleMixOpen) {
+    for (const code of getActiveProductCodes()) {
+      const curQty = saleQtys[code] || 0;
+      const existingMix = saleRipenessMix[code];
+      const hasAny =
+        existingMix && DRV_RIPENESS_STAGES.some((st) => (Number(existingMix[st]) || 0) > 0);
+      if (curQty > 0 && !hasAny) {
+        saleRipenessMix[code] = { Verde: 0, Quebrado: 0, Sazón: curQty, Maduro: 0 };
+      }
+    }
+  }
+  renderStreetSaleCalibers();
+});
+
 function renderStreetSaleCalibers() {
   const container = document.getElementById("streetSaleCalibersContainer");
   if (!container) return;
@@ -2348,6 +2537,28 @@ function renderStreetSaleCalibers() {
       const unitPrice = salePrices[code] || cal.price;
       const minPrice = Number(cal.minPrice) || 1;
       const kgPrice = saleKgPrices[code] || Number(cal.pricePerKg) || Math.round((unitPrice / uCfg.subUnitsPerUnit) * 100) / 100;
+      const mix = saleRipenessMix[code] || {};
+
+      const mixBlockHtml = drvSaleMixOpen
+        ? `
+          <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:8px;margin-bottom:8px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.72rem;font-weight:800;color:#14532d;margin-bottom:5px;">
+              <span>🎨 Cajas por maduración</span>
+              <span data-mix-sum-lbl="${code}">Total: ${qty} ${escapeHtml(uCfg.unitPlural)}</span>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:6px;text-align:center;">
+              ${DRV_RIPENESS_STAGES.map(
+                (st) => `
+                  <div>
+                    <div style="font-size:0.68rem;font-weight:800;color:#334155;margin-bottom:2px;">${st === "Quebrado" ? "Quebr." : st}</div>
+                    <input type="number" min="0" max="500" inputmode="numeric" class="form-control" data-drv-mix-code="${code}" data-drv-mix-stage="${st}" value="${Number(mix[st]) || 0}" style="padding:6px 4px;font-size:0.9rem;font-weight:800;text-align:center;background:#fff;">
+                  </div>
+                `
+              ).join("")}
+            </div>
+          </div>
+        `
+        : "";
 
       return `
         <div class="driver-sale-cal-row ${isActiveRow ? "active-row" : ""}" data-cal-row="${code}" style="padding:12px;">
@@ -2361,15 +2572,21 @@ function renderStreetSaleCalibers() {
             <span class="ripeness-badge" data-avail-badge="${code}" style="white-space:nowrap;flex-shrink:0;font-size:0.72rem;padding:4px 9px;">En carro: ${formatBoxesKg(stats.avail[code] ?? 0)}</span>
           </div>
 
-          <div style="display:grid;grid-template-columns:${allowFrac ? "1fr 1fr" : "1fr"};gap:8px;margin-bottom:8px;">
-            <div style="display:flex;flex-direction:column;gap:3px;">
-              <span style="font-size:0.68rem;font-weight:800;color:var(--slate-600);text-transform:uppercase;letter-spacing:0.3px;">📦 ${escapeHtml(uCfg.unitPlural)}</span>
-              <div class="stepper" style="width:100%;justify-content:space-between;">
-                <button type="button" data-step-code="${code}" data-delta="-1" style="flex:0 0 36px;">−</button>
-                <input type="number" min="0" max="500" inputmode="numeric" data-qty-code="${code}" value="${qty}" title="${escapeHtml(uCfg.unitPlural)}" style="flex:1;min-width:34px;text-align:center;">
-                <button type="button" data-step-code="${code}" data-delta="1" style="flex:0 0 36px;">+</button>
-              </div>
-            </div>
+          ${mixBlockHtml}
+
+          <div style="display:grid;grid-template-columns:${drvSaleMixOpen ? (allowFrac ? "1fr" : "1fr") : allowFrac ? "1fr 1fr" : "1fr"};gap:8px;margin-bottom:8px;">
+            ${
+              !drvSaleMixOpen
+                ? `<div style="display:flex;flex-direction:column;gap:3px;">
+                    <span style="font-size:0.68rem;font-weight:800;color:var(--slate-600);text-transform:uppercase;letter-spacing:0.3px;">📦 ${escapeHtml(uCfg.unitPlural)}</span>
+                    <div class="stepper" style="width:100%;justify-content:space-between;">
+                      <button type="button" data-step-code="${code}" data-delta="-1" style="flex:0 0 36px;">−</button>
+                      <input type="number" min="0" max="500" inputmode="numeric" data-qty-code="${code}" value="${qty}" title="${escapeHtml(uCfg.unitPlural)}" style="flex:1;min-width:34px;text-align:center;">
+                      <button type="button" data-step-code="${code}" data-delta="1" style="flex:0 0 36px;">+</button>
+                    </div>
+                  </div>`
+                : ""
+            }
 
             ${allowFrac ? `<div style="display:flex;flex-direction:column;gap:3px;">
               <span style="font-size:0.68rem;font-weight:800;color:var(--slate-600);text-transform:uppercase;letter-spacing:0.3px;">⚖️ Sueltos (${escapeHtml(uCfg.subUnit)})</span>
@@ -2428,6 +2645,24 @@ document.getElementById("streetSaleCalibersContainer").addEventListener("click",
 });
 
 document.getElementById("streetSaleCalibersContainer").addEventListener("input", (e) => {
+  const mixInp = e.target.closest("input[data-drv-mix-code]");
+  if (mixInp) {
+    const code = mixInp.dataset.drvMixCode;
+    const stage = mixInp.dataset.drvMixStage;
+    if (!saleRipenessMix[code]) saleRipenessMix[code] = {};
+    saleRipenessMix[code][stage] = Math.max(0, Math.floor(Number(mixInp.value) || 0));
+    const newQty = syncSaleQtyFromRipenessMix(code);
+    const sumLbl = document.querySelector(`[data-mix-sum-lbl="${code}"]`);
+    if (sumLbl) {
+      const uCfg = getUnitConfig(storeSettings);
+      sumLbl.textContent = `Total: ${newQty} ${uCfg.unitPlural}`;
+    }
+    const row = document.querySelector(`[data-cal-row="${code}"]`);
+    if (row) row.classList.toggle("active-row", newQty > 0 || (saleKgs[code] || 0) > 0);
+    recalcStreetSaleTotals();
+    return;
+  }
+
   const qtyInp = e.target.closest("input[data-qty-code]");
   if (qtyInp) {
     const code = qtyInp.dataset.qtyCode;
@@ -2629,7 +2864,36 @@ document.getElementById("streetSaleForm").addEventListener("submit", async (e) =
 
     const subtotal = Math.round(boxes * unitPrice + extraKg * kgPrice);
     const totalKg = Math.round(equivBoxes * uCfg.subUnitsPerUnit);
-    items.push({ code, name: cal.name, qty: equivBoxes, boxes, extraKg, totalKg, unitPrice, kgPrice, subtotal });
+    let ripenessBreakdown = null;
+    let ripenessSummary = "";
+    const mixObj = saleRipenessMix[code];
+    if (drvSaleMixOpen && mixObj && boxes > 0) {
+      const bd = {};
+      const parts = [];
+      for (const st of DRV_RIPENESS_STAGES) {
+        const v = Math.max(0, Math.floor(Number(mixObj[st]) || 0));
+        if (v > 0) {
+          bd[st] = v;
+          parts.push(`${v} ${st}`);
+        }
+      }
+      if (parts.length > 0) {
+        ripenessBreakdown = bd;
+        ripenessSummary = parts.join(" + ");
+      }
+    }
+    items.push({
+      code,
+      name: cal.name,
+      qty: equivBoxes,
+      boxes,
+      extraKg,
+      totalKg,
+      unitPrice,
+      kgPrice,
+      subtotal,
+      ...(ripenessBreakdown ? { ripenessBreakdown, ripenessSummary } : {})
+    });
     boxesByCaliber[code] = equivBoxes;
     totalBoxes = round1(totalBoxes + equivBoxes);
     totalAmount += subtotal;
@@ -2760,6 +3024,10 @@ document.getElementById("streetSaleForm").addEventListener("submit", async (e) =
 
     saleQtys = {};
     saleKgs = {};
+    saleRipenessMix = {};
+    drvSaleMixOpen = false;
+    const mixBtn = document.getElementById("btnToggleDrvSaleRipeness");
+    if (mixBtn) mixBtn.textContent = "🎨 Detallar maduración";
     syncDefaultSalePrices();
     document.getElementById("saleSelectedPlaceId").value = "";
     document.getElementById("saleLinkedPlaceBadge").style.display = "none";
@@ -2790,7 +3058,10 @@ document.getElementById("streetSaleForm").addEventListener("submit", async (e) =
 function buildDigitalReceiptWhatsAppUrl(sale) {
   const cleanPhone = cleanPhoneForWhatsApp(sale.phone);
   const itemsLines = (sale.items || [])
-    .map((i) => `• ${i.qty} × ${i.name} (${formatCurrency(i.unitPrice)}) = ${formatCurrency(i.subtotal)}`)
+    .map(
+      (i) =>
+        `• ${i.qty} × ${i.name}${i.ripenessSummary ? ` [${i.ripenessSummary}]` : ""} (${formatCurrency(i.unitPrice || i.price)}) = ${formatCurrency(i.subtotal)}`
+    )
     .join("\n");
 
   let payLine = `*Pagado (${sale.paymentMethod}):* ${formatCurrency(sale.totalAmount)}`;
@@ -3246,6 +3517,10 @@ window.__drvMakeStopFirst = async function (idx) {
 };
 
 window.__drvRemoveStopFromMap = async function (idx) {
+  if (activeRouteDoc?.sealed) {
+    showToast("🔒 Tu ruta del día ya fue sellada por Administración.");
+    return;
+  }
   if (idx < 0 || idx >= activeRouteStops.length) return;
   const removed = activeRouteStops.splice(idx, 1)[0];
   renderDriverActiveRouteCard();
@@ -3326,6 +3601,10 @@ document.getElementById("driverActiveRouteList")?.addEventListener("click", asyn
   }
   const mv = e.target.closest("button[data-drv-rt-move]");
   if (mv) {
+    if (activeRouteDoc?.sealed) {
+      showToast("🔒 Tu ruta del día ya fue sellada por Administración.");
+      return;
+    }
     const idx = Number(mv.dataset.drvRtIdx);
     const next = idx + Number(mv.dataset.drvRtMove);
     if (next < 0 || next >= activeRouteStops.length) return;
@@ -3347,6 +3626,10 @@ document.getElementById("driverActiveRouteList")?.addEventListener("click", asyn
   }
   const rem = e.target.closest("button[data-drv-rt-remove]");
   if (rem) {
+    if (activeRouteDoc?.sealed) {
+      showToast("🔒 Tu ruta del día ya fue sellada por Administración.");
+      return;
+    }
     const idx = Number(rem.dataset.drvRtRemove);
     const targetStop = activeRouteStops[idx];
     if (!targetStop) return;
@@ -3364,6 +3647,10 @@ document.getElementById("driverActiveRouteList")?.addEventListener("click", asyn
 });
 
 document.getElementById("btnClearActiveRoute")?.addEventListener("click", async () => {
+  if (activeRouteDoc?.sealed) {
+    showToast("🔒 Tu ruta del día ya fue sellada por Administración.");
+    return;
+  }
   if (activeRouteStops.length === 0) return;
   const confirmed = await openDriverConfirmModal({
     title: "¿Limpiar toda tu ruta?",
@@ -3387,6 +3674,10 @@ document.getElementById("btnStartActiveRoute3D")?.addEventListener("click", () =
 });
 
 document.getElementById("btnReoptimizeActiveRoute")?.addEventListener("click", async () => {
+  if (activeRouteDoc?.sealed) {
+    showToast("🔒 Tu ruta del día ya fue sellada por Administración.");
+    return;
+  }
   const done = activeRouteStops.filter((s) => s.status === "done");
   const pending = activeRouteStops.filter((s) => s.status !== "done");
   if (pending.length < 2) {
