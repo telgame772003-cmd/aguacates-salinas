@@ -165,6 +165,80 @@ export const INDUSTRY_TEMPLATES = {
       HU360: { code: "HU360", name: "Huevo Blanco Caja", subtitle: "Caja 12 conos", description: "Huevo fresco de granja seleccionado.", badge: "Fresco", price: 890, pricePerKg: 78, minPrice: 840, available: true, order: 3 },
       RF24: { code: "RF24", name: "Refresco Surtido Paq", subtitle: "Charola 24 unidades", description: "Bebidas de alta demanda para tiendas de esquina.", badge: "Promoción", price: 310, pricePerKg: 28, minPrice: 285, available: true, order: 4 }
     }
+  },
+
+  pharmacy: {
+    id: "pharmacy",
+    label: "💊 Farmacia e Insumos Médicos",
+    pinEmoji: "💊",
+    folioPrefix: "MED",
+    theme: {
+      primary: "#0d9488",
+      dark: "#042f2e",
+      accent: "#38bdf8"
+    },
+    unitConfig: {
+      unitSingular: "caja",
+      unitPlural: "cajas",
+      subUnit: "pza",
+      subUnitsPerUnit: 10,
+      allowSubUnit: true
+    },
+    terminology: {
+      batchSingular: "Lote",
+      batchPlural: "Lotes",
+      storageArea: "Almacén Sanitario",
+      productGroupLabel: "Medicamentos / Insumos"
+    },
+    modules: {
+      coldRooms: true,
+      ripeness: false,
+      onlineStore: true,
+      fractionalSales: true,
+      nav3d: true
+    },
+    defaultProducts: {
+      PAR500: { code: "PAR500", name: "Analgésico 500mg (Paq 10)", subtitle: "Caja colectiva 10 blísteres", description: "Alta rotación para farmacias independientes y consultorios.", badge: "Esencial", price: 380, pricePerKg: 40, minPrice: 340, available: true, order: 1 },
+      SUERO: { code: "SUERO", name: "Electrolitos Orales 12×625ml", subtitle: "Charola surtida", description: "Hidratación grado médico en envase sellado.", badge: "Alta Demanda", price: 295, pricePerKg: 26, minPrice: 265, available: true, order: 2 },
+      CURA: { code: "CURA", name: "Kit Material de Curación", subtitle: "Gasas, vendas y antiséptico", description: "Paquete mayorista para clínicas y botiquines.", badge: "Clínico", price: 540, pricePerKg: 56, minPrice: 490, available: true, order: 3 }
+    }
+  },
+
+  hardware: {
+    id: "hardware",
+    label: "🛠️ Ferretería y Refacciones",
+    pinEmoji: "🛠️",
+    folioPrefix: "FER",
+    theme: {
+      primary: "#ea580c",
+      dark: "#1c1917",
+      accent: "#facc15"
+    },
+    unitConfig: {
+      unitSingular: "caja",
+      unitPlural: "cajas",
+      subUnit: "pza",
+      subUnitsPerUnit: 20,
+      allowSubUnit: true
+    },
+    terminology: {
+      batchSingular: "Embarque",
+      batchPlural: "Embarques",
+      storageArea: "Bodega Central",
+      productGroupLabel: "Artículos / SKUs"
+    },
+    modules: {
+      coldRooms: false,
+      ripeness: false,
+      onlineStore: true,
+      fractionalSales: true,
+      nav3d: true
+    },
+    defaultProducts: {
+      DISC: { code: "DISC", name: "Disco Corte 4.5\" (Paq 25)", subtitle: "Acero inoxidable profesional", description: "Caja cerrada de 25 discos abrasivos.", badge: "Industrial", price: 620, pricePerKg: 27, minPrice: 560, available: true, order: 1 },
+      CINT: { code: "CINT", name: "Cinta Aislar Negra (Paq 20)", subtitle: "Uso eléctrico pesado", description: "Paquete mayorista para ferreterías.", badge: "Rotación", price: 340, pricePerKg: 18, minPrice: 300, available: true, order: 2 },
+      SELL: { code: "SELL", name: "Sellador Silicón (Caja 12)", subtitle: "Transparente multiusos", description: "Cartuchos de 280ml listos para exhibidor.", badge: "Construcción", price: 780, pricePerKg: 68, minPrice: 710, available: true, order: 3 }
+    }
   }
 };
 

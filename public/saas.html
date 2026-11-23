@@ -3,26 +3,50 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Master SaaS Console | Ruta Pro Distribution — Ruta Pro Technologies</title>
+  <title>Master SaaS Console | Ruta Pro Distribution — Global Control Plane</title>
   <link rel="icon" type="image/png" href="assets/favicon.png">
-  <link rel="stylesheet" href="css/styles.css?v=rpd_1">
+  <link rel="stylesheet" href="css/styles.css?v=rpd_4">
   <style>
     body.saas-body {
-      background: #0f172a;
+      background: #0b1120;
       color: #f8fafc;
       min-height: 100vh;
-      font-family: system-ui, -apple-system, sans-serif;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
     }
+    .saas-body .btn-outline {
+      background: rgba(15, 23, 42, 0.85) !important;
+      border: 1px solid #334155 !important;
+      color: #e2e8f0 !important;
+    }
+    .saas-body .btn-outline:hover {
+      background: #1e293b !important;
+      border-color: #64748b !important;
+      color: #ffffff !important;
+    }
+    .saas-body .btn-cta-new {
+      background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+      border: 1px solid #34d399 !important;
+      color: #ffffff !important;
+      font-weight: 800;
+      box-shadow: 0 4px 14px rgba(16, 185, 129, 0.25);
+    }
+    .saas-body .btn-cta-new:hover {
+      filter: brightness(1.08);
+    }
+
+    /* Topbar */
     .saas-topbar {
-      background: #020617;
+      background: rgba(2, 6, 23, 0.92);
+      backdrop-filter: blur(10px);
       border-bottom: 1px solid #1e293b;
-      padding: 14px 20px;
+      padding: 12px 20px;
       position: sticky;
       top: 0;
-      z-index: 50;
+      z-index: 60;
     }
     .saas-topbar-inner {
-      max-width: 1200px;
+      max-width: 1400px;
       margin: 0 auto;
       display: flex;
       justify-content: space-between;
@@ -38,7 +62,7 @@
     .saas-badge {
       background: linear-gradient(135deg, #10b981, #0284c7);
       color: #fff;
-      font-size: 0.68rem;
+      font-size: 0.66rem;
       font-weight: 900;
       padding: 3px 9px;
       border-radius: 999px;
@@ -46,237 +70,346 @@
       text-transform: uppercase;
     }
     .saas-wrap {
-      max-width: 1200px;
+      max-width: 1400px;
       margin: 0 auto;
-      padding: 24px 16px 60px;
+      padding: 20px 18px 70px;
     }
+
+    /* Login */
     .saas-login-box {
-      max-width: 430px;
-      margin: 60px auto;
-      background: #1e293b;
-      border: 1px solid #334155;
+      max-width: 420px;
+      margin: 64px auto;
+      background: #111827;
+      border: 1px solid #1f2937;
       border-radius: 18px;
       padding: 28px 24px;
-      box-shadow: 0 25px 50px rgba(0, 0, 0, 0.45);
+      box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
     }
+
+    /* KPIs */
     .saas-kpi-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 14px;
-      margin-bottom: 24px;
+      gap: 12px;
+      margin-bottom: 18px;
     }
     .saas-kpi-card {
-      background: #1e293b;
-      border: 1px solid #334155;
+      background: #111827;
+      border: 1px solid #1f2937;
       border-radius: 14px;
-      padding: 16px 18px;
+      padding: 14px 16px;
     }
     .saas-kpi-lbl {
-      font-size: 0.74rem;
+      font-size: 0.71rem;
       font-weight: 800;
       text-transform: uppercase;
       letter-spacing: 0.05em;
       color: #94a3b8;
     }
     .saas-kpi-val {
-      font-size: 1.75rem;
+      font-size: 1.55rem;
       font-weight: 900;
       color: #f8fafc;
       margin-top: 4px;
+      line-height: 1.15;
     }
     .saas-kpi-sub {
-      font-size: 0.78rem;
-      color: #cbd5e1;
-      margin-top: 3px;
+      font-size: 0.74rem;
+      color: #94a3b8;
+      margin-top: 5px;
+      line-height: 1.35;
     }
-    .saas-tenant-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
-      gap: 16px;
-    }
-    .saas-tenant-card {
-      background: linear-gradient(180deg, #1e293b 0%, #172033 100%);
-      border: 1px solid #334155;
-      border-radius: 16px;
-      padding: 18px;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      gap: 14px;
-      box-shadow: 0 10px 26px rgba(2, 6, 23, 0.35);
-      transition: border-color 0.18s ease, transform 0.18s ease;
-    }
-    .saas-tenant-card:hover {
-      border-color: #475569;
-    }
-    .saas-tenant-card.is-billing-ok {
-      border-left: 5px solid #10b981;
-    }
-    .saas-tenant-card.is-billing-soon {
-      border-left: 5px solid #f59e0b;
-    }
-    .saas-tenant-card.is-billing-overdue {
-      border-left: 5px solid #ef4444;
-      box-shadow: 0 10px 26px rgba(239, 68, 68, 0.16);
-    }
-    .saas-tenant-card.is-billing-unset {
-      border-left: 5px solid #475569;
-    }
-    .saas-filter-chips {
+
+    /* Action Inbox Pills */
+    .saas-inbox-bar {
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
-      margin-bottom: 16px;
+      align-items: center;
+      margin-bottom: 12px;
     }
-    .saas-filter-chip {
-      border: 1px solid #334155;
-      background: #1e293b;
+    .saas-inbox-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid #1f2937;
+      background: #111827;
       color: #cbd5e1;
       border-radius: 999px;
       padding: 6px 13px;
-      font-size: 0.78rem;
+      font-size: 0.77rem;
       font-weight: 800;
       cursor: pointer;
-      transition: all 0.15s ease;
+      transition: all 0.14s ease;
     }
-    .saas-filter-chip:hover {
-      border-color: #64748b;
+    .saas-inbox-pill:hover {
+      border-color: #475569;
       color: #fff;
     }
-    .saas-filter-chip.active {
+    .saas-inbox-pill.active {
       background: #0284c7;
       border-color: #38bdf8;
-      color: #ffffff;
+      color: #fff;
     }
-    .saas-cycle-track {
-      width: 100%;
-      height: 6px;
+    .saas-inbox-cnt {
+      background: rgba(255, 255, 255, 0.14);
+      padding: 1px 7px;
       border-radius: 999px;
-      background: #1e293b;
-      overflow: hidden;
-      margin: 4px 0 8px;
+      font-size: 0.7rem;
     }
-    .saas-cycle-fill {
+
+    /* Filter Toolbar */
+    .saas-filter-bar {
+      display: grid;
+      grid-template-columns: minmax(220px, 1.8fr) repeat(3, minmax(135px, 1fr)) auto auto;
+      gap: 8px;
+      align-items: center;
+      background: #111827;
+      border: 1px solid #1f2937;
+      border-radius: 12px;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+    }
+    .saas-dark-input {
+      background: #0b1120 !important;
+      border: 1px solid #334155 !important;
+      color: #f8fafc !important;
+      font-size: 0.81rem !important;
+      padding: 7px 10px !important;
+      border-radius: 8px !important;
+    }
+
+    /* High-Density Executive Table */
+    .saas-table-card {
+      background: #111827;
+      border: 1px solid #1f2937;
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35);
+    }
+    .saas-table-wrap {
+      width: 100%;
+      overflow-x: auto;
+    }
+    table.saas-table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 960px;
+      font-size: 0.81rem;
+    }
+    .saas-table thead th {
+      background: #0f172a;
+      color: #94a3b8;
+      font-size: 0.7rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 11px 12px;
+      text-align: left;
+      border-bottom: 1px solid #1f2937;
+      white-space: nowrap;
+      user-select: none;
+    }
+    .saas-table thead th[data-sort-col] {
+      cursor: pointer;
+    }
+    .saas-table thead th[data-sort-col]:hover {
+      color: #f8fafc;
+    }
+    .saas-table tbody tr {
+      border-bottom: 1px solid rgba(51, 65, 85, 0.45);
+      cursor: pointer;
+      transition: background 0.12s ease;
+    }
+    .saas-table tbody tr:hover {
+      background: rgba(30, 41, 59, 0.65);
+    }
+    .saas-table tbody tr.is-row-overdue {
+      border-left: 4px solid #ef4444;
+      background: rgba(127, 29, 29, 0.1);
+    }
+    .saas-table tbody tr.is-row-soon {
+      border-left: 4px solid #f59e0b;
+    }
+    .saas-table tbody tr.is-row-ok {
+      border-left: 4px solid #10b981;
+    }
+    .saas-table tbody tr.is-row-unset {
+      border-left: 4px solid #475569;
+    }
+    .saas-table td {
+      padding: 10px 12px;
+      vertical-align: middle;
+    }
+    .saas-mini-bar {
+      width: 92px;
+      height: 5px;
+      background: #1e293b;
+      border-radius: 999px;
+      overflow: hidden;
+      margin-top: 4px;
+    }
+    .saas-mini-bar > div {
       height: 100%;
       border-radius: 999px;
-      transition: width 0.25s ease;
-    }
-    .saas-body .btn-outline {
-      background: rgba(15, 23, 42, 0.78) !important;
-      border: 1px solid #475569 !important;
-      color: #f1f5f9 !important;
-    }
-    .saas-body .btn-outline:hover {
-      background: #334155 !important;
-      border-color: #64748b !important;
-      color: #ffffff !important;
-    }
-    .saas-body .btn-cta-new {
-      background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
-      border: 1px solid #34d399 !important;
-      color: #ffffff !important;
-      font-weight: 800;
-      box-shadow: 0 6px 18px rgba(16, 185, 129, 0.28);
-    }
-    .saas-body .btn-cta-new:hover {
-      filter: brightness(1.07);
-    }
-    .saas-toolbar-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
-      margin-bottom: 16px;
-      background: rgba(30, 41, 59, 0.65);
-      border: 1px solid #334155;
-      border-radius: 14px;
-      padding: 12px 14px;
-    }
-    @media (max-width: 640px) {
-      .saas-topbar {
-        padding: 12px;
-      }
-      .saas-toolbar-row {
-        flex-direction: column;
-        align-items: stretch;
-      }
-      .saas-toolbar-controls {
-        width: 100%;
-        flex-direction: column;
-        align-items: stretch !important;
-      }
-      #saasSearchInput {
-        max-width: 100% !important;
-      }
-    }
-    .saas-tenant-card.is-suspended {
-      border-color: #ef4444;
-      background: rgba(127, 29, 29, 0.18);
     }
     .saas-pill {
       display: inline-flex;
       align-items: center;
       gap: 4px;
-      font-size: 0.72rem;
+      font-size: 0.69rem;
       font-weight: 800;
-      padding: 3px 9px;
+      padding: 2px 8px;
       border-radius: 999px;
-      background: #334155;
-      color: #e2e8f0;
+      white-space: nowrap;
     }
-    .saas-pill.active { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
-    .saas-pill.suspended { background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); }
+    .saas-pill.active { background: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); }
+    .saas-pill.suspended { background: rgba(239, 68, 68, 0.18); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.35); }
+
+    .saas-pagination-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 10px 14px;
+      background: #0f172a;
+      font-size: 0.78rem;
+      color: #94a3b8;
+    }
+
+    /* Slide-Over Right Drawer */
+    .saas-drawer-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(2, 6, 23, 0.66);
+      backdrop-filter: blur(3px);
+      z-index: 200;
+      justify-content: flex-end;
+    }
+    .saas-drawer-backdrop.open {
+      display: flex;
+    }
+    .saas-drawer {
+      width: min(540px, 100vw);
+      height: 100%;
+      background: #0f172a;
+      border-left: 1px solid #334155;
+      display: flex;
+      flex-direction: column;
+      box-shadow: -18px 0 45px rgba(0, 0, 0, 0.55);
+      animation: saasSlideIn 0.18s ease-out;
+    }
+    @keyframes saasSlideIn {
+      from { transform: translateX(30px); opacity: 0.6; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    .saas-drawer-head {
+      padding: 16px 18px 12px;
+      background: #020617;
+      border-bottom: 1px solid #1e293b;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .saas-drawer-tabs {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      background: #020617;
+      border-bottom: 1px solid #1e293b;
+      padding: 0 10px;
+      gap: 4px;
+    }
+    .saas-drawer-tab {
+      background: transparent;
+      border: none;
+      border-bottom: 2.5px solid transparent;
+      color: #94a3b8;
+      font-size: 0.76rem;
+      font-weight: 800;
+      padding: 10px 4px;
+      cursor: pointer;
+      text-align: center;
+    }
+    .saas-drawer-tab.active {
+      color: #38bdf8;
+      border-bottom-color: #38bdf8;
+    }
+    .saas-drawer-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 18px 28px;
+    }
     .saas-link-chip {
       display: inline-flex;
       align-items: center;
-      gap: 4px;
-      padding: 5px 10px;
+      gap: 5px;
+      padding: 6px 11px;
       border-radius: 8px;
-      background: #0f172a;
+      background: #1e293b;
       border: 1px solid #334155;
       color: #38bdf8;
-      font-size: 0.75rem;
+      font-size: 0.77rem;
       font-weight: 700;
       text-decoration: none;
     }
-    .saas-link-chip:hover { background: #1e293b; border-color: #38bdf8; }
+    .saas-link-chip:hover { background: #334155; color: #fff; }
+
+    /* Dark Modals */
     .saas-dark-modal .modal-card {
-      background: #1e293b;
+      background: #111827;
       color: #f8fafc;
       border: 1px solid #334155;
     }
-    .saas-dark-modal .form-label { color: #cbd5e1; }
-    .saas-dark-modal .form-control {
-      background: #0f172a;
+    .saas-dark-modal .form-label { color: #cbd5e1; font-size: 0.76rem; }
+    .saas-dark-modal .form-control,
+    .saas-drawer .form-control {
+      background: #0b1120;
       border-color: #334155;
       color: #f8fafc;
+    }
+
+    @media (max-width: 980px) {
+      .saas-filter-bar {
+        grid-template-columns: 1fr 1fr;
+      }
+      .saas-filter-bar #saasSearchInput {
+        grid-column: 1 / -1;
+      }
     }
   </style>
 </head>
 <body class="saas-body">
 
+  <!-- TOP BAR -->
   <header class="saas-topbar">
     <div class="saas-topbar-inner">
       <div class="saas-brand">
-        <span style="font-size:1.45rem;">🌐</span>
+        <span style="font-size:1.4rem;">🌐</span>
         <div>
-          <strong style="font-size:1.05rem;color:#fff;display:block;line-height:1.15;">Ruta Pro Distribution</strong>
-          <span style="font-size:0.73rem;color:#94a3b8;">Ruta Pro Technologies • Multi-Tenant SaaS Control</span>
+          <strong style="font-size:1.02rem;color:#fff;display:block;line-height:1.15;">Ruta Pro Distribution</strong>
+          <span style="font-size:0.72rem;color:#94a3b8;">Global Multi-Tenant SaaS Control Plane</span>
         </div>
         <span class="saas-badge">Master Superadmin</span>
       </div>
 
       <div id="saasHeaderActions" style="display:none;gap:8px;align-items:center;flex-wrap:wrap;">
+        <select id="saasReportCurrencySelect" class="saas-dark-input" title="Moneda base para consolidar KPIs globales" style="font-weight:800;width:auto;">
+          <option value="USD">🌎 Consolidar en USD ($)</option>
+          <option value="MXN" selected>🇲🇽 Consolidar en MXN ($)</option>
+        </select>
+        <button type="button" id="btnOpenFxModal" class="btn btn-outline btn-sm" title="Configurar tipos de cambio de referencia">💱 Divisas</button>
+        <button type="button" id="btnExportTenantsXlsx" class="btn btn-outline btn-sm" title="Exportar cartera filtrada a Excel (.xlsx)">📊 Excel</button>
         <button type="button" id="btnSaasRefresh" class="btn btn-outline btn-sm">🔄 Actualizar</button>
-        <button type="button" id="btnSaasResyncSalinas" class="btn btn-outline btn-sm" style="color:#fcd34d !important;border-color:#b45309 !important;" title="Sincronizar colecciones raíz históricas hacia el tenant salinas">🥑 Sincronizar Salinas</button>
-        <button type="button" id="btnOpenNewTenantModal" class="btn btn-primary btn-sm btn-cta-new">+ Nuevo Tenant (Empresa)</button>
+        <button type="button" id="btnOpenNewTenantModal" class="btn btn-primary btn-sm btn-cta-new">+ Nuevo Tenant</button>
         <button type="button" id="btnSaasLogout" class="btn btn-outline btn-sm" style="color:#fca5a5 !important;border-color:#991b1b !important;">🚪 Salir</button>
       </div>
     </div>
   </header>
 
-  <!-- LOGIN / INITIALIZATION VIEW -->
+  <!-- LOGIN VIEW -->
   <section id="saasLoginView" class="saas-wrap">
     <div class="saas-login-box">
       <div style="text-align:center;margin-bottom:18px;">
@@ -290,13 +423,13 @@
       <form id="saasLoginForm">
         <div class="form-group">
           <label class="form-label" for="saasMasterPass" style="color:#cbd5e1;">Clave Maestra SaaS *</label>
-          <input type="password" id="saasMasterPass" class="form-control" placeholder="Mínimo 6 caracteres" minlength="6" required style="background:#0f172a;border-color:#334155;color:#fff;font-weight:800;text-align:center;">
+          <input type="password" id="saasMasterPass" class="form-control" placeholder="Mínimo 6 caracteres" minlength="6" required style="background:#0b1120;border-color:#334155;color:#fff;font-weight:800;text-align:center;">
         </div>
         <label style="display:flex;align-items:center;gap:8px;font-size:0.8rem;color:#cbd5e1;margin-bottom:16px;cursor:pointer;">
           <input type="checkbox" id="saasRememberChk" checked>
           <span>Recordar sesión en este dispositivo</span>
         </label>
-        <button type="submit" id="btnSaasLoginSubmit" class="btn btn-primary" style="width:100%;padding:12px;background:#10b981;border:none;font-weight:800;">
+        <button type="submit" id="btnSaasLoginSubmit" class="btn btn-primary btn-cta-new" style="width:100%;padding:12px;">
           Entrar a Consola SaaS
         </button>
       </form>
@@ -305,63 +438,307 @@
 
   <!-- DASHBOARD VIEW -->
   <main id="saasDashboardView" class="saas-wrap" style="display:none;">
+    <!-- Executive KPIs -->
     <div class="saas-kpi-grid">
       <div class="saas-kpi-card">
-        <div class="saas-kpi-lbl">🏢 Empresas (Tenants)</div>
+        <div class="saas-kpi-lbl">🏢 Cartera Global</div>
         <div class="saas-kpi-val" id="kpiSaasTenants">0</div>
-        <div class="saas-kpi-sub" id="kpiSaasTenantsSub">0 activas • 0 en pausa</div>
+        <div class="saas-kpi-sub" id="kpiSaasTenantsSub">0 activas • 0 países</div>
+      </div>
+      <div class="saas-kpi-card" style="border-color:#065f46;background:linear-gradient(180deg,#111827 0%,#0b221d 100%);">
+        <div class="saas-kpi-lbl" style="color:#6ee7b7;">💳 MRR Mensual Consolidado</div>
+        <div class="saas-kpi-val" id="kpiSaasMrr" style="color:#34d399;">$0</div>
+        <div class="saas-kpi-sub" id="kpiSaasMrrBreakdown">Sin suscripciones activas</div>
       </div>
       <div class="saas-kpi-card">
-        <div class="saas-kpi-lbl">🚗 Flotilla Conectada Hoy</div>
-        <div class="saas-kpi-val" id="kpiSaasTrucks">0</div>
-        <div class="saas-kpi-sub" id="kpiSaasTrucksSub">0 choferes registrados en total</div>
+        <div class="saas-kpi-lbl">📅 Ingreso Anualizado (ARR)</div>
+        <div class="saas-kpi-val" id="kpiSaasArr" style="color:#38bdf8;">$0</div>
+        <div class="saas-kpi-sub" id="kpiSaasArrSub">Anualidades plataforma: $0</div>
       </div>
       <div class="saas-kpi-card">
-        <div class="saas-kpi-lbl">🏪 Puntos de Venta en Mapa</div>
-        <div class="saas-kpi-val" id="kpiSaasPlaces">0</div>
-        <div class="saas-kpi-sub">Negocios geolocalizados en la red</div>
+        <div class="saas-kpi-lbl">🚨 Salud de Cobranza</div>
+        <div class="saas-kpi-val" id="kpiSaasAlerts" style="color:#fbbf24;">0 alertas</div>
+        <div class="saas-kpi-sub" id="kpiSaasAlertsSub">0 vencidos • 0 vencen en ≤5d</div>
       </div>
       <div class="saas-kpi-card">
-        <div class="saas-kpi-lbl">💰 GMV Procesado Hoy</div>
-        <div class="saas-kpi-val" id="kpiSaasGmv">$0</div>
-        <div class="saas-kpi-sub" id="kpiSaasGmvSub">0 ventas en ruta hoy</div>
-      </div>
-      <div class="saas-kpi-card" style="border-color:#065f46;background:linear-gradient(180deg,#1e293b 0%,#0f2922 100%);">
-        <div class="saas-kpi-lbl" style="color:#6ee7b7;">💳 Facturación SaaS</div>
-        <div class="saas-kpi-val" id="kpiSaasMrr" style="color:#34d399;">$0/mes</div>
-        <div class="saas-kpi-sub" id="kpiSaasBillingSub">Anualidades: $0 • 0 por vencer</div>
+        <div class="saas-kpi-lbl">🚗 Flota y Actividad</div>
+        <div class="saas-kpi-val" id="kpiSaasFleet">0 chof.</div>
+        <div class="saas-kpi-sub" id="kpiSaasFleetSub">0 GPS en vivo • 0 negocios</div>
       </div>
     </div>
 
-    <div class="saas-toolbar-row">
-      <div>
-        <h2 style="font-size:1.15rem;margin:0;color:#f8fafc;">Empresas Suscritas a Ruta Pro Distribution</h2>
-        <div style="font-size:0.78rem;color:#94a3b8;margin-top:2px;">Administra bóvedas aisladas, módulos por giro o crea una empresa de pruebas.</div>
-      </div>
-      <div class="saas-toolbar-controls" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <input type="search" id="saasSearchInput" class="form-control" placeholder="🔍 Filtrar por nombre, código o giro..." style="width:250px;max-width:100%;background:#0f172a;border-color:#475569;color:#fff;padding:8px 12px;font-size:0.84rem;">
-        <button type="button" id="btnOpenNewTenantHero" class="btn btn-primary btn-sm btn-cta-new" style="padding:9px 14px;white-space:nowrap;">+ Nuevo Tenant (Empresa)</button>
-      </div>
+    <!-- Action Inbox (Exception Filters) -->
+    <div id="saasInboxBar" class="saas-inbox-bar">
+      <button type="button" class="saas-inbox-pill active" data-inbox="all">Todas <span class="saas-inbox-cnt" id="cntInboxAll">0</span></button>
+      <button type="button" class="saas-inbox-pill" data-inbox="overdue">🔴 Vencidos <span class="saas-inbox-cnt" id="cntInboxOverdue">0</span></button>
+      <button type="button" class="saas-inbox-pill" data-inbox="soon">🟡 Vencen ≤5d <span class="saas-inbox-cnt" id="cntInboxSoon">0</span></button>
+      <button type="button" class="saas-inbox-pill" data-inbox="ok">🟢 Al corriente <span class="saas-inbox-cnt" id="cntInboxOk">0</span></button>
+      <button type="button" class="saas-inbox-pill" data-inbox="unset">⚪ Sin fecha <span class="saas-inbox-cnt" id="cntInboxUnset">0</span></button>
+      <button type="button" class="saas-inbox-pill" data-inbox="suspended">⏸️ Suspendidos <span class="saas-inbox-cnt" id="cntInboxSuspended">0</span></button>
     </div>
 
-    <div id="saasBillingFilters" class="saas-filter-chips">
-      <button type="button" class="saas-filter-chip active" data-billing-filter="all">Todos</button>
-      <button type="button" class="saas-filter-chip" data-billing-filter="soon">🟡 Por vencer (≤5d)</button>
-      <button type="button" class="saas-filter-chip" data-billing-filter="overdue">🔴 Vencidos</button>
-      <button type="button" class="saas-filter-chip" data-billing-filter="ok">🟢 Al corriente</button>
-      <button type="button" class="saas-filter-chip" data-billing-filter="suspended">⏸️ En pausa</button>
+    <!-- Multi-Dimension Filter Bar -->
+    <div class="saas-filter-bar">
+      <input type="search" id="saasSearchInput" class="saas-dark-input" placeholder="🔍 Buscar por empresa, slug, país, ciudad o nota de facturación...">
+      <select id="saasFilterCountry" class="saas-dark-input">
+        <option value="all">🌍 Todos los países</option>
+      </select>
+      <select id="saasFilterCurrency" class="saas-dark-input">
+        <option value="all">💱 Todas las monedas</option>
+      </select>
+      <select id="saasFilterIndustry" class="saas-dark-input">
+        <option value="all">🏭 Todos los giros</option>
+        <option value="avocado">🥑 Aguacate y Fruta</option>
+        <option value="citrus">🍋 Limón y Cítricos</option>
+        <option value="tomato">🍅 Tomate y Hortalizas</option>
+        <option value="groceries">📦 Abarrotes Mayorista</option>
+        <option value="pharmacy">💊 Farmacia / Médico</option>
+        <option value="hardware">🛠️ Ferretería / Refacciones</option>
+      </select>
+      <select id="saasPageSizeSelect" class="saas-dark-input" title="Empresas por página">
+        <option value="25">25 / pág</option>
+        <option value="50" selected>50 / pág</option>
+        <option value="100">100 / pág</option>
+        <option value="250">250 / pág</option>
+      </select>
+      <button type="button" id="btnRefreshPageTelemetry" class="btn btn-outline btn-sm" title="Consultar GPS y ventas en vivo de las empresas en esta página">⚡ Vivo Pág.</button>
     </div>
 
-    <div id="saasTenantsGrid" class="saas-tenant-grid"></div>
+    <!-- Executive DataGrid -->
+    <div class="saas-table-card">
+      <div class="saas-table-wrap">
+        <table class="saas-table">
+          <thead>
+            <tr>
+              <th data-sort-col="brand">Empresa / Slug <span id="sortIcon_brand"></span></th>
+              <th data-sort-col="country">País / Divisa <span id="sortIcon_country"></span></th>
+              <th data-sort-col="fleet">Estado y Flota <span id="sortIcon_fleet"></span></th>
+              <th data-sort-col="mrr">Suscripción <span id="sortIcon_mrr"></span></th>
+              <th data-sort-col="due">Próximo Corte <span id="sortIcon_due">▲</span></th>
+              <th data-sort-col="punctuality">Puntualidad <span id="sortIcon_punctuality"></span></th>
+              <th style="text-align:right;">Acciones Rápidas</th>
+            </tr>
+          </thead>
+          <tbody id="saasTenantsTableBody">
+            <tr><td colspan="7" style="text-align:center;padding:32px;color:#94a3b8;">Cargando cartera de tenants...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="saas-pagination-bar">
+        <div id="saasPageSummaryText">Mostrando 0 de 0 empresas</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button type="button" id="btnSaasPrevPage" class="btn btn-outline btn-sm" style="padding:4px 10px;">‹ Anterior</button>
+          <span id="saasPageIndicator" style="font-weight:800;color:#e2e8f0;">Página 1 / 1</span>
+          <button type="button" id="btnSaasNextPage" class="btn btn-outline btn-sm" style="padding:4px 10px;">Siguiente ›</button>
+        </div>
+      </div>
+    </div>
   </main>
 
-  <!-- MODAL: CREATE NEW TENANT (1-CLICK ONBOARDING) -->
+  <!-- SLIDE-OVER RIGHT DRAWER (TENANT 360 DETAIL) -->
+  <div id="tenantDrawerBackdrop" class="saas-drawer-backdrop" role="dialog" aria-modal="true">
+    <aside class="saas-drawer">
+      <div class="saas-drawer-head">
+        <div style="min-width:0;flex:1;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <strong id="drwTitle" style="font-size:1.12rem;color:#fff;">Empresa</strong>
+            <span id="drwStatusPill" class="saas-pill active">🟢 Activo</span>
+          </div>
+          <div id="drwSubMeta" style="font-size:0.76rem;color:#94a3b8;margin-top:3px;"></div>
+        </div>
+        <button type="button" id="btnCloseDrawer" class="btn btn-outline btn-sm" style="padding:4px 9px;font-weight:900;">✕</button>
+      </div>
+
+      <nav class="saas-drawer-tabs" id="drawerTabsNav">
+        <button type="button" class="saas-drawer-tab active" data-drawer-tab="overview">📊 Operación</button>
+        <button type="button" class="saas-drawer-tab" data-drawer-tab="billing">💳 Cobranza</button>
+        <button type="button" class="saas-drawer-tab" data-drawer-tab="history">📜 Historial</button>
+        <button type="button" class="saas-drawer-tab" data-drawer-tab="settings">⚙️ Ajustes</button>
+      </nav>
+
+      <div class="saas-drawer-body">
+        <input type="hidden" id="drwSlug">
+
+        <!-- TAB 1: OVERVIEW & TELEMETRY -->
+        <section id="drwPane_overview">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <span style="font-size:0.75rem;font-weight:800;color:#94a3b8;text-transform:uppercase;">Telemetría en Tiempo Real</span>
+            <button type="button" id="btnDrwRefreshLive" class="btn btn-outline btn-sm" style="padding:4px 9px;font-size:0.72rem;">⚡ Consultar en Vivo</button>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:16px;">
+            <div style="background:#111827;border:1px solid #1f2937;border-radius:10px;padding:11px;">
+              <div style="font-size:0.7rem;color:#94a3b8;">CHOFERES Y GPS</div>
+              <strong id="drwTelDrivers" style="font-size:1.15rem;color:#fff;display:block;margin-top:2px;">0 / 0</strong>
+              <span id="drwTelGps" style="font-size:0.73rem;color:#34d399;">0 con GPS activo</span>
+            </div>
+            <div style="background:#111827;border:1px solid #1f2937;border-radius:10px;padding:11px;">
+              <div style="font-size:0.7rem;color:#94a3b8;">VENTAS HOY (LOCAL)</div>
+              <strong id="drwTelGmv" style="font-size:1.15rem;color:#34d399;display:block;margin-top:2px;">$0</strong>
+              <span id="drwTelPlaces" style="font-size:0.73rem;color:#94a3b8;">0 puntos en mapa</span>
+            </div>
+          </div>
+
+          <div style="font-size:0.75rem;font-weight:800;color:#94a3b8;text-transform:uppercase;margin-bottom:8px;">Accesos Directos de esta Instancia</div>
+          <div id="drwDirectLinks" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px;"></div>
+
+          <div style="background:#111827;border:1px solid #1f2937;border-radius:12px;padding:12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+              <strong style="font-size:0.82rem;color:#e2e8f0;">📋 Enlaces para compartir al Cliente</strong>
+              <button type="button" id="btnDrwCopyLinks" class="btn btn-outline btn-sm" style="padding:3px 8px;font-size:0.72rem;">Copiar Links</button>
+            </div>
+            <pre id="drwShareText" style="white-space:pre-wrap;margin:0;font-size:0.74rem;color:#94a3b8;line-height:1.45;"></pre>
+          </div>
+
+          <div id="drwSalinasToolsBox" style="display:none;margin-top:16px;padding-top:14px;border-top:1px dashed #334155;">
+            <button type="button" id="btnSaasResyncSalinas" class="btn btn-outline btn-sm" style="width:100%;color:#fcd34d !important;border-color:#b45309 !important;">
+              🥑 Sincronizar colecciones históricas hacia bóveda Salinas
+            </button>
+          </div>
+        </section>
+
+        <!-- TAB 2: BILLING & SUBSCRIPTIONS -->
+        <section id="drwPane_billing" style="display:none;">
+          <div id="drwBillingStatusBanner" style="padding:10px 12px;border-radius:10px;margin-bottom:14px;font-size:0.8rem;font-weight:700;"></div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">
+            <button type="button" id="btnDrwPayMonth" class="btn btn-primary btn-sm btn-cta-new" style="padding:10px 8px;">✅ Cobrar Mes (+1m)</button>
+            <button type="button" id="btnDrwPayYear" class="btn btn-outline btn-sm" style="padding:10px 8px;border-color:#38bdf8 !important;color:#38bdf8 !important;">📅 Cobrar Año (+1a)</button>
+            <button type="button" id="btnDrwWhatsAppRemind" class="btn btn-outline btn-sm" style="grid-column:1/-1;padding:9px;color:#fde68a !important;border-color:#d97706 !important;">
+              💬 Enviar Recordatorio de Pago por WhatsApp
+            </button>
+          </div>
+
+          <div style="border-top:1px solid #1e293b;padding-top:12px;">
+            <div style="font-size:0.75rem;font-weight:800;color:#94a3b8;text-transform:uppercase;margin-bottom:10px;">Esquema de Precios y Fechas de Corte</div>
+
+            <div class="form-row-2" style="gap:10px;">
+              <div class="form-group">
+                <label class="form-label" for="drwCurrency">Moneda de Cobro</label>
+                <select id="drwCurrency" class="form-control">
+                  <option value="MXN">MXN — Peso Mexicano</option>
+                  <option value="USD">USD — Dólar EE. UU.</option>
+                  <option value="COP">COP — Peso Colombiano</option>
+                  <option value="PEN">PEN — Sol Peruano</option>
+                  <option value="CLP">CLP — Peso Chileno</option>
+                  <option value="ARS">ARS — Peso Argentino</option>
+                  <option value="GTQ">GTQ — Quetzal</option>
+                  <option value="EUR">EUR — Euro</option>
+                  <option value="BRL">BRL — Real Brasileño</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="drwMonthlyFee">Renta Base / Mes</label>
+                <input type="number" id="drwMonthlyFee" class="form-control" min="0" step="any">
+              </div>
+            </div>
+
+            <div class="form-row-2" style="gap:10px;">
+              <div class="form-group">
+                <label class="form-label" for="drwPerDriverFee">Tarifa por Chofer / Mes</label>
+                <input type="number" id="drwPerDriverFee" class="form-control" min="0" step="any">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="drwAnnualFee">Anualidad Plataforma</label>
+                <input type="number" id="drwAnnualFee" class="form-control" min="0" step="any">
+              </div>
+            </div>
+
+            <div id="drwCalculatedMrrHint" style="font-size:0.77rem;color:#34d399;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.28);padding:7px 10px;border-radius:8px;margin-bottom:10px;font-weight:700;"></div>
+
+            <div class="form-row-2" style="gap:10px;">
+              <div class="form-group">
+                <label class="form-label" for="drwNextMonthlyDue">Próximo Corte Mensual</label>
+                <input type="date" id="drwNextMonthlyDue" class="form-control">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="drwNextAnnualDue">Vencimiento Anualidad</label>
+                <input type="date" id="drwNextAnnualDue" class="form-control">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="drwBillingNotes">Acuerdo Comercial / Notas de Facturación</label>
+              <input type="text" id="drwBillingNotes" class="form-control" placeholder="Ej. Factura RFC, día de corte 20, contacto tesorería...">
+            </div>
+
+            <button type="button" id="btnDrwSaveBilling" class="btn btn-primary" style="width:100%;padding:10px;background:#0284c7;border:none;font-weight:800;">
+              💾 Guardar Esquema de Cobro
+            </button>
+          </div>
+        </section>
+
+        <!-- TAB 3: PAYMENT HISTORY -->
+        <section id="drwPane_history" style="display:none;">
+          <div id="drwPunctualitySummary" style="background:#111827;border:1px solid #1f2937;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:0.8rem;"></div>
+          <div id="drwHistoryList" style="display:flex;flex-direction:column;gap:8px;"></div>
+        </section>
+
+        <!-- TAB 4: REGION, MODULES & SECURITY -->
+        <section id="drwPane_settings" style="display:none;">
+          <div class="form-row-2" style="gap:10px;">
+            <div class="form-group">
+              <label class="form-label" for="drwCountry">País</label>
+              <select id="drwCountry" class="form-control"></select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="drwDialCode">Lada País WhatsApp (+)</label>
+              <input type="text" id="drwDialCode" class="form-control" placeholder="Ej. 52, 1, 57">
+            </div>
+          </div>
+
+          <div class="form-row-2" style="gap:10px;">
+            <div class="form-group">
+              <label class="form-label" for="drwTimezone">Zona Horaria</label>
+              <input type="text" id="drwTimezone" class="form-control" placeholder="America/Monterrey">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="drwPhone">WhatsApp Contacto (sin lada)</label>
+              <input type="text" id="drwPhone" class="form-control" placeholder="Ej. 8441234567">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="drwMaxDrivers">Límite de Choferes Contratados</label>
+            <input type="number" id="drwMaxDrivers" class="form-control" min="1" max="2000">
+          </div>
+
+          <div style="background:#111827;border:1px solid #1f2937;border-radius:10px;padding:10px 12px;margin-bottom:12px;">
+            <div style="font-size:0.74rem;font-weight:800;color:#94a3b8;text-transform:uppercase;margin-bottom:8px;">Módulos Activos del Tenant</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.8rem;">
+              <label style="display:inline-flex;align-items:center;gap:6px;"><input type="checkbox" id="drwModOnline"> 🛒 Tienda Web</label>
+              <label style="display:inline-flex;align-items:center;gap:6px;"><input type="checkbox" id="drwModCold"> ❄️ Lotes QR / Cámaras</label>
+              <label style="display:inline-flex;align-items:center;gap:6px;"><input type="checkbox" id="drwModRipeness"> 🥑 Maduración</label>
+              <label style="display:inline-flex;align-items:center;gap:6px;"><input type="checkbox" id="drwModFrac"> ⚖️ Venta Suelta</label>
+              <label style="display:inline-flex;align-items:center;gap:6px;"><input type="checkbox" id="drwModNav3d"> 🧭 Navegación 3D</label>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="drwResetAdminPass">Restablecer Clave Admin (dejar vacío para no cambiar)</label>
+            <input type="text" id="drwResetAdminPass" class="form-control" placeholder="Nueva contraseña de oficina...">
+          </div>
+
+          <button type="button" id="btnDrwSaveSettings" class="btn btn-primary" style="width:100%;padding:10px;background:#0284c7;border:none;font-weight:800;margin-bottom:16px;">
+            💾 Guardar Región, Módulos y Accesos
+          </button>
+
+          <div style="border-top:1px solid #334155;padding-top:14px;">
+            <button type="button" id="btnDrwToggleSuspend" class="btn btn-outline" style="width:100%;padding:10px;font-weight:800;">
+              ⏸️ Suspender Servicio de este Tenant
+            </button>
+          </div>
+        </section>
+      </div>
+    </aside>
+  </div>
+
+  <!-- MODAL: CREATE NEW TENANT (GLOBAL MULTI-COUNTRY) -->
   <div id="newTenantModal" class="modal-backdrop saas-dark-modal" role="dialog" aria-modal="true">
-    <div class="modal-card" style="max-width:620px;max-height:90vh;overflow-y:auto;">
+    <div class="modal-card" style="max-width:650px;max-height:90vh;overflow-y:auto;">
       <button type="button" id="btnCloseNewTenantModal" class="modal-close" style="color:#cbd5e1;">✕</button>
-      <h3 style="font-size:1.25rem;margin:0 0 4px;color:#fff;">🚀 Alta de Nuevo Cliente (Tenant)</h3>
-      <p style="font-size:0.82rem;color:#94a3b8;margin:0 0 14px;">
-        Crea una instancia aislada con su propia bóveda criptográfica, marca blanca y catálogo inicial en segundos.
+      <h3 style="font-size:1.22rem;margin:0 0 4px;color:#fff;">🚀 Alta Global de Nuevo Cliente (Tenant)</h3>
+      <p style="font-size:0.8rem;color:#94a3b8;margin:0 0 14px;">
+        Aprovisiona una bóveda aislada con país, moneda, huso horario, marca blanca y catálogo base.
       </p>
 
       <form id="newTenantForm">
@@ -372,30 +749,58 @@
               <option value="avocado">🥑 Aguacate / Empaque y Fruta</option>
               <option value="citrus">🍋 Limón y Cítricos</option>
               <option value="tomato">🍅 Tomate y Hortalizas</option>
-              <option value="groceries">📦 Abarrotes y Distribución General</option>
+              <option value="groceries">📦 Abarrotes y Distribución Mayorista</option>
+              <option value="pharmacy">💊 Farmacia e Insumos Médicos</option>
+              <option value="hardware">🛠️ Ferretería y Refacciones</option>
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label" for="ntSlug">Código / Subdominio (slug) *</label>
-            <input type="text" id="ntSlug" class="form-control" placeholder="ej. limones-garcia" required style="font-weight:800;text-transform:lowercase;">
+            <label class="form-label" for="ntSlug">Código Único / Subdominio (slug) *</label>
+            <input type="text" id="ntSlug" class="form-control" placeholder="ej. pruebas o tomates-norte" required style="font-weight:800;text-transform:lowercase;">
           </div>
         </div>
 
         <div class="form-row-2" style="gap:10px;">
           <div class="form-group">
             <label class="form-label" for="ntBrandName">Nombre Comercial *</label>
-            <input type="text" id="ntBrandName" class="form-control" placeholder="Ej. Cítricos García" required>
+            <input type="text" id="ntBrandName" class="form-control" placeholder="Ej. Distribuidora del Norte" required>
           </div>
           <div class="form-group">
             <label class="form-label" for="ntTagline">Giro / Eslogan</label>
-            <input type="text" id="ntTagline" class="form-control" placeholder="Especialistas en Limón Persa">
+            <input type="text" id="ntTagline" class="form-control" placeholder="Distribución Mayorista en Ruta">
           </div>
         </div>
 
         <div class="form-row-3" style="gap:10px;">
           <div class="form-group">
-            <label class="form-label" for="ntPhone">WhatsApp / Teléfono</label>
-            <input type="text" id="ntPhone" class="form-control" placeholder="10 dígitos">
+            <label class="form-label" for="ntCountry">País *</label>
+            <select id="ntCountry" class="form-control" style="font-weight:700;"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="ntCurrency">Moneda *</label>
+            <select id="ntCurrency" class="form-control" style="font-weight:800;">
+              <option value="MXN">MXN</option>
+              <option value="USD">USD</option>
+              <option value="COP">COP</option>
+              <option value="PEN">PEN</option>
+              <option value="CLP">CLP</option>
+              <option value="ARS">ARS</option>
+              <option value="GTQ">GTQ</option>
+              <option value="EUR">EUR</option>
+              <option value="BRL">BRL</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="ntTimezone">Zona Horaria</label>
+            <input type="text" id="ntTimezone" class="form-control" value="America/Monterrey">
+          </div>
+        </div>
+
+        <div class="form-row-3" style="gap:10px;">
+          <div class="form-group">
+            <label class="form-label" for="ntPhone">WhatsApp (+<span id="ntDialPreview">52</span>)</label>
+            <input type="text" id="ntPhone" class="form-control" placeholder="Número local">
+            <input type="hidden" id="ntDialCode" value="52">
           </div>
           <div class="form-group">
             <label class="form-label" for="ntPrimaryColor">Color Marca</label>
@@ -403,33 +808,26 @@
           </div>
           <div class="form-group">
             <label class="form-label" for="ntMaxDrivers">Máx. Choferes</label>
-            <input type="number" id="ntMaxDrivers" class="form-control" min="1" max="500" value="10" style="font-weight:800;">
+            <input type="number" id="ntMaxDrivers" class="form-control" min="1" max="2000" value="10" style="font-weight:800;">
           </div>
         </div>
 
-        <div class="form-row-2" style="gap:10px;">
+        <div class="form-row-3" style="gap:10px;">
           <div class="form-group">
-            <label class="form-label" for="ntBaseCoords">Coordenadas Base Bodega (lat, lng)</label>
-            <input type="text" id="ntBaseCoords" class="form-control" value="25.407054, -100.954645">
+            <label class="form-label" for="ntMonthlyFee">Renta Base / Mes</label>
+            <input type="number" id="ntMonthlyFee" class="form-control" min="0" step="any" value="0">
           </div>
           <div class="form-group">
-            <label class="form-label" for="ntMonthlyFee">Renta Base Mensual ($ MXN)</label>
-            <input type="number" id="ntMonthlyFee" class="form-control" min="0" step="50" value="0">
-          </div>
-        </div>
-
-        <div class="form-row-2" style="gap:10px;">
-          <div class="form-group">
-            <label class="form-label" for="ntPerDriverFee">Mensualidad por Chofer ($ MXN)</label>
-            <input type="number" id="ntPerDriverFee" class="form-control" min="0" step="50" value="250">
+            <label class="form-label" for="ntPerDriverFee">Tarifa por Chofer / Mes</label>
+            <input type="number" id="ntPerDriverFee" class="form-control" min="0" step="any" value="250">
           </div>
           <div class="form-group">
-            <label class="form-label" for="ntAnnualFee">Anualidad Plataforma ($ MXN)</label>
-            <input type="number" id="ntAnnualFee" class="form-control" min="0" step="100" value="5000">
+            <label class="form-label" for="ntAnnualFee">Anualidad Plataforma</label>
+            <input type="number" id="ntAnnualFee" class="form-control" min="0" step="any" value="5000">
           </div>
         </div>
 
-        <div class="form-row-2" style="gap:10px;">
+        <div class="form-row-3" style="gap:10px;">
           <div class="form-group">
             <label class="form-label" for="ntNextMonthlyDue">Primer Corte Mensual</label>
             <input type="date" id="ntNextMonthlyDue" class="form-control">
@@ -438,15 +836,19 @@
             <label class="form-label" for="ntNextAnnualDue">Vence Anualidad</label>
             <input type="date" id="ntNextAnnualDue" class="form-control">
           </div>
+          <div class="form-group">
+            <label class="form-label" for="ntBaseCoords">Coords Bodega (lat, lng)</label>
+            <input type="text" id="ntBaseCoords" class="form-control" value="25.407054, -100.954645">
+          </div>
         </div>
 
-        <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:10px 12px;margin-bottom:12px;">
-          <div style="font-size:0.76rem;font-weight:800;color:#94a3b8;text-transform:uppercase;margin-bottom:6px;">Módulos Incluidos en su Plan</div>
-          <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:0.82rem;">
-            <label style="display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="ntModOnline" checked> 🛒 Tienda en Línea</label>
+        <div style="background:#0b1120;border:1px solid #334155;border-radius:10px;padding:10px 12px;margin-bottom:12px;">
+          <div style="font-size:0.74rem;font-weight:800;color:#94a3b8;text-transform:uppercase;margin-bottom:6px;">Módulos Incluidos</div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:0.8rem;">
+            <label style="display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="ntModOnline" checked> 🛒 Tienda Web</label>
             <label style="display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="ntModCold" checked> ❄️ Lotes QR / Cámaras</label>
             <label style="display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="ntModRipeness" checked> 🥑 Maduración</label>
-            <label style="display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="ntModFrac" checked> ⚖️ Venta Suelta (Kg/Pza)</label>
+            <label style="display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="ntModFrac" checked> ⚖️ Venta Suelta</label>
             <label style="display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="ntModNav3d" checked> 🧭 Navegación 3D</label>
           </div>
         </div>
@@ -454,7 +856,7 @@
         <div class="form-row-2" style="gap:10px;">
           <div class="form-group">
             <label class="form-label" for="ntAdminPass">Clave Inicial Admin (Oficina) *</label>
-            <input type="text" id="ntAdminPass" class="form-control" placeholder="Ej. garcia2026" minlength="4" required style="font-weight:800;">
+            <input type="text" id="ntAdminPass" class="form-control" placeholder="Ej. norte2026" minlength="4" required style="font-weight:800;">
           </div>
           <div class="form-group">
             <label class="form-label" for="ntOwnerPass">Clave Inicial Dirección / Finanzas *</label>
@@ -462,97 +864,34 @@
           </div>
         </div>
 
-        <button type="submit" id="btnCreateTenantSubmit" class="btn btn-primary" style="width:100%;padding:13px;background:#10b981;border:none;font-weight:800;font-size:0.96rem;">
+        <button type="submit" id="btnCreateTenantSubmit" class="btn btn-primary btn-cta-new" style="width:100%;padding:12px;font-size:0.95rem;">
           ✨ Crear Empresa y Generar Accesos
         </button>
       </form>
 
       <div id="ntWelcomeKitBox" style="display:none;margin-top:16px;background:#022c22;border:1px solid #10b981;border-radius:12px;padding:14px;">
-        <strong style="color:#34d399;display:block;margin-bottom:6px;">✅ ¡Tenant creado con éxito! Copia su Kit de Bienvenida:</strong>
+        <strong style="color:#34d399;display:block;margin-bottom:6px;">✅ ¡Tenant creado! Copia su Kit de Bienvenida:</strong>
         <pre id="ntWelcomeKitText" style="white-space:pre-wrap;font-size:0.78rem;color:#ecfdf5;background:#064e3b;padding:10px;border-radius:8px;margin-bottom:10px;"></pre>
-        <button type="button" id="btnCopyWelcomeKit" class="btn btn-primary btn-sm" style="background:#10b981;border:none;font-weight:800;">📋 Copiar para enviar por WhatsApp</button>
+        <button type="button" id="btnCopyWelcomeKit" class="btn btn-primary btn-sm btn-cta-new">📋 Copiar para WhatsApp</button>
       </div>
     </div>
   </div>
 
-  <!-- MODAL: EDIT TENANT PLAN / MODULES / PASSWORD RESET -->
-  <div id="editTenantModal" class="modal-backdrop saas-dark-modal" role="dialog" aria-modal="true">
-    <div class="modal-card" style="max-width:480px;">
-      <button type="button" id="btnCloseEditTenantModal" class="modal-close" style="color:#cbd5e1;">✕</button>
-      <h3 id="etModalTitle" style="font-size:1.2rem;margin:0 0 12px;color:#fff;">⚙️ Configurar Tenant</h3>
-      <input type="hidden" id="etSlug">
-
-      <div class="form-row-2" style="gap:10px;">
-        <div class="form-group">
-          <label class="form-label" for="etMaxDrivers">Límite de Choferes</label>
-          <input type="number" id="etMaxDrivers" class="form-control" min="1" max="500">
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="etMonthlyFee">Renta Base Mensual ($ MXN)</label>
-          <input type="number" id="etMonthlyFee" class="form-control" min="0" step="50">
-        </div>
-      </div>
-
-      <div class="form-row-2" style="gap:10px;">
-        <div class="form-group">
-          <label class="form-label" for="etPerDriverFee">Mensualidad por Chofer ($ MXN)</label>
-          <input type="number" id="etPerDriverFee" class="form-control" min="0" step="50" placeholder="Ej. 250">
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="etAnnualFee">Anualidad Plataforma ($ MXN)</label>
-          <input type="number" id="etAnnualFee" class="form-control" min="0" step="100" placeholder="Ej. 5000">
-        </div>
-      </div>
-
-      <div class="form-row-2" style="gap:10px;">
-        <div class="form-group">
-          <label class="form-label" for="etNextMonthlyDue">Próximo Corte Mensual</label>
-          <input type="date" id="etNextMonthlyDue" class="form-control">
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="etNextAnnualDue">Vence Anualidad</label>
-          <input type="date" id="etNextAnnualDue" class="form-control">
-        </div>
-      </div>
-
-      <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:10px 12px;margin-bottom:12px;">
-        <div style="font-size:0.75rem;font-weight:800;color:#94a3b8;text-transform:uppercase;margin-bottom:6px;">Módulos Activos</div>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:0.8rem;">
-          <label style="display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="etModOnline"> 🛒 Tienda Web</label>
-          <label style="display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="etModCold"> ❄️ Lotes QR</label>
-          <label style="display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="etModRipeness"> 🥑 Maduración</label>
-          <label style="display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="etModFrac"> ⚖️ Venta Suelta</label>
-          <label style="display:inline-flex;align-items:center;gap:5px;"><input type="checkbox" id="etModNav3d"> 🧭 Nav 3D</label>
-        </div>
-      </div>
-
-      <div class="form-group">
-        <label class="form-label" for="etBillingNotes">Notas internas (facturación / socios / corte)</label>
-        <input type="text" id="etBillingNotes" class="form-control" placeholder="Ej. Día de corte 15 de cada mes">
-      </div>
-
-      <div class="form-group">
-        <label class="form-label" for="etResetAdminPass">Asignar nueva Clave Admin (opcional — dejar vacío para no cambiar)</label>
-        <input type="text" id="etResetAdminPass" class="form-control" placeholder="Escribe solo si el cliente olvidó su clave">
-      </div>
-
-      <button type="button" id="btnSaveTenantEdit" class="btn btn-primary" style="width:100%;padding:11px;background:#0284c7;border:none;font-weight:800;">
-        💾 Guardar Cambios del Tenant
-      </button>
-    </div>
-  </div>
-
-  <!-- MODAL: PAYMENT HISTORY -->
-  <div id="paymentHistoryModal" class="modal-backdrop saas-dark-modal" role="dialog" aria-modal="true">
-    <div class="modal-card" style="max-width:480px;max-height:86vh;overflow-y:auto;">
-      <button type="button" id="btnCloseHistoryModal" class="modal-close" style="color:#cbd5e1;">✕</button>
-      <h3 id="phModalTitle" style="font-size:1.15rem;margin:0 0 4px;color:#fff;">📜 Historial de Pagos</h3>
-      <p id="phModalSub" style="font-size:0.8rem;color:#94a3b8;margin:0 0 12px;"></p>
-      <div id="phHistoryList" style="display:flex;flex-direction:column;gap:8px;"></div>
+  <!-- MODAL: FX EXCHANGE RATES -->
+  <div id="fxRatesModal" class="modal-backdrop saas-dark-modal" role="dialog" aria-modal="true">
+    <div class="modal-card" style="max-width:440px;">
+      <button type="button" id="btnCloseFxModal" class="modal-close" style="color:#cbd5e1;">✕</button>
+      <h3 style="font-size:1.15rem;margin:0 0 4px;color:#fff;">💱 Tipos de Cambio de Referencia</h3>
+      <p style="font-size:0.78rem;color:#94a3b8;margin:0 0 12px;">
+        Unidades de cada moneda equivalentes a <strong>1 USD</strong> (se usan únicamente para consolidar tus KPIs globales).
+      </p>
+      <div id="fxRatesInputsGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;"></div>
+      <button type="button" id="btnSaveFxRates" class="btn btn-primary btn-cta-new" style="width:100%;padding:10px;">Guardar Tipos de Cambio</button>
     </div>
   </div>
 
   <div id="toastBox" class="toast-box"></div>
-  <script type="module" src="js/saas.js?v=rpd_3"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script type="module" src="js/saas.js?v=rpd_5"></script>
 </body>
 </html>

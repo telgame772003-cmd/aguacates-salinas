@@ -548,13 +548,92 @@ exports.saasBootstrapAndAuth = onRequest({ cors: true, region: "us-central1" }, 
   }
 });
 
+function getDateStrForTimezone(tz) {
+  try {
+    const cleanTz = String(tz || "America/Monterrey").trim() || "America/Monterrey";
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: cleanTz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(new Date());
+    const y = parts.find((p) => p.type === "year")?.value;
+    const m = parts.find((p) => p.type === "month")?.value;
+    const d = parts.find((p) => p.type === "day")?.value;
+    if (y && m && d) return `${y}-${m}-${d}`;
+  } catch (_) {}
+  return getMonterreyNowParts().dateStr;
+}
+
+async function computeSingleTenantTelemetry(t) {
+  const vId = t.vaultId;
+  const tz = t.timezone || t.plan?.timezone || "America/Monterrey";
+  const localDateStr = getDateStrForTimezone(tz);
+  let placesCount = Number(t.placesCount) || 0;
+  let driversConfigured = Number(t.driversConfigured) || 0;
+  let onlineTrucks = 0;
+  let salesTodayCount = 0;
+  let gmvToday = 0;
+
+  if (vId) {
+    const placesQuery = db.collection(`vaults/${vId}/places`);
+    const placesCountPromise =
+      typeof placesQuery.count === "function"
+        ? placesQuery.count().get().then((s) => s.data().count)
+        : placesQuery.select().get().then((s) => s.size);
+
+    const [storeSnap, pCount, locsSnap, salesSnap] = await Promise.all([
+      db.doc(`vaults/${vId}/settings/store`).get(),
+      placesCountPromise,
+      db.collection(`vaults/${vId}/driver_locations`).get(),
+      db.collection(`vaults/${vId}/route_sales`).where("date", "==", localDateStr).get()
+    ]);
+
+    placesCount = Number(pCount) || 0;
+    if (storeSnap.exists) {
+      driversConfigured = Array.isArray(storeSnap.data()?.drivers) ? storeSnap.data().drivers.length : 0;
+    }
+    const nowMs = Date.now();
+    locsSnap.docs.forEach((l) => {
+      const ld = l.data();
+      if (ld.active && ld.updatedAtIso && nowMs - Date.parse(ld.updatedAtIso) < 20 * 60 * 1000) {
+        onlineTrucks++;
+      }
+    });
+    salesSnap.docs.forEach((s) => {
+      const sd = s.data();
+      if (sd.status !== "cancelada") {
+        salesTodayCount++;
+        gmvToday += Number(sd.totalAmount) || 0;
+      }
+    });
+
+    // Mantener contadores desnormalizados en saas_tenants_registry para lecturas O(1) a escala
+    if (t.tenantSlug && (t.placesCount !== placesCount || t.driversConfigured !== driversConfigured)) {
+      db.doc(`saas_tenants_registry/${t.tenantSlug}`)
+        .set({ placesCount, driversConfigured }, { merge: true })
+        .catch(() => {});
+    }
+  }
+
+  return {
+    placesCount,
+    driversConfigured,
+    onlineTrucks,
+    salesTodayCount,
+    gmvToday,
+    localDateStr,
+    liveLoaded: true
+  };
+}
+
 exports.saasListTenants = onRequest({ cors: true, region: "us-central1" }, async (req, res) => {
   if (req.method !== "POST") {
     res.status(405).json({ ok: false, error: "Method not allowed" });
     return;
   }
   try {
-    const { saasKeyHash } = req.body || {};
+    const { saasKeyHash, mode } = req.body || {};
     if (!(await isValidSaasMasterHash(saasKeyHash))) {
       res.status(403).json({ ok: false, error: "No autorizado" });
       return;
@@ -562,63 +641,82 @@ exports.saasListTenants = onRequest({ cors: true, region: "us-central1" }, async
 
     const { dateStr } = getMonterreyNowParts();
     const regSnap = await db.collection("saas_tenants_registry").get();
+    const rawDocs = regSnap.docs.map((d) => ({ tenantSlug: d.id, ...d.data() }));
+
+    // Escalabilidad: si hay > 30 tenants y se pide modo summary, responde O(1) al instante sin consultar miles de bóvedas
+    const useFastSummary = mode === "summary" && rawDocs.length > 30;
     const tenants = [];
 
-    for (const docSnap of regSnap.docs) {
-      const t = docSnap.data();
-      const vId = t.vaultId;
-      let placesCount = 0;
-      let driversConfigured = 0;
-      let onlineTrucks = 0;
-      let salesTodayCount = 0;
-      let gmvToday = 0;
-      let ordersTodayCount = 0;
-
-      if (vId) {
-        const [storeSnap, placesSnap, locsSnap, salesSnap] = await Promise.all([
-          db.doc(`vaults/${vId}/settings/store`).get(),
-          db.collection(`vaults/${vId}/places`).select().get(),
-          db.collection(`vaults/${vId}/driver_locations`).get(),
-          db.collection(`vaults/${vId}/route_sales`).where("date", "==", dateStr).get()
-        ]);
-        placesCount = placesSnap.size;
-        if (storeSnap.exists) {
-          driversConfigured = Array.isArray(storeSnap.data()?.drivers) ? storeSnap.data().drivers.length : 0;
-        }
-        const nowMs = Date.now();
-        locsSnap.docs.forEach((l) => {
-          const ld = l.data();
-          if (ld.active && ld.updatedAtIso && nowMs - Date.parse(ld.updatedAtIso) < 20 * 60 * 1000) {
-            onlineTrucks++;
-          }
-        });
-        salesSnap.docs.forEach((s) => {
-          const sd = s.data();
-          if (sd.status !== "cancelada") {
-            salesTodayCount++;
-            gmvToday += Number(sd.totalAmount) || 0;
+    if (useFastSummary) {
+      for (const t of rawDocs) {
+        tenants.push({
+          ...t,
+          telemetry: {
+            placesCount: Number(t.placesCount) || 0,
+            driversConfigured: Number(t.driversConfigured) || 1,
+            onlineTrucks: 0,
+            salesTodayCount: 0,
+            gmvToday: 0,
+            liveLoaded: false
           }
         });
       }
-
-      tenants.push({
-        ...t,
-        telemetry: {
-          placesCount,
-          driversConfigured,
-          onlineTrucks,
-          salesTodayCount,
-          gmvToday,
-          ordersTodayCount
-        }
-      });
+    } else {
+      const CHUNK = 15;
+      for (let i = 0; i < rawDocs.length; i += CHUNK) {
+        const slice = rawDocs.slice(i, i + CHUNK);
+        const computed = await Promise.all(
+          slice.map(async (t) => ({
+            ...t,
+            telemetry: await computeSingleTenantTelemetry(t)
+          }))
+        );
+        tenants.push(...computed);
+      }
     }
 
     tenants.sort((a, b) => String(a.brandName || "").localeCompare(String(b.brandName || "")));
-    res.json({ ok: true, dateStr, tenants });
+    res.json({ ok: true, dateStr, summaryOnly: useFastSummary, tenants });
   } catch (err) {
     console.error("saasListTenants error:", err);
     res.status(500).json({ ok: false, error: err.message || "Error listando tenants" });
+  }
+});
+
+exports.saasGetTenantTelemetry = onRequest({ cors: true, region: "us-central1" }, async (req, res) => {
+  if (req.method !== "POST") {
+    res.status(405).json({ ok: false, error: "Method not allowed" });
+    return;
+  }
+  try {
+    const { saasKeyHash, tenantSlugs } = req.body || {};
+    if (!(await isValidSaasMasterHash(saasKeyHash))) {
+      res.status(403).json({ ok: false, error: "No autorizado" });
+      return;
+    }
+    const slugs = (Array.isArray(tenantSlugs) ? tenantSlugs : [])
+      .map((s) => sanitizeSlug(s))
+      .filter(Boolean)
+      .slice(0, 50);
+
+    const telemetryBySlug = {};
+    const snaps = await Promise.all(slugs.map((sl) => db.doc(`saas_tenants_registry/${sl}`).get()));
+    const existing = snaps.filter((s) => s.exists).map((s) => ({ tenantSlug: s.id, ...s.data() }));
+
+    const CHUNK = 15;
+    for (let i = 0; i < existing.length; i += CHUNK) {
+      const slice = existing.slice(i, i + CHUNK);
+      await Promise.all(
+        slice.map(async (t) => {
+          telemetryBySlug[t.tenantSlug] = await computeSingleTenantTelemetry(t);
+        })
+      );
+    }
+
+    res.json({ ok: true, telemetryBySlug });
+  } catch (err) {
+    console.error("saasGetTenantTelemetry error:", err);
+    res.status(500).json({ ok: false, error: err.message || "Error obteniendo telemetría" });
   }
 });
 
@@ -654,6 +752,14 @@ exports.saasProvisionTenant = onRequest({ cors: true, region: "us-central1" }, a
       adminPassword,
       ownerPassword,
       monthlyFeeMxn,
+      perDriverFeeMxn,
+      annualFeeMxn,
+      nextMonthlyDue,
+      nextAnnualDue,
+      countryCode,
+      dialCode,
+      currency,
+      timezone,
       billingNotes
     } = req.body || {};
 
@@ -743,7 +849,16 @@ exports.saasProvisionTenant = onRequest({ cors: true, region: "us-central1" }, a
       plan: {
         tier: String(planTier || "pro"),
         maxDrivers: Math.max(1, Number(maxDrivers) || 10),
-        monthlyFeeMxn: Number(monthlyFeeMxn) || 0
+        monthlyFeeMxn: Number(monthlyFeeMxn) || 0,
+        perDriverFeeMxn: Number(perDriverFeeMxn) || 0,
+        annualFeeMxn: Number(annualFeeMxn) || 0,
+        nextMonthlyDue: String(nextMonthlyDue || ""),
+        nextAnnualDue: String(nextAnnualDue || ""),
+        countryCode: String(countryCode || "MX").toUpperCase(),
+        dialCode: String(dialCode || "52").replace(/\D/g, ""),
+        currency: String(currency || "MXN").toUpperCase(),
+        timezone: String(timezone || "America/Monterrey"),
+        paymentHistory: []
       },
       baseLocation: {
         name: String(baseName || `Base ${cleanShort}`),
@@ -776,6 +891,13 @@ exports.saasProvisionTenant = onRequest({ cors: true, region: "us-central1" }, a
       industry: String(industry || "avocado"),
       pinEmoji: fullSettings.branding.pinEmoji,
       tenantStatus: "active",
+      countryCode: fullSettings.plan.countryCode,
+      dialCode: fullSettings.plan.dialCode,
+      currency: fullSettings.plan.currency,
+      timezone: fullSettings.plan.timezone,
+      contactPhone: fullSettings.whatsappPrimary,
+      driversConfigured: 1,
+      placesCount: 0,
       plan: fullSettings.plan,
       modules: fullSettings.modules,
       billingNotes: String(billingNotes || ""),
@@ -837,6 +959,13 @@ exports.saasUpdateTenant = onRequest({ cors: true, region: "us-central1" }, asyn
       regPatch.plan = updates.plan;
       pubPatch.plan = updates.plan;
       vaultStorePatch.plan = updates.plan;
+      if (updates.plan.countryCode) regPatch.countryCode = String(updates.plan.countryCode).toUpperCase();
+      if (updates.plan.dialCode) regPatch.dialCode = String(updates.plan.dialCode).replace(/\D/g, "");
+      if (updates.plan.currency) regPatch.currency = String(updates.plan.currency).toUpperCase();
+      if (updates.plan.timezone) regPatch.timezone = String(updates.plan.timezone);
+    }
+    if (typeof updates.contactPhone === "string") {
+      regPatch.contactPhone = updates.contactPhone.replace(/\D/g, "");
     }
     if (typeof updates.billingNotes === "string") {
       regPatch.billingNotes = updates.billingNotes;
